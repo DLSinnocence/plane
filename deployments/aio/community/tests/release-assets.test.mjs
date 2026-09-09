@@ -36,11 +36,11 @@ function checkAssets(dist, version, imageName = "makeplane/plane-aio-community")
   assert.equal(
     readFileSync(join(release, "docker-compose.yml"), "utf8"),
     templates["docker-compose.yml"]
-      .replace("APP_RELEASE:-stable", `APP_RELEASE:-${version}`)
+      .replace("APP_RELEASE:-preview", `APP_RELEASE:-${version}`)
       .replace("ghcr.io/dlsinnocence/plane-aio-community", imageName)
   );
   const deploymentEnv = readFileSync(join(release, ".env"), "utf8");
-  assert.equal(deploymentEnv, templates[".env.example"].replace("APP_RELEASE=stable", `APP_RELEASE=${version}`));
+  assert.equal(deploymentEnv, templates[".env.example"].replace("APP_RELEASE=preview", `APP_RELEASE=${version}`));
   const deploymentValues = parseEnv(deploymentEnv);
   assert.equal(deploymentValues.APP_RELEASE, version);
   for (const key of secretKeys) assert.equal(deploymentValues[key], "", `${key} must never be published with a value`);
@@ -157,25 +157,25 @@ test(
     }
     assert.deepEqual(
       service.ports.map(({ published, target }) => [published, target]),
-      [
-        ["80", 80],
-        ["443", 443],
-      ]
+      [["8080", 80]]
     );
 
     const override = renderCompose(release, {
       APP_RELEASE: "v2.0.0",
-      LISTEN_HTTP_PORT: "8080",
+      LISTEN_HTTP_PORT: "18080",
       LISTEN_HTTPS_PORT: "8443",
+      WEB_URL: "https://plane.example.test:8443",
+      APP_PROTOCOL: "https",
     }).services.plane;
     assert.equal(override.image, "ghcr.io/example-owner/plane-aio-community:v2.0.0");
     assert.deepEqual(
       override.ports.map(({ published, target }) => [published, target]),
-      [
-        ["8080", 80],
-        ["8443", 443],
-      ]
+      [["18080", 80]]
     );
+    assert.equal(override.environment.WEB_URL, "https://plane.example.test:8443");
+    assert.equal(override.environment.APP_PROTOCOL, "https");
+    assert.equal(override.environment.SITE_ADDRESS, ":80");
+    assert.ok(!Object.hasOwn(override.environment, "LISTEN_HTTPS_PORT"));
   }
 );
 

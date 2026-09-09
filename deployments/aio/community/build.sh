@@ -106,7 +106,7 @@ build_dist_files(){
     cp ./docker-compose.yml "$DIST_DIR/release/docker-compose.yml"
     cp ./.env.example "$DIST_DIR/release/.env"
     update_env_file "$DIST_DIR/release/.env" "APP_RELEASE" "$APP_RELEASE_VERSION"
-    string_replace "$DIST_DIR/release/docker-compose.yml" 'APP_RELEASE:-stable' "APP_RELEASE:-$APP_RELEASE_VERSION"
+    string_replace "$DIST_DIR/release/docker-compose.yml" 'APP_RELEASE:-preview' "APP_RELEASE:-$APP_RELEASE_VERSION"
     string_replace "$DIST_DIR/release/docker-compose.yml" 'ghcr.io/dlsinnocence/plane-aio-community' "$IMAGE_NAME"
 
     # print docker build command

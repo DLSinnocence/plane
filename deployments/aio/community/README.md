@@ -6,8 +6,9 @@ configuration file is needed.
 
 Plane's web app, admin, spaces, API, workers, live server, and Caddy proxy run in
 one AIO container. PostgreSQL, Redis-compatible Valkey, RabbitMQ, and MinIO run
-alongside it on a Docker **bridge** network. Host networking is not used. Only the
-AIO HTTP/HTTPS ports are published; infrastructure ports remain inside the network.
+alongside it on a Docker **bridge** network. Host networking is not used. Only one
+AIO HTTP port is published (host 8080 to container 80); an external reverse proxy
+handles HTTPS. Infrastructure ports remain inside the network.
 
 ## Quick Start
 
@@ -25,9 +26,9 @@ deployment changes.
    docker compose up -d
    ```
 
-Open `http://localhost` for the default local installation. For a remote host,
+Open `http://localhost:8080` for the default local installation. For a remote host,
 replace `DOMAIN_NAME` and `WEB_URL` with its real IP address or domain before
-starting.
+starting. For HTTPS, use the reverse-proxy configuration below.
 
 ### From the Source Checkout
 
@@ -42,9 +43,9 @@ chmod 600 .env
 docker compose up -d
 ```
 
-The source Compose file defaults to `ghcr.io/dlsinnocence/plane-aio-community:stable`.
-Release downloads use the publishing repository owner's namespace and pin the
-release version in both files.
+The source Compose file defaults to `ghcr.io/dlsinnocence/plane-aio-community:preview`.
+This is a rolling preview image, not a stable release. Release downloads use the
+publishing repository owner's namespace and pin the release version in both files.
 
 ## Environment Configuration
 
@@ -72,21 +73,38 @@ inside Compose. You do not need to configure them separately.
 
 - `DOMAIN_NAME`: Hostname or IP address without scheme or port.
 - `WEB_URL`: Full public origin, including a nondefault port when used.
-- `LISTEN_HTTP_PORT` / `LISTEN_HTTPS_PORT`: Host ports mapped to AIO, default 80/443.
+- `LISTEN_HTTP_PORT`: The only published host port, default 8080, mapped to AIO HTTP
+  port 80. Host ports 80 and 443 remain available for the reverse proxy.
 - `APP_RELEASE`: Image version. Releases set this to their version; source defaults
-  to `stable`.
+  to `preview`.
 - `FILE_SIZE_LIMIT`: Maximum upload size in bytes, default 5242880.
 - `GUNICORN_WORKERS`: API worker count, default 1.
 
-For example, HTTP on port 8080 requires `DOMAIN_NAME=192.168.1.10`,
+For direct HTTP on port 8080, set `DOMAIN_NAME=192.168.1.10`,
 `WEB_URL=http://192.168.1.10:8080`, and `LISTEN_HTTP_PORT=8080`.
 
-For Caddy-managed HTTPS, set `APP_PROTOCOL=https`,
-`WEB_URL=https://your-domain.com`, and `SITE_ADDRESS=your-domain.com`. Ensure DNS
-and public ports 80/443 reach the server. Behind an external HTTPS-terminating
-proxy, leave `SITE_ADDRESS=:80` and also set `MINIO_ENDPOINT_SSL=1`. Preserve the
-original Host and X-Forwarded-Proto headers. Bucket requests use the same public
-origin; do not expose MinIO or rewrite the signed bucket paths.
+For an external HTTPS-terminating reverse proxy, use:
+
+```dotenv
+DOMAIN_NAME=plane.example.com
+WEB_URL=https://plane.example.com
+APP_PROTOCOL=https
+SITE_ADDRESS=:80
+LISTEN_HTTP_PORT=8080
+MINIO_ENDPOINT_SSL=1
+```
+
+Forward the domain to `http://<deployment-host>:8080`. A proxy running directly on
+the same host can use `http://127.0.0.1:8080`; a containerized proxy needs a reachable
+host address, or `http://plane:80` if explicitly joined to the Compose network.
+The proxy owns the HTTPS certificate and public port 443; AIO continues to listen
+on HTTP port 80 inside the container. No `LISTEN_HTTPS_PORT` setting is needed.
+Restrict access to the published HTTP port to the reverse proxy as appropriate for
+your network.
+
+Preserve the original Host and X-Forwarded-Proto headers and enable WebSocket
+forwarding. Bucket requests use the same public origin; do not expose MinIO or
+rewrite the signed bucket paths.
 
 ## Startup and Persistence
 

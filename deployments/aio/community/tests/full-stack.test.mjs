@@ -82,18 +82,18 @@ test("environment template has blank required credentials and source deployment 
     assert.equal(values[key], "", `${key} must not ship a credential`);
   }
   const defaults = {
-    APP_RELEASE: "stable",
+    APP_RELEASE: "preview",
     DOMAIN_NAME: "localhost",
-    WEB_URL: "http://localhost",
+    WEB_URL: "http://localhost:8080",
     APP_PROTOCOL: "http",
     SITE_ADDRESS: ":80",
-    LISTEN_HTTP_PORT: "80",
-    LISTEN_HTTPS_PORT: "443",
+    LISTEN_HTTP_PORT: "8080",
     MINIO_ENDPOINT_SSL: "0",
     FILE_SIZE_LIMIT: "5242880",
     GUNICORN_WORKERS: "1",
   };
   for (const [key, value] of Object.entries(defaults)) assert.equal(values[key], value, key);
+  assert.ok(!Object.hasOwn(values, "LISTEN_HTTPS_PORT"));
 });
 
 test("copying and filling the environment template leaves source files unchanged", (t) => {
@@ -122,7 +122,7 @@ test(
       "plane-redis",
     ]);
     assert.equal(config.networks.default.driver, "bridge");
-    assert.equal(services.plane.image, "ghcr.io/dlsinnocence/plane-aio-community:stable");
+    assert.equal(services.plane.image, "ghcr.io/dlsinnocence/plane-aio-community:preview");
     assert.deepEqual(services.plane.healthcheck.test, ["CMD", "curl", "-fsS", "http://127.0.0.1:3004/"]);
     assert.ok(!services.plane.healthcheck.disable);
     assert.match(services["plane-db"].image, /^postgres:/);
@@ -140,10 +140,7 @@ test(
     }
     assert.deepEqual(
       services.plane.ports.map(({ published, target }) => [published, target]),
-      [
-        ["80", 80],
-        ["443", 443],
-      ]
+      [["8080", 80]]
     );
     const state = {
       plane: { "/app/data": "plane_data", "/app/logs": "plane_logs" },
@@ -206,7 +203,29 @@ test(
   }
 );
 
-test("full Compose preserves public HTTPS origin, nondefault ports and runtime overrides", composeOptions, (t) => {
+test("Compose uses fallback defaults for unset and empty release, public URL and HTTP port", composeOptions, (t) => {
+  const { directory, values } = deployment(t);
+  for (const state of ["unset", "empty"]) {
+    const environment = { ...values };
+    for (const key of ["APP_RELEASE", "WEB_URL", "LISTEN_HTTP_PORT"]) {
+      if (state === "unset") delete environment[key];
+      else environment[key] = "";
+    }
+    writeEnvironment(directory, environment);
+    const plane = render(directory).services.plane;
+    assert.equal(plane.image, "ghcr.io/dlsinnocence/plane-aio-community:preview", state);
+    assert.equal(plane.environment.WEB_URL, "http://localhost:8080", state);
+    assert.equal(plane.environment.CORS_ALLOWED_ORIGINS, "http://localhost:8080", state);
+    assert.equal(plane.environment.SITE_ADDRESS, ":80", state);
+    assert.deepEqual(
+      plane.ports.map(({ published, target }) => [published, target]),
+      [["8080", 80]],
+      state
+    );
+  }
+});
+
+test("full Compose preserves public HTTPS origin and ignores the legacy HTTPS port override", composeOptions, (t) => {
   const { directory } = deployment(t);
   const overrides = {
     APP_RELEASE: "v1.2.3",
@@ -215,7 +234,7 @@ test("full Compose preserves public HTTPS origin, nondefault ports and runtime o
     WEB_URL: "https://plane.example.test:8443",
     SITE_ADDRESS: ":80",
     MINIO_ENDPOINT_SSL: "1",
-    LISTEN_HTTP_PORT: "8080",
+    LISTEN_HTTP_PORT: "18080",
     LISTEN_HTTPS_PORT: "8443",
     GUNICORN_WORKERS: "2",
     FILE_SIZE_LIMIT: "10485760",
@@ -236,11 +255,9 @@ test("full Compose preserves public HTTPS origin, nondefault ports and runtime o
   assert.equal(plane.environment.CORS_ALLOWED_ORIGINS, overrides.WEB_URL);
   assert.deepEqual(
     plane.ports.map(({ published, target }) => [published, target]),
-    [
-      ["8080", 80],
-      ["8443", 443],
-    ]
+    [["18080", 80]]
   );
+  assert.ok(!Object.hasOwn(plane.environment, "LISTEN_HTTPS_PORT"));
 });
 
 test("default Compose rejects missing and empty required credentials", composeOptions, (t) => {

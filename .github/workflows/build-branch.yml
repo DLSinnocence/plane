@@ -646,7 +646,7 @@ jobs:
             Download only `docker-compose.yml` and `.env` into the same directory.
             Set `DOMAIN_NAME`, `WEB_URL`, and the five blank password/secret values in `.env`, then run `docker compose up -d`.
             No setup script or extra configuration file is required. Keep the filename `.env` so Compose loads it automatically.
-            PostgreSQL, Valkey (Redis-compatible), RabbitMQ, and MinIO are included; only AIO HTTP/HTTPS ports are published. Host networking is not used.
+            PostgreSQL, Valkey (Redis-compatible), RabbitMQ, and MinIO are included; only AIO HTTP port 8080 is published by default. Use an external reverse proxy for HTTPS. Host networking is not used.
             If the GHCR package is private, log in to `ghcr.io` first; public packages support anonymous pulls.
             Keep your existing `.env` when upgrading. Deployment details: https://github.com/${{ github.repository }}/blob/${{ github.sha }}/deployments/aio/community/README.md
           files: |
