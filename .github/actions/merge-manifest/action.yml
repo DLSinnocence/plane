@@ -1,0 +1,51 @@
+name: Merge GHCR Manifest
+description: Merge native image digests and verify their platform set
+inputs:
+  image-ref:
+    description: Fully qualified GHCR image repository
+    required: true
+  build-release:
+    description: Publish version tags
+    default: "false"
+  build-prerelease:
+    description: Suppress stable tag on releases
+    default: "false"
+  release-version:
+    description: Version including leading v
+    default: latest
+  digest-artifact-pattern:
+    description: Artifact pattern for this image
+    required: true
+  expected-platforms:
+    description: Exact comma-separated platform set
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Login to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+      with:
+        driver: docker-container
+        version: latest
+    - name: Download digests
+      uses: actions/download-artifact@v8
+      with:
+        pattern: ${{ inputs.digest-artifact-pattern }}
+        merge-multiple: true
+        path: ${{ runner.temp }}/digests
+    - name: Merge and verify manifest
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+        BUILD_RELEASE: ${{ inputs.build-release }}
+        BUILD_PRERELEASE: ${{ inputs.build-prerelease }}
+        RELEASE_VERSION: ${{ inputs.release-version }}
+        TARGET_BRANCH: ${{ github.ref_name }}
+        EXPECTED_PLATFORMS: ${{ inputs.expected-platforms }}
+      run: node "$GITHUB_ACTION_PATH/merge.mjs"

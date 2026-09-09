@@ -1,0 +1,92 @@
+name: Build and Push Native Digest
+description: Build one native platform and publish its digest to GHCR
+inputs:
+  image-ref:
+    description: Fully qualified GHCR image repository
+    required: true
+  build-context:
+    description: Build context path
+    required: true
+  dockerfile-path:
+    description: Dockerfile path
+    required: true
+  platform:
+    description: Single native platform
+    required: true
+  cache-scope-suffix:
+    description: Architecture-specific cache suffix
+    required: true
+  digest-artifact-name:
+    description: Unique image and architecture artifact name
+    required: true
+  build-args:
+    description: Additional build arguments
+    default: ""
+  additional-assets:
+    description: Optional artifact name
+    default: ""
+  additional-assets-dir:
+    description: Optional artifact destination
+    default: ""
+outputs:
+  digest:
+    description: Published sha256 manifest digest
+    value: ${{ steps.build.outputs.digest }}
+runs:
+  using: composite
+  steps:
+    - name: Validate native build inputs
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+        PLATFORM: ${{ inputs.platform }}
+        CACHE_SUFFIX: ${{ inputs.cache-scope-suffix }}
+        ARTIFACT_NAME: ${{ inputs.digest-artifact-name }}
+        ASSETS: ${{ inputs.additional-assets }}
+        ASSETS_DIR: ${{ inputs.additional-assets-dir }}
+      run: node "$GITHUB_ACTION_PATH/validate.mjs"
+    - name: Login to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+      with:
+        driver: docker-container
+        version: latest
+    - name: Download additional assets
+      if: ${{ inputs.additional-assets != '' && inputs.additional-assets-dir != '' }}
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.additional-assets }}
+        path: ${{ inputs.additional-assets-dir }}
+    - name: Build and push digest
+      id: build
+      uses: docker/build-push-action@v7.0.0
+      with:
+        context: ${{ inputs.build-context }}
+        file: ${{ inputs.dockerfile-path }}
+        platforms: ${{ inputs.platform }}
+        outputs: type=image,name=${{ inputs.image-ref }},push-by-digest=true,name-canonical=true,push=true
+        cache-from: type=registry,ref=${{ inputs.image-ref }}:buildcache${{ inputs.cache-scope-suffix }}
+        cache-to: type=registry,ref=${{ inputs.image-ref }}:buildcache${{ inputs.cache-scope-suffix }},mode=max
+        provenance: false
+        push: false
+        build-args: ${{ inputs.build-args }}
+        labels: |
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+    - name: Export digest
+      shell: bash
+      env:
+        DIGEST: ${{ steps.build.outputs.digest }}
+      run: node "$GITHUB_ACTION_PATH/validate.mjs" export
+    - name: Upload digest
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.digest-artifact-name }}
+        path: ${{ runner.temp }}/digests/*
+        retention-days: 1
+        if-no-files-found: error

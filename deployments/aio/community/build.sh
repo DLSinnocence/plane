@@ -3,8 +3,8 @@
 set -e
 
 DIST_DIR=${DIST_DIR:-./dist}
-CPU_ARCH=$(uname -m)
-IMAGE_NAME=${IMAGE_NAME:-makeplane/plane-aio-community}
+IMAGE_NAMESPACE=${IMAGE_NAMESPACE:-makeplane}
+IMAGE_NAME=${IMAGE_NAME:-$IMAGE_NAMESPACE/plane-aio-community}
 
 
 # loop though all flags and set the variables
@@ -42,13 +42,6 @@ if [ -z "$APP_RELEASE_VERSION" ]; then
     echo ""
     echo "Example: ./build.sh --release=v0.27.1 --platform=linux/amd64"
     exit 1
-fi
-
-# Install yq if not present
-if ! command -v yq &> /dev/null; then
-    echo "Installing yq..."
-    sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${CPU_ARCH}
-    sudo chmod +x /usr/local/bin/yq
 fi
 
 cd $(dirname "$0")
@@ -108,6 +101,17 @@ build_dist_files(){
     update_env_file $DIST_DIR/plane.env "API_BASE_URL" "http://localhost:3004"
     update_env_file $DIST_DIR/plane.env "SITE_ADDRESS" ":80"
 
+    # Ship deployment files from the same preparation step as the image config.
+    mkdir -p "$DIST_DIR/release"
+    cp ./docker-compose.yml "$DIST_DIR/release/docker-compose.yml"
+    cp ./docker-compose.full.yml "$DIST_DIR/release/docker-compose.full.yml"
+    cp ./init-stack.sh "$DIST_DIR/release/init-stack.sh"
+    cp "$DIST_DIR/plane.env" "$DIST_DIR/release/variables.env"
+    cp ./README.md "$DIST_DIR/release/README.md"
+    string_replace "$DIST_DIR/release/docker-compose.yml" 'APP_RELEASE:-stable' "APP_RELEASE:-$APP_RELEASE_VERSION"
+    string_replace "$DIST_DIR/release/docker-compose.yml" 'makeplane/plane-aio-community' "$IMAGE_NAME"
+    string_replace "$DIST_DIR/release/docker-compose.full.yml" 'APP_RELEASE:-stable' "APP_RELEASE:-$APP_RELEASE_VERSION"
+    string_replace "$DIST_DIR/release/docker-compose.full.yml" 'ghcr.io/dlsinnocence/plane-aio-community' "$IMAGE_NAME"
 
     # print docker build command
     echo "------------------------------------------------"
@@ -116,6 +120,7 @@ build_dist_files(){
     echo ""
     echo "docker build -t $IMAGE_NAME \\"
     echo "  -f $(pwd)/Dockerfile \\"
+    echo "  --build-arg IMAGE_NAMESPACE=$IMAGE_NAMESPACE \\"
     echo "  --build-arg PLANE_VERSION=$APP_RELEASE_VERSION \\"
     echo "  $(pwd)"
     echo ""

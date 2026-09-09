@@ -127,8 +127,8 @@ update_env_file(){
     else
         update_env_value "SITE_ADDRESS" ":80"
     fi
-    update_env_value "WEB_URL" "$app_protocol://$DOMAIN_NAME"
-    update_env_value "CORS_ALLOWED_ORIGINS" "http://$DOMAIN_NAME,https://$DOMAIN_NAME"
+    update_env_value "WEB_URL" "${WEB_URL:-$app_protocol://$DOMAIN_NAME}"
+    update_env_value "CORS_ALLOWED_ORIGINS" "${CORS_ALLOWED_ORIGINS:-http://$DOMAIN_NAME,https://$DOMAIN_NAME}"
 
     # update database url
     update_env_value "DATABASE_URL" "$DATABASE_URL"
@@ -142,7 +142,8 @@ update_env_file(){
     update_env_value "AWS_S3_BUCKET_NAME" "$AWS_S3_BUCKET_NAME"
     update_env_value "AWS_S3_ENDPOINT_URL" "${AWS_S3_ENDPOINT_URL:-https://s3.${AWS_REGION}.amazonaws.com}"
     update_env_value "BUCKET_NAME" "$AWS_S3_BUCKET_NAME"
-    update_env_value "USE_MINIO" "0"
+    update_env_value "USE_MINIO" "${USE_MINIO:-0}"
+    update_env_value "MINIO_ENDPOINT_SSL" "${MINIO_ENDPOINT_SSL:-0}"
 
     # Optional environment variables
     # SECRET_KEY: if absent or set to a known placeholder/insecure value, preserve whatever
@@ -176,6 +177,7 @@ update_env_file(){
     update_env_value "LIVE_SERVER_SECRET_KEY" "$LIVE_SERVER_SECRET_KEY"
 
     update_env_value "API_KEY_RATE_LIMIT" "${API_KEY_RATE_LIMIT:-60/minute}"
+    update_env_value "GUNICORN_WORKERS" "${GUNICORN_WORKERS:-1}"
 
     echo "✅ Environment file updated"
     echo ""

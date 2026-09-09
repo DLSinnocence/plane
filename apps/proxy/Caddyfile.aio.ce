@@ -23,6 +23,11 @@
         try_files {path} {path}/ /index.html
         file_server
     }
+    @storage path /{$BUCKET_NAME} /{$BUCKET_NAME}/*
+    handle @storage {
+        reverse_proxy {$MINIO_ENDPOINT:plane-minio:9000}
+    }
+
     handle_path /* {
         root * /app/web
         try_files {path} {path}/ /index.html

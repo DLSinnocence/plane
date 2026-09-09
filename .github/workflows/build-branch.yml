@@ -35,6 +35,9 @@ on:
       - preview
       - canary
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -53,6 +56,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       gh_branch_name: ${{ steps.set_env_variables.outputs.TARGET_BRANCH }}
+      image_namespace: ${{ steps.set_env_variables.outputs.IMAGE_NAMESPACE }}
       # Per-architecture native build matrix. Every image builds one platform per
       # job on a runner native to it, so there is no single buildx driver/platform
       # pair for the run and no Docker Build Cloud endpoint.
@@ -94,6 +98,7 @@ jobs:
 
           BR_NAME=$( echo "${{ env.TARGET_BRANCH }}" |sed 's/[^a-zA-Z0-9.-]//g')
           echo "TARGET_BRANCH=$BR_NAME" >> $GITHUB_OUTPUT
+          echo "IMAGE_NAMESPACE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
           echo "DH_IMG_WEB=plane-frontend" >> $GITHUB_OUTPUT
           echo "DH_IMG_SPACE=plane-space" >> $GITHUB_OUTPUT
@@ -141,6 +146,9 @@ jobs:
         name: Checkout Files
         uses: actions/checkout@v6
 
+      - name: Test Registry Actions
+        run: node --test .github/actions/tests/*.test.mjs
+
   # Native per-architecture image builds.
   #
   # Each branch_build_push_<image> job below builds ONE platform on a runner
@@ -158,29 +166,25 @@ jobs:
     name: Build-Push Admin Docker Image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup]
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.branch_build_setup.outputs.gh_build_matrix) }}
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Admin Build and Push
-        uses: makeplane/actions/build-push@v1.6.0
+        uses: ./.github/actions/build-push
         with:
-          build-release: ${{ needs.branch_build_setup.outputs.build_release }}
-          build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
-          release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_admin }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_admin }}
           build-context: .
           dockerfile-path: ./apps/admin/Dockerfile.admin
-          buildx-driver: docker-container
-          buildx-version: latest
-          buildx-platforms: ${{ matrix.platform }}
-          buildx-endpoint: ""
-          push-by-digest: "true"
+          platform: ${{ matrix.platform }}
           # Without a per-arch cache ref the two legs overwrite each other's
           # buildcache tag, since it is not platform-indexed.
           cache-scope-suffix: -${{ matrix.arch }}
@@ -190,18 +194,21 @@ jobs:
     name: Merge Admin Manifest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup, branch_build_push_admin]
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Merge Admin Manifest
-        uses: makeplane/actions/merge-manifest@v1.6.0
+        uses: ./.github/actions/merge-manifest
         with:
           build-release: ${{ needs.branch_build_setup.outputs.build_release }}
           build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
           release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_admin }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_admin }}
           digest-artifact-pattern: digest-admin-*
           expected-platforms: ${{ needs.branch_build_setup.outputs.gh_expected_platforms }}
 
@@ -209,29 +216,25 @@ jobs:
     name: Build-Push Web Docker Image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup]
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.branch_build_setup.outputs.gh_build_matrix) }}
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Web Build and Push
-        uses: makeplane/actions/build-push@v1.6.0
+        uses: ./.github/actions/build-push
         with:
-          build-release: ${{ needs.branch_build_setup.outputs.build_release }}
-          build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
-          release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_web }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_web }}
           build-context: .
           dockerfile-path: ./apps/web/Dockerfile.web
-          buildx-driver: docker-container
-          buildx-version: latest
-          buildx-platforms: ${{ matrix.platform }}
-          buildx-endpoint: ""
-          push-by-digest: "true"
+          platform: ${{ matrix.platform }}
           # Without a per-arch cache ref the two legs overwrite each other's
           # buildcache tag, since it is not platform-indexed.
           cache-scope-suffix: -${{ matrix.arch }}
@@ -241,18 +244,21 @@ jobs:
     name: Merge Web Manifest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup, branch_build_push_web]
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Merge Web Manifest
-        uses: makeplane/actions/merge-manifest@v1.6.0
+        uses: ./.github/actions/merge-manifest
         with:
           build-release: ${{ needs.branch_build_setup.outputs.build_release }}
           build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
           release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_web }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_web }}
           digest-artifact-pattern: digest-web-*
           expected-platforms: ${{ needs.branch_build_setup.outputs.gh_expected_platforms }}
 
@@ -260,29 +266,25 @@ jobs:
     name: Build-Push Space Docker Image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup]
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.branch_build_setup.outputs.gh_build_matrix) }}
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Space Build and Push
-        uses: makeplane/actions/build-push@v1.6.0
+        uses: ./.github/actions/build-push
         with:
-          build-release: ${{ needs.branch_build_setup.outputs.build_release }}
-          build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
-          release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_space }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_space }}
           build-context: .
           dockerfile-path: ./apps/space/Dockerfile.space
-          buildx-driver: docker-container
-          buildx-version: latest
-          buildx-platforms: ${{ matrix.platform }}
-          buildx-endpoint: ""
-          push-by-digest: "true"
+          platform: ${{ matrix.platform }}
           # Without a per-arch cache ref the two legs overwrite each other's
           # buildcache tag, since it is not platform-indexed.
           cache-scope-suffix: -${{ matrix.arch }}
@@ -292,18 +294,21 @@ jobs:
     name: Merge Space Manifest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup, branch_build_push_space]
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Merge Space Manifest
-        uses: makeplane/actions/merge-manifest@v1.6.0
+        uses: ./.github/actions/merge-manifest
         with:
           build-release: ${{ needs.branch_build_setup.outputs.build_release }}
           build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
           release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_space }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_space }}
           digest-artifact-pattern: digest-space-*
           expected-platforms: ${{ needs.branch_build_setup.outputs.gh_expected_platforms }}
 
@@ -311,29 +316,25 @@ jobs:
     name: Build-Push Live Collaboration Docker Image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup]
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.branch_build_setup.outputs.gh_build_matrix) }}
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Live Build and Push
-        uses: makeplane/actions/build-push@v1.6.0
+        uses: ./.github/actions/build-push
         with:
-          build-release: ${{ needs.branch_build_setup.outputs.build_release }}
-          build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
-          release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_live }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_live }}
           build-context: .
           dockerfile-path: ./apps/live/Dockerfile.live
-          buildx-driver: docker-container
-          buildx-version: latest
-          buildx-platforms: ${{ matrix.platform }}
-          buildx-endpoint: ""
-          push-by-digest: "true"
+          platform: ${{ matrix.platform }}
           # Without a per-arch cache ref the two legs overwrite each other's
           # buildcache tag, since it is not platform-indexed.
           cache-scope-suffix: -${{ matrix.arch }}
@@ -343,18 +344,21 @@ jobs:
     name: Merge Live Collaboration Manifest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup, branch_build_push_live]
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Merge Live Collaboration Manifest
-        uses: makeplane/actions/merge-manifest@v1.6.0
+        uses: ./.github/actions/merge-manifest
         with:
           build-release: ${{ needs.branch_build_setup.outputs.build_release }}
           build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
           release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_live }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_live }}
           digest-artifact-pattern: digest-live-*
           expected-platforms: ${{ needs.branch_build_setup.outputs.gh_expected_platforms }}
 
@@ -362,29 +366,25 @@ jobs:
     name: Build-Push API Server Docker Image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup]
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.branch_build_setup.outputs.gh_build_matrix) }}
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Backend Build and Push
-        uses: makeplane/actions/build-push@v1.6.0
+        uses: ./.github/actions/build-push
         with:
-          build-release: ${{ needs.branch_build_setup.outputs.build_release }}
-          build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
-          release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_backend }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_backend }}
           build-context: ./apps/api
           dockerfile-path: ./apps/api/Dockerfile.api
-          buildx-driver: docker-container
-          buildx-version: latest
-          buildx-platforms: ${{ matrix.platform }}
-          buildx-endpoint: ""
-          push-by-digest: "true"
+          platform: ${{ matrix.platform }}
           # Without a per-arch cache ref the two legs overwrite each other's
           # buildcache tag, since it is not platform-indexed.
           cache-scope-suffix: -${{ matrix.arch }}
@@ -394,18 +394,21 @@ jobs:
     name: Merge API Server Manifest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup, branch_build_push_api]
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Merge API Server Manifest
-        uses: makeplane/actions/merge-manifest@v1.6.0
+        uses: ./.github/actions/merge-manifest
         with:
           build-release: ${{ needs.branch_build_setup.outputs.build_release }}
           build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
           release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_backend }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_backend }}
           digest-artifact-pattern: digest-api-*
           expected-platforms: ${{ needs.branch_build_setup.outputs.gh_expected_platforms }}
 
@@ -413,29 +416,25 @@ jobs:
     name: Build-Push Proxy Docker Image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup]
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.branch_build_setup.outputs.gh_build_matrix) }}
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Proxy Build and Push
-        uses: makeplane/actions/build-push@v1.6.0
+        uses: ./.github/actions/build-push
         with:
-          build-release: ${{ needs.branch_build_setup.outputs.build_release }}
-          build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
-          release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_proxy }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_proxy }}
           build-context: ./apps/proxy
           dockerfile-path: ./apps/proxy/Dockerfile.ce
-          buildx-driver: docker-container
-          buildx-version: latest
-          buildx-platforms: ${{ matrix.platform }}
-          buildx-endpoint: ""
-          push-by-digest: "true"
+          platform: ${{ matrix.platform }}
           # Without a per-arch cache ref the two legs overwrite each other's
           # buildcache tag, since it is not platform-indexed.
           cache-scope-suffix: -${{ matrix.arch }}
@@ -445,18 +444,21 @@ jobs:
     name: Merge Proxy Manifest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup, branch_build_push_proxy]
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Merge Proxy Manifest
-        uses: makeplane/actions/merge-manifest@v1.6.0
+        uses: ./.github/actions/merge-manifest
         with:
           build-release: ${{ needs.branch_build_setup.outputs.build_release }}
           build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
           release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_proxy }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_proxy }}
           digest-artifact-pattern: digest-proxy-*
           expected-platforms: ${{ needs.branch_build_setup.outputs.gh_expected_platforms }}
 
@@ -476,8 +478,13 @@ jobs:
       - name: Checkout Files
         uses: actions/checkout@v6
 
+      - name: Test AIO Release Assets
+        run: node --test deployments/aio/community/tests/*.test.mjs
+
       - name: Prepare AIO Assets
         id: prepare_aio_assets
+        env:
+          IMAGE_NAMESPACE: ${{ needs.branch_build_setup.outputs.image_namespace }}
         run: |
           cd deployments/aio/community
 
@@ -494,6 +501,7 @@ jobs:
         with:
           path: ./deployments/aio/community/dist
           name: aio-assets-dist
+          if-no-files-found: error
 
   # AIO pulls the other images in by tag, so it needs the merge jobs -- the tags
   # do not exist until the merges run.
@@ -502,6 +510,9 @@ jobs:
     name: Build-Push AIO Docker Image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -516,50 +527,48 @@ jobs:
       - branch_merge_api
       - branch_merge_proxy
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: AIO Build and Push
-        uses: makeplane/actions/build-push@v1.6.0
+        uses: ./.github/actions/build-push
         with:
-          build-release: ${{ needs.branch_build_setup.outputs.build_release }}
-          build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
-          release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_aio }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_aio }}
           build-context: ./deployments/aio/community
           dockerfile-path: ./deployments/aio/community/Dockerfile
-          buildx-driver: docker-container
-          buildx-version: latest
-          buildx-platforms: ${{ matrix.platform }}
-          buildx-endpoint: ""
-          push-by-digest: "true"
+          platform: ${{ matrix.platform }}
           cache-scope-suffix: -${{ matrix.arch }}
           digest-artifact-name: digest-aio-${{ matrix.arch }}
           additional-assets: aio-assets-dist
           additional-assets-dir: ./deployments/aio/community/dist
           build-args: |
             PLANE_VERSION=${{ needs.prepare_aio_assets.outputs.aio_build_version }}
+            IMAGE_NAMESPACE=${{ needs.branch_build_setup.outputs.image_namespace }}
 
   branch_merge_aio:
     name: Merge AIO Manifest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     needs: [branch_build_setup, branch_build_push_aio]
     steps:
+      - name: Checkout Files
+        uses: actions/checkout@v6
+
       - name: Merge AIO Manifest
-        uses: makeplane/actions/merge-manifest@v1.6.0
+        uses: ./.github/actions/merge-manifest
         with:
           build-release: ${{ needs.branch_build_setup.outputs.build_release }}
           build-prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
           release-version: ${{ needs.branch_build_setup.outputs.release_version }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-image-owner: makeplane
-          docker-image-name: ${{ needs.branch_build_setup.outputs.dh_img_aio }}
+          image-ref: ${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_aio }}
           digest-artifact-pattern: digest-aio-*
           expected-platforms: ${{ needs.branch_build_setup.outputs.gh_expected_platforms }}
 
   upload_build_assets:
+    if: ${{ needs.branch_build_setup.outputs.build_type != 'Release' }}
     name: Upload Build Assets
     runs-on: ubuntu-24.04
     needs:
@@ -575,14 +584,13 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Update Assets
+        env:
+          IMAGE_NAMESPACE: ${{ needs.branch_build_setup.outputs.image_namespace }}
         run: |
-          if [ "${{ needs.branch_build_setup.outputs.build_type }}" == "Release" ]; then
-            REL_VERSION=${{ needs.branch_build_setup.outputs.release_version }}
-          else
-            REL_VERSION=${{ needs.branch_build_setup.outputs.gh_branch_name }}
-          fi
+          REL_VERSION=${{ needs.branch_build_setup.outputs.gh_branch_name }}
 
           cp ./deployments/cli/community/install.sh deployments/cli/community/setup.sh
+          sed -i "s|makeplane/plane-|${IMAGE_NAMESPACE}/plane-|g" deployments/cli/community/docker-compose.yml
           sed -i 's/${APP_RELEASE:-stable}/${APP_RELEASE:-'${REL_VERSION}'}/g' deployments/cli/community/docker-compose.yml
           # sed -i 's/APP_RELEASE=stable/APP_RELEASE='${REL_VERSION}'/g' deployments/cli/community/variables.env
 
@@ -599,54 +607,48 @@ jobs:
             ./deployments/swarm/community/swarm.sh
 
   publish_release:
-    # Deliberately NO status function here. The default success() gate is what
-    # stops a release when any image fails: a failed build leg skips its
-    # branch_merge_* job, and success() rejects a skipped need.
-    #
-    # That is also why branch_merge_aio is NOT in needs below. AIO runs last (it
-    # needs every other merge), the GitHub release ships no AIO artifact, and
-    # gating on it would let one flaky AIO leg silently discard a finished release.
+    # Default success() blocks publication if the AIO build or manifest merge
+    # fails or is skipped. Component images are transitive build dependencies.
     if: ${{ needs.branch_build_setup.outputs.build_type == 'Release' }}
-    name: Build Release
+    name: Publish AIO Release
     runs-on: ubuntu-24.04
-    needs:
-      [
-        branch_build_setup,
-        branch_merge_admin,
-        branch_merge_web,
-        branch_merge_space,
-        branch_merge_live,
-        branch_merge_api,
-        branch_merge_proxy,
-      ]
+    permissions:
+      contents: write
+    needs: [branch_build_setup, prepare_aio_assets, branch_merge_aio]
     env:
       REL_VERSION: ${{ needs.branch_build_setup.outputs.release_version }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Update Assets
-        run: |
-          cp ./deployments/cli/community/install.sh deployments/cli/community/setup.sh
-          sed -i 's/${APP_RELEASE:-stable}/${APP_RELEASE:-'${REL_VERSION}'}/g' deployments/cli/community/docker-compose.yml
-          # sed -i 's/APP_RELEASE=stable/APP_RELEASE='${REL_VERSION}'/g' deployments/cli/community/variables.env
+      - name: Download AIO Assets
+        uses: actions/download-artifact@v8
+        with:
+          name: aio-assets-dist
+          path: ./aio-assets
 
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v2.6.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         with:
           tag_name: ${{ env.REL_VERSION }}
           name: ${{ env.REL_VERSION }}
           target_commitish: ${{ github.sha }}
           draft: false
-          prerelease: ${{ env.IS_PRERELEASE }}
+          prerelease: ${{ needs.branch_build_setup.outputs.build_prerelease }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ## AIO Single-Container Deployment
+
+            Image: `${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_aio }}:${{ env.REL_VERSION }}`
+            Platforms: `${{ needs.branch_build_setup.outputs.gh_expected_platforms }}`
+
+            For the complete bridge-network stack, download `docker-compose.full.yml`, `init-stack.sh`, and `README.md`.
+            Run `bash init-stack.sh`, configure `DOMAIN_NAME` and `WEB_URL` in `.env`, then run `docker compose -f docker-compose.full.yml up -d`.
+            PostgreSQL, Valkey (Redis-compatible), RabbitMQ, and MinIO are included; only AIO HTTP/HTTPS ports are published. Host networking is not used.
+            For existing external services, use `docker-compose.yml` with `variables.env` instead.
+            If the GHCR package is private, log in to `ghcr.io` first; public packages support anonymous pulls.
           files: |
-            ${{ github.workspace }}/deployments/cli/community/setup.sh
-            ${{ github.workspace }}/deployments/cli/community/restore.sh
-            ${{ github.workspace }}/deployments/cli/community/restore-airgapped.sh
-            ${{ github.workspace }}/deployments/cli/community/docker-compose.yml
-            ${{ github.workspace }}/deployments/cli/community/variables.env
-            ${{ github.workspace }}/deployments/swarm/community/swarm.sh
+            ./aio-assets/release/docker-compose.yml
+            ./aio-assets/release/docker-compose.full.yml
+            ./aio-assets/release/init-stack.sh
+            ./aio-assets/release/variables.env
+            ./aio-assets/release/README.md

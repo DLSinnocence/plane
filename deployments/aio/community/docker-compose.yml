@@ -1,0 +1,21 @@
+services:
+  plane:
+    image: makeplane/plane-aio-community:${APP_RELEASE:-stable}
+    restart: unless-stopped
+    # The AIO entrypoint uses terminal output during startup.
+    tty: true
+    env_file:
+      - variables.env
+    environment:
+      XDG_DATA_HOME: /app/data
+      XDG_CONFIG_HOME: /app/data/config
+    ports:
+      - "${LISTEN_HTTP_PORT:-80}:80"
+      - "${LISTEN_HTTPS_PORT:-443}:443"
+    volumes:
+      - plane_data:/app/data
+      - plane_logs:/app/logs
+
+volumes:
+  plane_data:
+  plane_logs:
