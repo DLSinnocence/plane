@@ -104,14 +104,10 @@ build_dist_files(){
     # Ship deployment files from the same preparation step as the image config.
     mkdir -p "$DIST_DIR/release"
     cp ./docker-compose.yml "$DIST_DIR/release/docker-compose.yml"
-    cp ./docker-compose.full.yml "$DIST_DIR/release/docker-compose.full.yml"
-    cp ./init-stack.sh "$DIST_DIR/release/init-stack.sh"
-    cp "$DIST_DIR/plane.env" "$DIST_DIR/release/variables.env"
-    cp ./README.md "$DIST_DIR/release/README.md"
+    cp ./.env.example "$DIST_DIR/release/.env"
+    update_env_file "$DIST_DIR/release/.env" "APP_RELEASE" "$APP_RELEASE_VERSION"
     string_replace "$DIST_DIR/release/docker-compose.yml" 'APP_RELEASE:-stable' "APP_RELEASE:-$APP_RELEASE_VERSION"
-    string_replace "$DIST_DIR/release/docker-compose.yml" 'makeplane/plane-aio-community' "$IMAGE_NAME"
-    string_replace "$DIST_DIR/release/docker-compose.full.yml" 'APP_RELEASE:-stable' "APP_RELEASE:-$APP_RELEASE_VERSION"
-    string_replace "$DIST_DIR/release/docker-compose.full.yml" 'ghcr.io/dlsinnocence/plane-aio-community' "$IMAGE_NAME"
+    string_replace "$DIST_DIR/release/docker-compose.yml" 'ghcr.io/dlsinnocence/plane-aio-community' "$IMAGE_NAME"
 
     # print docker build command
     echo "------------------------------------------------"

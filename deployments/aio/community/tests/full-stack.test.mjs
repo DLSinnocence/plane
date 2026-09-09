@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -42,44 +42,47 @@ function succeeded(result) {
   return result.stdout;
 }
 
-function initialize(directory) {
-  const result = run("bash", [join(source, "init-stack.sh")], directory);
-  succeeded(result);
-  return { values: parseEnv(readFileSync(join(directory, ".env"), "utf8")), result };
+function writeEnvironment(directory, values) {
+  writeFileSync(
+    join(directory, ".env"),
+    Object.entries(values)
+      .map(([key, value]) => `${key}=${value}`)
+      .join("\n") + "\n"
+  );
 }
 
 function deployment(t) {
   const directory = temporaryDirectory(t);
-  copyFileSync(join(source, "docker-compose.full.yml"), join(directory, "docker-compose.full.yml"));
-  const { values } = initialize(directory);
-  assert.deepEqual(readdirSync(directory).sort(), [".env", "docker-compose.full.yml"]);
+  const templatePath = join(source, ".env.example");
+  const before = readFileSync(templatePath);
+  copyFileSync(join(source, "docker-compose.yml"), join(directory, "docker-compose.yml"));
+  copyFileSync(templatePath, join(directory, ".env"));
+  const values = parseEnv(readFileSync(join(directory, ".env"), "utf8"));
+  // Deterministic credentials exist only in temporary test fixtures.
+  secretKeys.forEach((key, index) => {
+    values[key] = (index + 1).toString(16).repeat(64);
+  });
+  writeEnvironment(directory, values);
+  assert.deepEqual(readFileSync(templatePath), before);
+  assert.deepEqual(readdirSync(directory).sort(), [".env", "docker-compose.yml"]);
   return { directory, values };
 }
 
 function render(directory, overrides = {}) {
   assert.ok(composeAvailable, "Docker Compose is required in CI (or set COMPOSE_BINARY)");
   return JSON.parse(
-    succeeded(
-      run(
-        composeCommand,
-        [...composeArgs, "-f", "docker-compose.full.yml", "config", "--format", "json"],
-        directory,
-        overrides
-      )
-    )
+    succeeded(run(composeCommand, [...composeArgs, "config", "--format", "json"], directory, overrides))
   );
 }
 
-test("initializer creates private, distinct secrets and deployment defaults without leaking credentials", (t) => {
-  const directory = temporaryDirectory(t);
-  const { values, result } = initialize(directory);
-  assert.equal(statSync(join(directory, ".env")).mode & 0o777, 0o600);
-  assert.equal(new Set(secretKeys.map((key) => values[key])).size, 5);
+test("environment template has blank required credentials and source deployment defaults", () => {
+  const values = parseEnv(readFileSync(join(source, ".env.example"), "utf8"));
   for (const key of secretKeys) {
-    assert.match(values[key], /^[a-f0-9]{64}$/, key);
-    assert.ok(!`${result.stdout}${result.stderr}`.includes(values[key]), `${key} leaked to output`);
+    assert.ok(Object.hasOwn(values, key), `${key} must be documented in the template`);
+    assert.equal(values[key], "", `${key} must not ship a credential`);
   }
   const defaults = {
+    APP_RELEASE: "stable",
     DOMAIN_NAME: "localhost",
     WEB_URL: "http://localhost",
     APP_PROTOCOL: "http",
@@ -93,26 +96,18 @@ test("initializer creates private, distinct secrets and deployment defaults with
   for (const [key, value] of Object.entries(defaults)) assert.equal(values[key], value, key);
 });
 
-test("initializer refuses overwrite without changing existing bytes or leaking credentials", (t) => {
-  const directory = temporaryDirectory(t);
-  const { values } = initialize(directory);
-  const before = readFileSync(join(directory, ".env"));
-  const result = run("bash", [join(source, "init-stack.sh")], directory);
-  assert.ifError(result.error);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Refusing to overwrite/);
-  assert.deepEqual(readFileSync(join(directory, ".env")), before);
-  for (const key of secretKeys) assert.ok(!`${result.stdout}${result.stderr}`.includes(values[key]));
-});
-
-test("independent installations receive different secrets", (t) => {
-  const first = initialize(temporaryDirectory(t)).values;
-  const second = initialize(temporaryDirectory(t)).values;
-  assert.equal(new Set([...secretKeys.map((key) => first[key]), ...secretKeys.map((key) => second[key])]).size, 10);
+test("copying and filling the environment template leaves source files unchanged", (t) => {
+  const templates = [".env.example", "docker-compose.yml"];
+  const before = templates.map((name) => readFileSync(join(source, name)));
+  const { directory, values } = deployment(t);
+  assert.equal(new Set(secretKeys.map((key) => values[key])).size, 5);
+  for (const key of secretKeys) assert.match(values[key], /^[a-f0-9]{64}$/, key);
+  assert.deepEqual(parseEnv(readFileSync(join(directory, ".env"), "utf8")), values);
+  templates.forEach((name, index) => assert.deepEqual(readFileSync(join(source, name)), before[index]));
 });
 
 test(
-  "full Compose renders from only generated .env with bridge isolation and persistent services",
+  "default Compose discovers only docker-compose.yml and filled .env with bridge isolation and persistent services",
   composeOptions,
   (t) => {
     const { directory, values } = deployment(t);
@@ -128,6 +123,8 @@ test(
     ]);
     assert.equal(config.networks.default.driver, "bridge");
     assert.equal(services.plane.image, "ghcr.io/dlsinnocence/plane-aio-community:stable");
+    assert.deepEqual(services.plane.healthcheck.test, ["CMD", "curl", "-fsS", "http://127.0.0.1:3004/"]);
+    assert.ok(!services.plane.healthcheck.disable);
     assert.match(services["plane-db"].image, /^postgres:/);
     assert.match(services["plane-redis"].image, /^valkey\/valkey:/);
     assert.match(services["plane-mq"].image, /^rabbitmq:/);
@@ -246,26 +243,20 @@ test("full Compose preserves public HTTPS origin, nondefault ports and runtime o
   );
 });
 
-test("full Compose rejects missing required configuration", composeOptions, (t) => {
+test("default Compose rejects missing and empty required credentials", composeOptions, (t) => {
   assert.ok(composeAvailable, "Docker Compose is required in CI (or set COMPOSE_BINARY)");
   const { directory, values } = deployment(t);
   for (const key of secretKeys) {
-    const incomplete = { ...values };
-    delete incomplete[key];
-    writeFileSync(
-      join(directory, ".env"),
-      Object.entries(incomplete)
-        .map(([name, value]) => `${name}=${value}`)
-        .join("\n")
-    );
-    const result = run(
-      composeCommand,
-      [...composeArgs, "-f", "docker-compose.full.yml", "config", "--format", "json"],
-      directory
-    );
-    assert.ifError(result.error);
-    assert.notEqual(result.status, 0, `${key} must be required`);
-    assert.ok(result.stderr.includes(key), `failure must identify ${key}`);
+    for (const state of ["missing", "empty"]) {
+      const incomplete = { ...values };
+      if (state === "missing") delete incomplete[key];
+      else incomplete[key] = "";
+      writeEnvironment(directory, incomplete);
+      const result = run(composeCommand, [...composeArgs, "config", "--format", "json"], directory);
+      assert.ifError(result.error);
+      assert.notEqual(result.status, 0, `${state} ${key} must be rejected`);
+      assert.ok(result.stderr.includes(key), `failure must identify ${state} ${key}`);
+    }
   }
 });
 

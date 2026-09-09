@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -8,8 +8,15 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 
 const source = fileURLToPath(new URL("../", import.meta.url));
-const templateFiles = ["variables.env", "docker-compose.yml", "docker-compose.full.yml", "init-stack.sh", "README.md"];
+const templateFiles = ["variables.env", "docker-compose.yml", ".env.example"];
 const templates = Object.fromEntries(templateFiles.map((name) => [name, readFileSync(join(source, name), "utf8")]));
+const secretKeys = [
+  "POSTGRES_PASSWORD",
+  "RABBITMQ_PASSWORD",
+  "MINIO_ROOT_PASSWORD",
+  "SECRET_KEY",
+  "LIVE_SERVER_SECRET_KEY",
+];
 
 function prepare(t, args, dist, overrides = {}) {
   if (!dist) {
@@ -25,23 +32,20 @@ function prepare(t, args, dist, overrides = {}) {
 
 function checkAssets(dist, version, imageName = "makeplane/plane-aio-community") {
   const release = join(dist, "release");
-  assert.deepEqual(readdirSync(release).sort(), [...templateFiles].sort());
+  assert.deepEqual(readdirSync(release).sort(), [".env", "docker-compose.yml"]);
   assert.equal(
     readFileSync(join(release, "docker-compose.yml"), "utf8"),
     templates["docker-compose.yml"]
       .replace("APP_RELEASE:-stable", `APP_RELEASE:-${version}`)
-      .replace("makeplane/plane-aio-community", imageName)
-  );
-  assert.equal(
-    readFileSync(join(release, "docker-compose.full.yml"), "utf8"),
-    templates["docker-compose.full.yml"]
-      .replace("APP_RELEASE:-stable", `APP_RELEASE:-${version}`)
       .replace("ghcr.io/dlsinnocence/plane-aio-community", imageName)
   );
-  assert.equal(readFileSync(join(release, "init-stack.sh"), "utf8"), templates["init-stack.sh"]);
-  const imageEnv = readFileSync(join(dist, "plane.env"), "utf8");
-  assert.equal(readFileSync(join(release, "variables.env"), "utf8"), imageEnv);
-  const values = parseEnv(imageEnv);
+  const deploymentEnv = readFileSync(join(release, ".env"), "utf8");
+  assert.equal(deploymentEnv, templates[".env.example"].replace("APP_RELEASE=stable", `APP_RELEASE=${version}`));
+  const deploymentValues = parseEnv(deploymentEnv);
+  assert.equal(deploymentValues.APP_RELEASE, version);
+  for (const key of secretKeys) assert.equal(deploymentValues[key], "", `${key} must never be published with a value`);
+
+  const values = parseEnv(readFileSync(join(dist, "plane.env"), "utf8"));
   for (const key of ["APP_RELEASE", "APP_RELEASE_VERSION", "APP_VERSION"]) {
     assert.equal(values[key], version, key);
   }
@@ -57,9 +61,8 @@ function checkAssets(dist, version, imageName = "makeplane/plane-aio-community")
     "AWS_SECRET_ACCESS_KEY",
     "AWS_S3_BUCKET_NAME",
   ]) {
-    assert.equal(values[key], "", `${key} must be configured by the operator`);
+    assert.equal(values[key], "", `${key} must be supplied at runtime`);
   }
-  assert.equal(readFileSync(join(release, "README.md"), "utf8"), templates["README.md"]);
   assert.equal(
     readFileSync(join(dist, "Caddyfile"), "utf8"),
     readFileSync(join(source, "../../../apps/proxy/Caddyfile.aio.ce"), "utf8")
@@ -74,7 +77,7 @@ for (const [version, args] of [
   ["v1.2.3-rc-1", ["--release=v1.2.3-rc-1"]],
   ["preview", ["--release", "preview"]],
 ]) {
-  test(`prepare matching AIO image and deployment assets for ${version}`, (t) => {
+  test(`prepare exactly two matching deployment files for ${version}`, (t) => {
     checkAssets(prepare(t, args), version);
   });
 }
@@ -92,10 +95,17 @@ test("an explicit image name is used in published deployment assets", (t) => {
   checkAssets(dist, "v1.2.3", imageName);
 });
 
-test("regenerating assets replaces the previous release version", (t) => {
+test("regenerating assets replaces the version and removes obsolete deployment files", (t) => {
   const dist = prepare(t, ["--release=v1.2.3"]);
+  writeFileSync(join(dist, "release", "obsolete-setup.sh"), "obsolete");
   prepare(t, ["--release=v1.2.4"], dist);
   checkAssets(dist, "v1.2.4");
+});
+
+test("deployment credentials in the build environment cannot leak into release assets", (t) => {
+  const overrides = Object.fromEntries(secretKeys.map((key, index) => [key, `private-build-value-${index}`]));
+  const dist = prepare(t, ["--release=v1.2.3"], undefined, overrides);
+  checkAssets(dist, "v1.2.3");
 });
 
 const composeCommand = process.env.COMPOSE_BINARY ? resolve(process.env.COMPOSE_BINARY) : "docker";
@@ -104,7 +114,7 @@ const composeAvailable = spawnSync(composeCommand, [...composeArgs, "version"]).
 
 function renderCompose(release, overrides = {}) {
   return JSON.parse(
-    execFileSync(composeCommand, [...composeArgs, "-f", "docker-compose.yml", "config", "--format", "json"], {
+    execFileSync(composeCommand, [...composeArgs, "config", "--format", "json"], {
       cwd: release,
       env: { PATH: process.env.PATH, HOME: process.env.HOME, ...overrides },
       encoding: "utf8",
@@ -113,32 +123,38 @@ function renderCompose(release, overrides = {}) {
 }
 
 test(
-  "Compose runs only AIO with persistent data and supports image and port overrides",
-  {
-    skip: !composeAvailable && process.env.GITHUB_ACTIONS !== "true",
-  },
+  "release deploys from only docker-compose.yml and a completed .env with default discovery",
+  { skip: !composeAvailable && process.env.GITHUB_ACTIONS !== "true" },
   (t) => {
     const release = join(
       prepare(t, ["--release=v1.2.3"], undefined, { IMAGE_NAMESPACE: "ghcr.io/example-owner" }),
       "release"
     );
+    const envPath = join(release, ".env");
+    let env = readFileSync(envPath, "utf8");
+    const values = Object.fromEntries(secretKeys.map((key, index) => [key, String(index + 1).repeat(64)]));
+    for (const [key, value] of Object.entries(values)) env = env.replace(`${key}=\n`, `${key}=${value}\n`);
+    writeFileSync(envPath, env);
+
+    assert.deepEqual(readdirSync(release).sort(), [".env", "docker-compose.yml"]);
     const config = renderCompose(release);
-    assert.deepEqual(Object.keys(config.services), ["plane"]);
+    assert.deepEqual(Object.keys(config.services).sort(), [
+      "minio-init",
+      "plane",
+      "plane-db",
+      "plane-minio",
+      "plane-mq",
+      "plane-redis",
+    ]);
     const service = config.services.plane;
     assert.equal(service.image, "ghcr.io/example-owner/plane-aio-community:v1.2.3");
-    assert.equal(service.restart, "unless-stopped");
-    assert.equal(service.tty, true);
-    assert.equal(service.environment.DOMAIN_NAME, "localhost");
-    assert.equal(service.environment.APP_RELEASE, "v1.2.3");
-    assert.equal(service.environment.XDG_DATA_HOME, "/app/data");
-    assert.equal(service.environment.XDG_CONFIG_HOME, "/app/data/config");
-    assert.deepEqual(
-      service.volumes.map(({ type, target }) => [type, target]),
-      [
-        ["volume", "/app/data"],
-        ["volume", "/app/logs"],
-      ]
-    );
+    assert.equal(service.environment.SECRET_KEY, values.SECRET_KEY);
+    assert.equal(service.environment.LIVE_SERVER_SECRET_KEY, values.LIVE_SERVER_SECRET_KEY);
+    assert.equal(config.networks.default.driver, "bridge");
+    for (const [name, entry] of Object.entries(config.services)) {
+      assert.equal(entry.network_mode, undefined);
+      if (name !== "plane") assert.ok(!entry.ports?.length);
+    }
     assert.deepEqual(
       service.ports.map(({ published, target }) => [published, target]),
       [

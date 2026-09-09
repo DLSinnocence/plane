@@ -1,12 +1,29 @@
 services:
   plane:
-    image: makeplane/plane-aio-community:${APP_RELEASE:-stable}
+    image: ghcr.io/dlsinnocence/plane-aio-community:${APP_RELEASE:-stable}
     restart: unless-stopped
-    # The AIO entrypoint uses terminal output during startup.
     tty: true
-    env_file:
-      - variables.env
     environment:
+      DOMAIN_NAME: ${DOMAIN_NAME:-localhost}
+      APP_PROTOCOL: ${APP_PROTOCOL:-http}
+      WEB_URL: ${WEB_URL:-http://localhost}
+      CORS_ALLOWED_ORIGINS: ${WEB_URL:-http://localhost}
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      DATABASE_URL: postgresql://plane:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@plane-db:5432/plane
+      REDIS_URL: redis://plane-redis:6379/0
+      AMQP_URL: amqp://plane:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}@plane-mq:5672/plane
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY:?Set LIVE_SERVER_SECRET_KEY in .env}
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: plane-storage
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      AWS_S3_BUCKET_NAME: uploads
+      AWS_S3_ENDPOINT_URL: http://plane-minio:9000
+      USE_MINIO: "1"
+      MINIO_ENDPOINT: plane-minio:9000
+      MINIO_ENDPOINT_SSL: ${MINIO_ENDPOINT_SSL:-0}
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-5242880}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}
       XDG_DATA_HOME: /app/data
       XDG_CONFIG_HOME: /app/data/config
     ports:
@@ -15,7 +32,109 @@ services:
     volumes:
       - plane_data:/app/data
       - plane_logs:/app/logs
+    depends_on:
+      plane-db:
+        condition: service_healthy
+      plane-redis:
+        condition: service_healthy
+      plane-mq:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3004/"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+
+  plane-db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: plane
+      POSTGRES_DB: plane
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U plane -d plane"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  plane-redis:
+    image: valkey/valkey:7.2.11-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  plane-mq:
+    image: rabbitmq:4.1-alpine
+    restart: unless-stopped
+    hostname: plane-mq
+    environment:
+      RABBITMQ_DEFAULT_USER: plane
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+      RABBITMQ_DEFAULT_VHOST: plane
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  plane-minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: plane-storage
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - uploads:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    environment:
+      MINIO_ROOT_USER: plane-storage
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+    command:
+      - |
+        attempts=0
+        until mc alias set storage http://plane-minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" && mc ready storage; do
+          attempts=$$((attempts + 1))
+          if [ "$$attempts" -ge 40 ]; then
+            echo "MinIO did not become ready" >&2
+            exit 1
+          fi
+          sleep 3
+        done
+        mc mb --ignore-existing storage/uploads
+        mc anonymous set none storage/uploads
+    depends_on:
+      plane-minio:
+        condition: service_started
+
+networks:
+  default:
+    driver: bridge
 
 volumes:
   plane_data:
   plane_logs:
+  pgdata:
+  redisdata:
+  rabbitmq_data:
+  uploads:

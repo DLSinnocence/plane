@@ -502,6 +502,8 @@ jobs:
           path: ./deployments/aio/community/dist
           name: aio-assets-dist
           if-no-files-found: error
+          # Only generated dist files are uploaded; release/.env has blank credentials.
+          include-hidden-files: true
 
   # AIO pulls the other images in by tag, so it needs the merge jobs -- the tags
   # do not exist until the merges run.
@@ -641,14 +643,12 @@ jobs:
             Image: `${{ needs.branch_build_setup.outputs.image_namespace }}/${{ needs.branch_build_setup.outputs.dh_img_aio }}:${{ env.REL_VERSION }}`
             Platforms: `${{ needs.branch_build_setup.outputs.gh_expected_platforms }}`
 
-            For the complete bridge-network stack, download `docker-compose.full.yml`, `init-stack.sh`, and `README.md`.
-            Run `bash init-stack.sh`, configure `DOMAIN_NAME` and `WEB_URL` in `.env`, then run `docker compose -f docker-compose.full.yml up -d`.
+            Download only `docker-compose.yml` and `.env` into the same directory.
+            Set `DOMAIN_NAME`, `WEB_URL`, and the five blank password/secret values in `.env`, then run `docker compose up -d`.
+            No setup script or extra configuration file is required. Keep the filename `.env` so Compose loads it automatically.
             PostgreSQL, Valkey (Redis-compatible), RabbitMQ, and MinIO are included; only AIO HTTP/HTTPS ports are published. Host networking is not used.
-            For existing external services, use `docker-compose.yml` with `variables.env` instead.
             If the GHCR package is private, log in to `ghcr.io` first; public packages support anonymous pulls.
+            Keep your existing `.env` when upgrading. Deployment details: https://github.com/${{ github.repository }}/blob/${{ github.sha }}/deployments/aio/community/README.md
           files: |
             ./aio-assets/release/docker-compose.yml
-            ./aio-assets/release/docker-compose.full.yml
-            ./aio-assets/release/init-stack.sh
-            ./aio-assets/release/variables.env
-            ./aio-assets/release/README.md
+            ./aio-assets/release/.env
