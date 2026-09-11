@@ -4,10 +4,12 @@
  * See the LICENSE file for details.
  */
 
-// plane imports
+import { ShieldCheck } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
+// plane imports
 import { API_BASE_URL } from "@plane/constants";
+import { useTranslation } from "@plane/i18n";
 import type { TOAuthConfigs, TOAuthOption } from "@plane/types";
 // assets
 import giteaLogo from "@/app/assets/logos/gitea-logo.svg?url";
@@ -27,15 +29,28 @@ export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
   const { resolvedTheme } = useTheme();
   // store hooks
   const { config } = useInstance();
+  const { t } = useTranslation();
   // derived values
   const isOAuthEnabled =
     (config &&
       (config?.is_google_enabled ||
         config?.is_github_enabled ||
         config?.is_gitlab_enabled ||
-        config?.is_gitea_enabled)) ||
+        config?.is_gitea_enabled ||
+        config?.is_meowalive_enabled)) ||
     false;
   const oAuthOptions: TOAuthOption[] = [
+    {
+      id: "meowalive",
+      text: t("auth.common.continue_with_meowalive"),
+      icon: <ShieldCheck size={18} aria-hidden="true" />,
+      onClick: () => {
+        window.location.assign(
+          `${API_BASE_URL}/auth/meowalive/${next_path ? `?next_path=${encodeURIComponent(next_path)}` : ``}`
+        );
+      },
+      enabled: config?.is_meowalive_enabled ?? false,
+    },
     {
       id: "google",
       text: `${oauthActionText} with Google`,

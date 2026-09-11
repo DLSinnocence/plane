@@ -44,9 +44,18 @@ from .views import (
     GiteaOauthInitiateEndpoint,
     GiteaCallbackSpaceEndpoint,
     GiteaOauthInitiateSpaceEndpoint,
+    MeowAliveCallbackEndpoint,
+    MeowAliveOauthInitiateEndpoint,
+    MeowAliveCallbackSpaceEndpoint,
+    MeowAliveOauthInitiateSpaceEndpoint,
 )
 
 urlpatterns = [
+    # MeowAlive (Casdoor OIDC)
+    path("meowalive/", MeowAliveOauthInitiateEndpoint.as_view(), name="meowalive-initiate"),
+    path("meowalive/callback/", MeowAliveCallbackEndpoint.as_view(), name="meowalive-callback"),
+    path("spaces/meowalive/", MeowAliveOauthInitiateSpaceEndpoint.as_view(), name="space-meowalive-initiate"),
+    path("spaces/meowalive/callback/", MeowAliveCallbackSpaceEndpoint.as_view(), name="space-meowalive-callback"),
     # credentials
     path("sign-in/", SignInAuthEndpoint.as_view(), name="sign-in"),
     path("sign-up/", SignUpAuthEndpoint.as_view(), name="sign-up"),

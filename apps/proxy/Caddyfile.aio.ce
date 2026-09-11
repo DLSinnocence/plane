@@ -18,7 +18,11 @@
         reverse_proxy localhost:3004
     }
 
-	handle_path /god-mode* {
+    # The admin router is built with the /god-mode/ basename.
+    # Preserve setup/sign-in query parameters when normalizing the entry URL.
+    redir /god-mode /god-mode/?{query} permanent
+
+    handle_path /god-mode/* {
         root * /app/admin
         try_files {path} {path}/ /index.html
         file_server

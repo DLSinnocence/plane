@@ -12,6 +12,8 @@ from .app.gitlab import GitLabCallbackEndpoint, GitLabOauthInitiateEndpoint
 from .app.gitea import GiteaCallbackEndpoint, GiteaOauthInitiateEndpoint
 from .app.google import GoogleCallbackEndpoint, GoogleOauthInitiateEndpoint
 from .app.magic import MagicGenerateEndpoint, MagicSignInEndpoint, MagicSignUpEndpoint
+from .app.meowalive import MeowAliveCallbackEndpoint, MeowAliveOauthInitiateEndpoint
+from .space.meowalive import MeowAliveCallbackSpaceEndpoint, MeowAliveOauthInitiateSpaceEndpoint
 
 from .app.signout import SignOutAuthEndpoint
 

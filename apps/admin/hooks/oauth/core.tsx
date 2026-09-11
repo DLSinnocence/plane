@@ -23,6 +23,7 @@ import { GiteaConfiguration } from "@/components/authentication/gitea-config";
 import { GithubConfiguration } from "@/components/authentication/github-config";
 import { GitlabConfiguration } from "@/components/authentication/gitlab-config";
 import { GoogleConfiguration } from "@/components/authentication/google-config";
+import { MeowAliveConfiguration } from "@/components/authentication/meowalive-config";
 import { PasswordLoginConfiguration } from "@/components/authentication/password-config-switch";
 
 // Authentication methods
@@ -80,6 +81,14 @@ export const getCoreAuthenticationModesMap: (
     icon: <img src={gitlabLogo} height={20} width={20} alt="GitLab Logo" />,
     config: <GitlabConfiguration disabled={disabled} updateConfig={updateConfig} />,
     enabledConfigKey: "IS_GITLAB_ENABLED",
+  },
+  meowalive: {
+    key: "meowalive",
+    name: "MeowAlive 验证",
+    description: "Allow members to log in or sign up for Plane with their MeowAlive accounts.",
+    icon: <KeyOutline className="h-6 w-6 p-0.5 text-tertiary" />,
+    config: <MeowAliveConfiguration disabled={disabled} updateConfig={updateConfig} />,
+    enabledConfigKey: "IS_MEOWALIVE_ENABLED",
   },
   gitea: {
     key: "gitea",

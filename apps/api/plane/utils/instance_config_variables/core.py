@@ -162,6 +162,33 @@ gitea_config_variables = [
     },
 ]
 
+meowalive_config_variables = [
+    {
+        "key": "IS_MEOWALIVE_ENABLED",
+        "value": os.environ.get("IS_MEOWALIVE_ENABLED", "0"),
+        "category": "MEOWALIVE",
+        "is_encrypted": False,
+    },
+    {
+        "key": "MEOWALIVE_ISSUER_URL",
+        "value": os.environ.get("MEOWALIVE_ISSUER_URL", "https://sso.meowalive.com"),
+        "category": "MEOWALIVE",
+        "is_encrypted": False,
+    },
+    {
+        "key": "MEOWALIVE_CLIENT_ID",
+        "value": os.environ.get("MEOWALIVE_CLIENT_ID", ""),
+        "category": "MEOWALIVE",
+        "is_encrypted": False,
+    },
+    {
+        "key": "MEOWALIVE_CLIENT_SECRET",
+        "value": os.environ.get("MEOWALIVE_CLIENT_SECRET", ""),
+        "category": "MEOWALIVE",
+        "is_encrypted": True,
+    },
+]
+
 smtp_config_variables = [
     {
         "key": "ENABLE_SMTP",
@@ -257,6 +284,7 @@ core_config_variables = [
     *github_config_variables,
     *gitlab_config_variables,
     *gitea_config_variables,
+    *meowalive_config_variables,
     *smtp_config_variables,
     *llm_config_variables,
     *unsplash_config_variables,

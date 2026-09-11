@@ -65,6 +65,9 @@ export enum EAuthenticationErrorCodes {
   GOOGLE_OAUTH_PROVIDER_ERROR = "5115",
   GITHUB_OAUTH_PROVIDER_ERROR = "5120",
   GITLAB_OAUTH_PROVIDER_ERROR = "5121",
+  MEOWALIVE_NOT_CONFIGURED = "5113",
+  OAUTH_PROVIDER_UNVERIFIED_EMAIL = "5124",
+  MEOWALIVE_OAUTH_PROVIDER_ERROR = "5126",
   // Reset Password
   INVALID_PASSWORD_TOKEN = "5125",
   EXPIRED_PASSWORD_TOKEN = "5130",
@@ -237,6 +240,18 @@ const errorCodeMessages: {
     title: `OAuth not configured`,
     message: () => `OAuth not configured. Please contact your administrator.`,
   },
+  [EAuthenticationErrorCodes.OAUTH_PROVIDER_UNVERIFIED_EMAIL]: {
+    title: `Email verification required`,
+    message: () => `Please verify your email address with your identity provider, then try signing in again.`,
+  },
+  [EAuthenticationErrorCodes.MEOWALIVE_NOT_CONFIGURED]: {
+    title: `MeowAlive not configured`,
+    message: () => `MeowAlive not configured. Please contact your administrator.`,
+  },
+  [EAuthenticationErrorCodes.MEOWALIVE_OAUTH_PROVIDER_ERROR]: {
+    title: `MeowAlive OAuth provider error`,
+    message: () => `MeowAlive OAuth provider error. Please try again.`,
+  },
   [EAuthenticationErrorCodes.GOOGLE_NOT_CONFIGURED]: {
     title: `Google not configured`,
     message: () => `Google not configured. Please contact your administrator.`,
@@ -370,6 +385,9 @@ export const authErrorHandler = (errorCode: EAuthenticationErrorCodes, email?: s
     EAuthenticationErrorCodes.EMAIL_CODE_ATTEMPT_EXHAUSTED_SIGN_IN,
     EAuthenticationErrorCodes.EMAIL_CODE_ATTEMPT_EXHAUSTED_SIGN_UP,
     EAuthenticationErrorCodes.OAUTH_NOT_CONFIGURED,
+    EAuthenticationErrorCodes.OAUTH_PROVIDER_UNVERIFIED_EMAIL,
+    EAuthenticationErrorCodes.MEOWALIVE_NOT_CONFIGURED,
+    EAuthenticationErrorCodes.MEOWALIVE_OAUTH_PROVIDER_ERROR,
     EAuthenticationErrorCodes.GOOGLE_NOT_CONFIGURED,
     EAuthenticationErrorCodes.GITHUB_NOT_CONFIGURED,
     EAuthenticationErrorCodes.GITLAB_NOT_CONFIGURED,

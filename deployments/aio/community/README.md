@@ -106,6 +106,33 @@ Preserve the original Host and X-Forwarded-Proto headers and enable WebSocket
 forwarding. Bucket requests use the same public origin; do not expose MinIO or
 rewrite the signed bucket paths.
 
+## Admin Setup Stays on the Loading Screen
+
+Open `/god-mode/` with the trailing slash. The admin router uses `/god-mode/` as
+its base path; older AIO proxy configurations serve `/god-mode` without redirecting,
+which leaves the initial loading screen visible when clicking **Get started**.
+Updated AIO images redirect the entry URL and preserve its query parameters.
+
+For an existing deployment behind Nginx or OpenResty, add this exact-match location
+inside the site's `server` block, validate the configuration, and reload the proxy:
+
+```nginx
+location = /god-mode {
+    return 308 /god-mode/$is_args$args;
+}
+```
+
+Opening `/god-mode/` directly works without changing the deployment. Editing the
+repository template affects newly built AIO images; it does not update a running
+container or an already published image.
+
+## MeowAlive Authentication
+
+MeowAlive authentication uses the Casdoor OIDC service at `https://sso.meowalive.com`.
+Configure it in **God mode > Authentication > MeowAlive 验证** after deploying an image
+containing this integration. See [MeowAlive setup](./MEOWALIVE.md) for the exact
+callback URLs, Casdoor settings, optional environment variables, and verification.
+
 ## Startup and Persistence
 
 A short-lived `minio-init` service waits for storage and creates a private uploads
