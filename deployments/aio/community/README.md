@@ -133,6 +133,24 @@ Configure it in **God mode > Authentication > MeowAlive 验证** after deploying
 containing this integration. See [MeowAlive setup](./MEOWALIVE.md) for the exact
 callback URLs, Casdoor settings, optional environment variables, and verification.
 
+## Language and Timezone Defaults
+
+New user profiles default to Simplified Chinese (`zh-CN`) and new users use
+Beijing time (`Asia/Shanghai`, UTC+08:00). A fresh browser also starts in Simplified
+Chinese. Existing account preferences and saved browser language choices remain
+in effect; the upgrade does not overwrite them.
+
+New workspaces and cycles default to `Asia/Shanghai`. Projects inherit their
+workspace's timezone when no project timezone is supplied. Existing workspaces,
+projects, and cycles keep their saved timezones, and explicit timezone choices
+continue to take precedence.
+
+To change an existing account, open **Profile settings > Preferences > Language &
+Time** (`/settings/profile/preferences`). Workspace administrators can change the
+workspace timezone under **Workspace settings > General**. Django continues to
+store and process timezone-aware timestamps in UTC; no container `TZ` override
+is required for these application defaults.
+
 ## Startup and Persistence
 
 A short-lived `minio-init` service waits for storage and creates a private uploads

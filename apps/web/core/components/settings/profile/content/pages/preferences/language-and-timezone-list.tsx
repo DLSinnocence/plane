@@ -6,7 +6,7 @@
 
 import { observer } from "mobx-react";
 // plane imports
-import { SUPPORTED_LANGUAGES, useTranslation } from "@plane/i18n";
+import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES, useTranslation } from "@plane/i18n";
 import { TOAST_TYPE, setToast } from "@plane/propel/toast";
 import { CustomSelect } from "@plane/ui";
 // components
@@ -73,15 +73,15 @@ export const ProfileSettingsLanguageAndTimezonePreferencesList = observer(
         <SettingsControlItem
           title={t("timezone")}
           description={t("timezone_setting")}
-          control={<TimezoneSelect value={user?.user_timezone || "Asia/Kolkata"} onChange={handleTimezoneChange} />}
+          control={<TimezoneSelect value={user?.user_timezone || "Asia/Shanghai"} onChange={handleTimezoneChange} />}
         />
         <SettingsControlItem
           title={t("language")}
           description={t("language_setting")}
           control={
             <CustomSelect
-              value={profile?.language}
-              label={profile?.language ? getLanguageLabel(profile?.language) : "Select a language"}
+              value={profile?.language || FALLBACK_LANGUAGE}
+              label={getLanguageLabel(profile?.language || FALLBACK_LANGUAGE)}
               onChange={handleLanguageChange}
               buttonClassName="border border-subtle-1"
               className="rounded-md"

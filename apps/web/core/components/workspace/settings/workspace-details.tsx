@@ -32,7 +32,7 @@ const defaultValues: Partial<IWorkspace> = {
   url: "",
   organization_size: "2-10",
   logo_url: null,
-  timezone: "UTC",
+  timezone: "Asia/Shanghai",
 };
 
 export const WorkspaceDetails = observer(function WorkspaceDetails() {

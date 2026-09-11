@@ -11,7 +11,7 @@ import { UserOutline } from "@makeplane/propel/icons";
 // plane imports
 import { Field } from "@makeplane/propel/components/field";
 import { Input, InputGroup } from "@makeplane/propel/components/input";
-import { useTranslation } from "@plane/i18n";
+import { FALLBACK_LANGUAGE, useTranslation } from "@plane/i18n";
 import { Button } from "@plane/propel/button";
 import { TOAST_TYPE, setPromiseToast, setToast } from "@plane/propel/toast";
 import { EFileAssetType } from "@plane/types";
@@ -78,8 +78,8 @@ export const GeneralProfileSettingsForm = observer(function GeneralProfileSettin
       display_name: user.display_name || "",
       email: user.email || "",
       role: profile.role || "Product / Project Manager",
-      language: profile.language || "en",
-      user_timezone: user.user_timezone || "Asia/Kolkata",
+      language: profile.language || FALLBACK_LANGUAGE,
+      user_timezone: user.user_timezone || "Asia/Shanghai",
     },
   });
   // derived values
@@ -232,9 +232,7 @@ export const GeneralProfileSettingsForm = observer(function GeneralProfileSettin
                         <img
                           src={getFileURL(userAvatar)}
                           className="absolute top-0 left-0 h-full w-full rounded-lg object-cover"
-                          onClick={() => setIsImageUploadModalOpen(true)}
                           alt={currentUser?.display_name}
-                          role="button"
                         />
                       </div>
                     )}
