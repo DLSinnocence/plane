@@ -561,10 +561,11 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
   ) {
     // Store Before state of the issue
     const issueBeforeUpdate = clone(this.rootIssueStore.issues.getIssueById(issueId));
+    const optimisticIssue = { ...issueBeforeUpdate, ...data } as TIssue;
     try {
       // Update the Respective Stores
       this.rootIssueStore.issues.updateIssue(issueId, data);
-      this.updateIssueList({ ...issueBeforeUpdate, ...data } as TIssue, issueBeforeUpdate);
+      this.updateIssueList(optimisticIssue, issueBeforeUpdate);
 
       // Check if should Sync
       if (!shouldSync) return;
@@ -576,14 +577,25 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
       } as TIssue);
 
       // call API to update the issue
-      await this.issueService.patchIssue(workspaceSlug, projectId, issueId, data);
+      const response = await this.issueService.patchIssue(workspaceSlug, projectId, issueId, data);
+      // A transition can change assignees on the server. Reconcile against the
+      // snapshot used for this view's groups, even if another path already applied
+      // the response to the shared issue map. Empty arrays/maps replace old values.
+      runInAction(() => {
+        this.rootIssueStore.issues.updateIssue(issueId, response);
+        this.updateIssueList(this.rootIssueStore.issues.getIssueById(issueId), optimisticIssue);
+      });
 
       // call fetch Parent Stats
       this.fetchParentStats(workspaceSlug, projectId);
     } catch (error) {
       // If errored out update store again to revert the change
-      this.rootIssueStore.issues.updateIssue(issueId, issueBeforeUpdate ?? {});
-      this.updateIssueList(issueBeforeUpdate, { ...issueBeforeUpdate, ...data } as TIssue);
+      this.rootIssueStore.issues.updateIssue(issueId, {
+        ...issueBeforeUpdate,
+        state_assignees: issueBeforeUpdate?.state_assignees,
+      });
+      this.updateIssueList(issueBeforeUpdate, optimisticIssue);
+      if (shouldSync) this.updateParentStats(optimisticIssue, issueBeforeUpdate);
       throw error;
     }
   }

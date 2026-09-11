@@ -415,6 +415,7 @@ class SearchEndpoint(BaseAPIView):
                             "project_id",
                             "priority",
                             "state_id",
+                            "state_assignees",
                             "type_id",
                         )[:count]
                     )
@@ -619,6 +620,7 @@ class SearchEndpoint(BaseAPIView):
                             "project_id",
                             "priority",
                             "state_id",
+                            "state_assignees",
                             "type_id",
                         )[:count]
                     )

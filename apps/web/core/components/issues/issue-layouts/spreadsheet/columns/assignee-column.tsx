@@ -10,6 +10,8 @@ import { observer } from "mobx-react";
 import type { TIssue } from "@plane/types";
 // components
 import { MemberDropdown } from "@/components/dropdowns/member/dropdown";
+import { useParams } from "next/navigation";
+import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
 
 type Props = {
   issue: TIssue;
@@ -20,6 +22,8 @@ type Props = {
 
 export const SpreadsheetAssigneeColumn = observer(function SpreadsheetAssigneeColumn(props: Props) {
   const { issue, onChange, disabled, onClose } = props;
+  const { workspaceSlug } = useParams();
+  const { canManageAssignments } = useIssueWorkflow(issue, workspaceSlug?.toString() ?? "");
 
   return (
     <div className="h-11 border-b-[0.5px] border-subtle">
@@ -36,7 +40,7 @@ export const SpreadsheetAssigneeColumn = observer(function SpreadsheetAssigneeCo
           );
         }}
         projectId={issue?.project_id ?? undefined}
-        disabled={disabled}
+        disabled={disabled || !canManageAssignments}
         multiple
         placeholder="Assignees"
         buttonVariant={

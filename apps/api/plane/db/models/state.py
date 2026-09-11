@@ -23,32 +23,38 @@ class StateGroup(models.TextChoices):
 # Default states
 DEFAULT_STATES = [
     {
-        "name": "Backlog",
+        "name": "待规划",
         "color": "#60646C",
         "sequence": 15000,
         "group": StateGroup.BACKLOG.value,
         "default": True,
     },
     {
-        "name": "Todo",
+        "name": "待开始",
         "color": "#60646C",
         "sequence": 25000,
         "group": StateGroup.UNSTARTED.value,
     },
     {
-        "name": "In Progress",
+        "name": "开发中",
         "color": "#F59E0B",
         "sequence": 35000,
         "group": StateGroup.STARTED.value,
     },
     {
-        "name": "Done",
+        "name": "开发完成/待验收",
+        "color": "#F59E0B",
+        "sequence": 40000,
+        "group": StateGroup.STARTED.value,
+    },
+    {
+        "name": "已完成",
         "color": "#46A758",
         "sequence": 45000,
         "group": StateGroup.COMPLETED.value,
     },
     {
-        "name": "Cancelled",
+        "name": "已取消",
         "color": "#9AA4BC",
         "sequence": 55000,
         "group": StateGroup.CANCELLED.value,

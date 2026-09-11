@@ -26,6 +26,9 @@ import { IssueIdentifier } from "@/components/issues/issue-detail/issue-identifi
 // hooks
 import { useAppTheme } from "@/hooks/store/use-app-theme";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
+import { useIssues } from "@/hooks/store/use-issues";
+import { useIssueStoreType } from "@/hooks/use-issue-layout-store";
+import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
 import { useProject } from "@/hooks/store/use-project";
 import type { TSelectionHelper } from "@/hooks/use-multiple-select";
 import { usePlatformOS } from "@/hooks/use-platform-os";
@@ -104,7 +107,14 @@ export const IssueBlock = observer(function IssueBlock(props: IssueBlockProps) {
   const issue = issuesMap[issueId];
   const subIssuesCount = issue?.sub_issues_count ?? 0;
   const canEditIssueProperties = canEditProperties(issue?.project_id ?? undefined);
-  const isDraggingAllowed = canDrag && canEditIssueProperties;
+  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug ?? "");
+  const storeType = useIssueStoreType();
+  const { issuesFilter } = useIssues(storeType);
+  const displayFilters = issuesFilter?.issueFilters?.displayFilters;
+  const groupings = new Set([displayFilters?.group_by, displayFilters?.sub_group_by]);
+  const canDragWorkflow =
+    (!groupings.has("state") || canTransition) && (!groupings.has("assignees") || canManageAssignments);
+  const isDraggingAllowed = canDrag && canEditIssueProperties && canDragWorkflow;
 
   const { isMobile } = usePlatformOS();
 
@@ -195,9 +205,11 @@ export const IssueBlock = observer(function IssueBlock(props: IssueBlockProps) {
             setToast({
               type: TOAST_TYPE.WARNING,
               title: "Cannot move work item",
-              message: !canEditIssueProperties
-                ? "You are not allowed to move this work item"
-                : "Drag and drop is disabled for the current grouping",
+              message: !canDragWorkflow
+                ? "You do not have permission to change this work item's workflow group"
+                : !canEditIssueProperties
+                  ? "You are not allowed to move this work item"
+                  : "Drag and drop is disabled for the current grouping",
             });
           }
         }}

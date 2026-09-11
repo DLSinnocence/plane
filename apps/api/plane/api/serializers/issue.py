@@ -32,6 +32,7 @@ from plane.utils.content_validator import (
     validate_binary_data,
 )
 
+from plane.utils.issue_workflow import IssueWorkflowSerializerMixin
 from .base import BaseSerializer
 from .cycle import CycleLiteSerializer, CycleSerializer
 from .module import ModuleLiteSerializer, ModuleSerializer
@@ -43,7 +44,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 
 
-class IssueSerializer(BaseSerializer):
+class IssueSerializer(IssueWorkflowSerializerMixin, BaseSerializer):
     """
     Comprehensive work item serializer with full relationship management.
 
@@ -52,6 +53,9 @@ class IssueSerializer(BaseSerializer):
     processing.
     """
 
+    state = serializers.PrimaryKeyRelatedField(
+        queryset=State.all_state_objects.filter(deleted_at__isnull=True), required=False, allow_null=True
+    )
     assignees = serializers.ListField(
         child=serializers.PrimaryKeyRelatedField(queryset=User.objects.values_list("id", flat=True)),
         write_only=True,
@@ -69,7 +73,9 @@ class IssueSerializer(BaseSerializer):
 
     class Meta:
         model = Issue
-        read_only_fields = ["id", "workspace", "project", "updated_by", "updated_at", "completed_at"]
+        read_only_fields = [
+            "id", "workspace", "project", "created_by", "created_at", "updated_by", "updated_at", "completed_at"
+        ]
         exclude = ["description_json", "description_stripped"]
 
     def validate(self, data):
@@ -109,6 +115,7 @@ class IssueSerializer(BaseSerializer):
                 ProjectMember.objects.filter(
                     project_id=self.context.get("project_id"),
                     is_active=True,
+                    member__is_active=True,
                     role__gte=15,
                     member_id__in=data["assignees"],
                 ).values_list("member_id", flat=True)
@@ -135,7 +142,9 @@ class IssueSerializer(BaseSerializer):
         # Check state is from the project only else raise validation error
         if (
             data.get("state")
-            and not State.objects.filter(project_id=self.context.get("project_id"), pk=data.get("state").id).exists()
+            and not (State.all_state_objects if self.context.get("allow_triage_state") else State.objects).filter(
+                project_id=self.context.get("project_id"), pk=data.get("state").id, deleted_at__isnull=True,
+            ).exists()
         ):
             raise serializers.ValidationError("State is not valid please pass a valid state_id")
 
@@ -162,13 +171,13 @@ class IssueSerializer(BaseSerializer):
 
         return data
 
-    def create(self, validated_data):
+    def create_workflow_issue(self, validated_data):
         assignees = validated_data.pop("assignees", None)
         labels = validated_data.pop("labels", None)
 
         project_id = self.context["project_id"]
         workspace_id = self.context["workspace_id"]
-        default_assignee_id = self.context["default_assignee_id"]
+        default_assignee_id = self.context.get("default_assignee_id", None)
 
         issue_type = validated_data.pop("type", None)
 
@@ -211,6 +220,7 @@ class IssueSerializer(BaseSerializer):
                         project_id=project_id,
                         role__gte=15,
                         is_active=True,
+                        member__is_active=True,
                     ).exists()
                 ):
                     IssueAssignee.objects.create(
@@ -245,7 +255,7 @@ class IssueSerializer(BaseSerializer):
 
         return issue
 
-    def update(self, instance, validated_data):
+    def update_workflow_issue(self, instance, validated_data):
         assignees = validated_data.pop("assignees", None)
         labels = validated_data.pop("labels", None)
 
@@ -299,7 +309,7 @@ class IssueSerializer(BaseSerializer):
 
         # Time updation occues even when other related models are updated
         instance.updated_at = timezone.now()
-        return super().update(instance, validated_data)
+        return super(IssueWorkflowSerializerMixin, self).update(instance, validated_data)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

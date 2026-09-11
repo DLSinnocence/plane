@@ -20,6 +20,7 @@ import { PriorityDropdown } from "@/components/dropdowns/priority";
 import { StateDropdown } from "@/components/dropdowns/state/dropdown";
 // hooks
 import { WithDisplayPropertiesHOC } from "@/components/issues/issue-layouts/properties/with-display-properties-HOC";
+import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
 import { useProjectState } from "@/hooks/store/use-project-state";
 
 type Props = {
@@ -39,15 +40,16 @@ type Props = {
   issue: TIssue;
 };
 
+const handleEventPropagation = (e: SyntheticEvent<HTMLDivElement>) => {
+  e.stopPropagation();
+  e.preventDefault();
+};
+
 export const SubIssuesListItemProperties = observer(function SubIssuesListItemProperties(props: Props) {
   const { workspaceSlug, parentIssueId, issueId, canEdit, updateSubIssue, displayProperties, issue } = props;
   const { t } = useTranslation();
   const { getStateById } = useProjectState();
-
-  const handleEventPropagation = (e: SyntheticEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    e.preventDefault();
-  };
+  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug);
 
   const handleStartDate = (date: Date | null) => {
     if (issue.project_id) {
@@ -101,7 +103,7 @@ export const SubIssuesListItemProperties = observer(function SubIssuesListItemPr
                 { ...issue }
               )
             }
-            disabled={!canEdit}
+            disabled={!canEdit || !canTransition}
             buttonVariant="transparent-without-text"
             buttonClassName="hover:bg-transparent px-0"
             iconSize="size-5"
@@ -133,7 +135,7 @@ export const SubIssuesListItemProperties = observer(function SubIssuesListItemPr
         displayPropertyKey={["start_date", "due_date"]}
         shouldRenderProperty={() => isDateRangeEnabled}
       >
-        <div className="h-5" onFocus={handleEventPropagation} onClick={handleEventPropagation}>
+        <div role="presentation" className="h-5" onFocus={handleEventPropagation} onClick={handleEventPropagation}>
           <DateRangeDropdown
             value={{
               from: getDate(issue.start_date) || undefined,
@@ -215,7 +217,7 @@ export const SubIssuesListItemProperties = observer(function SubIssuesListItemPr
                 assignee_ids: val,
               })
             }
-            disabled={!canEdit}
+            disabled={!canEdit || !canManageAssignments}
             multiple
             buttonVariant={(issue?.assignee_ids || []).length > 0 ? "transparent-without-text" : "border-without-text"}
             buttonClassName={(issue?.assignee_ids || []).length > 0 ? "hover:bg-transparent px-0" : ""}

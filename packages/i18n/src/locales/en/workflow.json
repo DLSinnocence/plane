@@ -1,5 +1,18 @@
 {
   "workflows": {
+    "state_assignees": {
+      "title": "Owners by state",
+      "description": "Entering a state assigns its owners automatically. States without an override keep the current owners.",
+      "permission_hint": "Only the current state's owners or project managers can change the state.",
+      "inherited": "Keep current owners",
+      "unassigned": "Unassigned",
+      "reset": "Reset override",
+      "reset_label": "{state}: keep current owners",
+      "current": "Current",
+      "loading": "Loading states…",
+      "load_error": "Unable to load states. Please try again.",
+      "retry": "Retry"
+    },
     "workflow_states": {
       "work_item_creation": "Allow new work items",
       "work_item_creation_disable_tooltip": "Work item creation is disabled for this state",

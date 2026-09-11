@@ -4,8 +4,10 @@
 
 # Python imports
 import json
+from functools import partial
 
 # Django import
+from django.db import transaction
 from django.utils import timezone
 from django.db.models import Q, OuterRef, Func, F, Prefetch
 from django.core.serializers.json import DjangoJSONEncoder
@@ -23,6 +25,7 @@ from plane.app.serializers import (
     IssueCreateSerializer,
     IssueStateIntakeSerializer,
 )
+from plane.utils.issue_workflow_activity import issue_activity_payload
 from plane.utils.content_validator import validate_html_content
 from plane.utils.issue_filters import issue_filters
 from plane.bgtasks.issue_activities_task import issue_activity
@@ -105,6 +108,7 @@ class IntakeIssuePublicViewSet(BaseViewSet):
         issues_data = IssueStateIntakeSerializer(issues, many=True).data
         return Response(issues_data, status=status.HTTP_200_OK)
 
+    @transaction.atomic
     def create(self, request, anchor, intake_id):
         project_deploy_board = DeployBoard.objects.get(anchor=anchor, entity_name="project")
         if project_deploy_board.intake is None:
@@ -156,24 +160,37 @@ class IntakeIssuePublicViewSet(BaseViewSet):
         safe_description_html = sanitized_description_html if sanitized_description_html is not None else "<p></p>"
 
         # create an issue
-        issue = Issue.objects.create(
-            name=request.data.get("issue", {}).get("name"),
-            description_json=request.data.get("issue", {}).get("description_json", {}),
-            description_html=safe_description_html,
-            priority=request.data.get("issue", {}).get("priority", "low"),
-            project_id=project_deploy_board.project_id,
-            state_id=triage_state.id,
+        issue_serializer = IssueCreateSerializer(
+            data={
+                "name": request.data.get("issue", {}).get("name"),
+                "description_json": request.data.get("issue", {}).get("description_json", {}),
+                "description_html": safe_description_html,
+                "priority": request.data.get("issue", {}).get("priority", "low"),
+                "state_id": str(triage_state.id),
+            },
+            context={
+                "request": request,
+                "project_id": project_deploy_board.project_id,
+                "workspace_id": project_deploy_board.workspace_id,
+                "default_assignee_id": project_deploy_board.project.default_assignee_id,
+                "allow_triage_state": True,
+            },
         )
+        issue_serializer.is_valid(raise_exception=True)
+        issue = issue_serializer.save()
 
         # Create an Issue Activity
-        issue_activity.delay(
-            type="issue.activity.created",
-            requested_data=json.dumps(request.data, cls=DjangoJSONEncoder),
-            actor_id=str(request.user.id),
-            issue_id=str(issue.id),
-            project_id=str(project_deploy_board.project_id),
-            current_instance=None,
-            epoch=int(timezone.now().timestamp()),
+        transaction.on_commit(
+            partial(
+                issue_activity.delay,
+                type="issue.activity.created",
+                requested_data=issue_activity_payload(request.data.get("issue", {}), issue_serializer.instance),
+                actor_id=str(request.user.id),
+                issue_id=str(issue.id),
+                project_id=str(project_deploy_board.project_id),
+                current_instance=None,
+                epoch=int(timezone.now().timestamp()),
+            )
         )
         # create an intake issue
         IntakeIssue.objects.create(
@@ -186,6 +203,7 @@ class IntakeIssuePublicViewSet(BaseViewSet):
         serializer = IssueStateIntakeSerializer(issue)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @transaction.atomic
     def partial_update(self, request, anchor, intake_id, pk):
         project_deploy_board = DeployBoard.objects.get(anchor=anchor, entity_name="project")
         if project_deploy_board.intake is None:
@@ -226,24 +244,39 @@ class IntakeIssuePublicViewSet(BaseViewSet):
             issue,
             data=issue_data,
             partial=True,
-            context={"project_id": project_deploy_board.project_id, "allow_triage_state": True},
+            context={
+                "request": request,
+                "project_id": project_deploy_board.project_id,
+                "workspace_id": project_deploy_board.workspace_id,
+                "allow_triage_state": True,
+            },
         )
 
         if issue_serializer.is_valid():
-            current_instance = issue
-            # Log all the updates
-            requested_data = json.dumps(issue_data, cls=DjangoJSONEncoder)
-            if issue is not None:
-                issue_activity.delay(
-                    type="issue.activity.updated",
-                    requested_data=requested_data,
-                    actor_id=str(request.user.id),
-                    issue_id=str(issue.id),
-                    project_id=str(project_deploy_board.project_id),
-                    current_instance=json.dumps(IssueSerializer(current_instance).data, cls=DjangoJSONEncoder),
-                    epoch=int(timezone.now().timestamp()),
-                )
+            current_data = dict(IssueSerializer(issue).data)
+            current_data["assignee_ids"] = list(
+                issue.issue_assignee.filter(deleted_at__isnull=True).values_list("assignee_id", flat=True)
+            )
+            current_instance = json.dumps(current_data, cls=DjangoJSONEncoder)
+            previous_state_id = issue.state_id
             issue_serializer.save()
+            # Log the persisted assignments only for configured workflow handoffs.
+            requested_data = issue_activity_payload(
+                issue_data, issue_serializer.instance, previous_state_id=previous_state_id
+            )
+            if issue is not None:
+                transaction.on_commit(
+                    partial(
+                        issue_activity.delay,
+                        type="issue.activity.updated",
+                        requested_data=requested_data,
+                        actor_id=str(request.user.id),
+                        issue_id=str(issue.id),
+                        project_id=str(project_deploy_board.project_id),
+                        current_instance=current_instance,
+                        epoch=int(timezone.now().timestamp()),
+                    )
+                )
             return Response(issue_serializer.data, status=status.HTTP_200_OK)
         return Response(issue_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

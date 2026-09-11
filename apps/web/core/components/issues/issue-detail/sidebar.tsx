@@ -35,6 +35,8 @@ import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import { useMember } from "@/hooks/store/use-member";
 import { useProject } from "@/hooks/store/use-project";
 import { useProjectState } from "@/hooks/store/use-project-state";
+import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
+import { IssueStateAssignees } from "./state-assignees";
 // components
 import { IssueParentSelectRoot } from "@/components/issues/parent-select-root";
 import { SidebarPropertyListItem } from "@/components/common/layout/sidebar/property-list-item";
@@ -63,6 +65,7 @@ export const IssueDetailsSidebar = observer(function IssueDetailsSidebar(props: 
   const { getUserDetails } = useMember();
   const { getStateById } = useProjectState();
   const issue = getIssueById(issueId);
+  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug);
   if (!issue) return <></>;
 
   const createdByDetails = getUserDetails(issue.created_by);
@@ -88,7 +91,7 @@ export const IssueDetailsSidebar = observer(function IssueDetailsSidebar(props: 
                 value={issue?.state_id}
                 onChange={(val) => issueOperations.update(workspaceSlug, projectId, issueId, { state_id: val })}
                 projectId={projectId?.toString() ?? ""}
-                disabled={!isEditable}
+                disabled={!isEditable || !canTransition}
                 buttonVariant="transparent-with-text"
                 className="group w-full grow"
                 buttonContainerClassName="w-full text-left h-7.5"
@@ -102,7 +105,7 @@ export const IssueDetailsSidebar = observer(function IssueDetailsSidebar(props: 
               <MemberDropdown
                 value={issue?.assignee_ids ?? undefined}
                 onChange={(val) => issueOperations.update(workspaceSlug, projectId, issueId, { assignee_ids: val })}
-                disabled={!isEditable}
+                disabled={!isEditable || !canManageAssignments}
                 projectId={projectId?.toString() ?? ""}
                 placeholder={t("issue.add.assignee")}
                 multiple
@@ -249,6 +252,13 @@ export const IssueDetailsSidebar = observer(function IssueDetailsSidebar(props: 
               />
             </SidebarPropertyListItem>
           </div>
+          <IssueStateAssignees
+            issue={issue}
+            workspaceSlug={workspaceSlug}
+            projectId={projectId}
+            issueOperations={issueOperations}
+            disabled={!isEditable}
+          />
         </div>
       </div>
     </>

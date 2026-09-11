@@ -12,6 +12,7 @@ from django.db import IntegrityError
 from rest_framework import serializers
 
 # Module imports
+from plane.utils.issue_workflow import IssueWorkflowSerializerMixin
 from .base import BaseSerializer, DynamicBaseSerializer
 from .user import UserLiteSerializer
 from .state import StateLiteSerializer
@@ -79,7 +80,10 @@ class IssueProjectLiteSerializer(BaseSerializer):
 
 ##TODO: Find a better way to write this serializer
 ## Find a better approach to save manytomany?
-class IssueCreateSerializer(BaseSerializer):
+class IssueCreateSerializer(IssueWorkflowSerializerMixin, BaseSerializer):
+    workflow_state_field = "state_id"
+    workflow_assignee_field = "assignee_ids"
+
     # ids
     state_id = serializers.PrimaryKeyRelatedField(
         source="state", queryset=State.all_state_objects.all(), required=False, allow_null=True
@@ -115,15 +119,18 @@ class IssueCreateSerializer(BaseSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        assignee_ids = self.initial_data.get("assignee_ids")
-        data["assignee_ids"] = assignee_ids if assignee_ids else []
+        data["assignee_ids"] = [
+            str(pk) for pk in IssueAssignee.objects.filter(issue=instance).values_list("assignee_id", flat=True)
+        ]
         label_ids = self.initial_data.get("label_ids")
         data["label_ids"] = label_ids if label_ids else []
         return data
 
     def validate(self, attrs):
         allow_triage = self.context.get("allow_triage_state", False)
-        state_manager = State.triage_objects if allow_triage else State.objects
+        state_manager = (
+            State.all_state_objects.filter(deleted_at__isnull=True) if allow_triage else State.objects
+        )
 
         if (
             attrs.get("start_date", None) is not None
@@ -148,12 +155,17 @@ class IssueCreateSerializer(BaseSerializer):
 
         # Validate assignees are from project
         if attrs.get("assignee_ids", []):
-            attrs["assignee_ids"] = ProjectMember.objects.filter(
+            requested_ids = {user.pk for user in attrs["assignee_ids"]}
+            valid_ids = set(ProjectMember.objects.filter(
                 project_id=self.context["project_id"],
                 role__gte=15,
                 is_active=True,
-                member_id__in=attrs["assignee_ids"],
-            ).values_list("member_id", flat=True)
+                member__is_active=True,
+                member_id__in=requested_ids,
+            ).values_list("member_id", flat=True))
+            if requested_ids - valid_ids:
+                raise serializers.ValidationError({"assignee_ids": "Assignees must be active project members."})
+            attrs["assignee_ids"] = list(valid_ids)
 
         # Validate labels are from project
         if attrs.get("label_ids"):
@@ -196,13 +208,13 @@ class IssueCreateSerializer(BaseSerializer):
 
         return attrs
 
-    def create(self, validated_data):
+    def create_workflow_issue(self, validated_data):
         assignees = validated_data.pop("assignee_ids", None)
         labels = validated_data.pop("label_ids", None)
 
         project_id = self.context["project_id"]
         workspace_id = self.context["workspace_id"]
-        default_assignee_id = self.context["default_assignee_id"]
+        default_assignee_id = self.context.get("default_assignee_id", None)
 
         # Create Issue
         issue = Issue.objects.create(**validated_data, project_id=project_id)
@@ -238,6 +250,7 @@ class IssueCreateSerializer(BaseSerializer):
                     project_id=project_id,
                     role__gte=15,
                     is_active=True,
+                    member__is_active=True,
                 ).exists()
             ):
                 try:
@@ -273,7 +286,7 @@ class IssueCreateSerializer(BaseSerializer):
 
         return issue
 
-    def update(self, instance, validated_data):
+    def update_workflow_issue(self, instance, validated_data):
         assignees = validated_data.pop("assignee_ids", None)
         labels = validated_data.pop("label_ids", None)
 
@@ -327,7 +340,7 @@ class IssueCreateSerializer(BaseSerializer):
 
         # Time updation occues even when other related models are updated
         instance.updated_at = timezone.now()
-        return super().update(instance, validated_data)
+        return super(IssueWorkflowSerializerMixin, self).update(instance, validated_data)
 
 
 class IssueActivitySerializer(BaseSerializer):
@@ -787,6 +800,7 @@ class IssueSerializer(DynamicBaseSerializer):
             "id",
             "name",
             "state_id",
+            "state_assignees",
             "sort_order",
             "completed_at",
             "estimate_point",
@@ -844,6 +858,7 @@ class IssueListDetailSerializer(serializers.Serializer):
             "id": instance.id,
             "name": instance.name,
             "state_id": instance.state_id,
+            "state_assignees": instance.state_assignees,
             "sort_order": instance.sort_order,
             "completed_at": instance.completed_at,
             "estimate_point": instance.estimate_point_id,

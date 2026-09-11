@@ -40,6 +40,7 @@ import { useProject } from "@/hooks/store/use-project";
 import { useProjectState } from "@/hooks/store/use-project-state";
 import { useAppRouter } from "@/hooks/use-app-router";
 import { useIssueStoreType } from "@/hooks/use-issue-layout-store";
+import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
 import { usePlatformOS } from "@/hooks/use-platform-os";
 // local components
 import { IssuePropertyLabels } from "./labels";
@@ -77,6 +78,7 @@ export const IssueProperties = observer(function IssueProperties(props: IIssuePr
   // router
   const router = useAppRouter();
   const { workspaceSlug, projectId } = useParams();
+  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug?.toString() ?? "");
 
   // derived values
   const stateDetails = getStateById(issue.state_id);
@@ -205,7 +207,7 @@ export const IssueProperties = observer(function IssueProperties(props: IIssuePr
             value={issue.state_id}
             onChange={handleState}
             projectId={issue.project_id}
-            disabled={isReadOnly}
+            disabled={isReadOnly || !canTransition}
             buttonVariant="border-with-text"
             renderByDefault={isMobile}
             showTooltip
@@ -324,7 +326,7 @@ export const IssueProperties = observer(function IssueProperties(props: IIssuePr
             projectId={issue?.project_id}
             value={issue?.assignee_ids}
             onChange={handleAssignee}
-            disabled={isReadOnly}
+            disabled={isReadOnly || !canManageAssignments}
             multiple
             buttonVariant={issue.assignee_ids?.length > 0 ? "transparent-without-text" : "border-without-text"}
             buttonClassName={issue.assignee_ids?.length > 0 ? "hover:bg-transparent px-0" : ""}

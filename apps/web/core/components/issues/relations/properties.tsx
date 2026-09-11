@@ -13,6 +13,7 @@ import { MemberDropdown } from "@/components/dropdowns/member/dropdown";
 import { PriorityDropdown } from "@/components/dropdowns/priority";
 import { StateDropdown } from "@/components/dropdowns/state/dropdown";
 // hooks
+import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 // types
 import type { TRelationIssueOperations } from "../issue-detail-widgets/relations/helper";
@@ -34,6 +35,7 @@ export const RelationIssueProperty = observer(function RelationIssueProperty(pro
 
   // derived value
   const issue = getIssueById(issueId);
+  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug);
 
   // if issue is not found, return empty
   if (!issue) return <></>;
@@ -64,7 +66,7 @@ export const RelationIssueProperty = observer(function RelationIssueProperty(pro
           value={issue.state_id}
           projectId={issue.project_id ?? undefined}
           onChange={handleStateChange}
-          disabled={disabled}
+          disabled={disabled || !canTransition}
           buttonVariant="border-with-text"
         />
       </div>
@@ -84,7 +86,7 @@ export const RelationIssueProperty = observer(function RelationIssueProperty(pro
           value={issue.assignee_ids}
           projectId={issue.project_id ?? undefined}
           onChange={handleAssigneeChange}
-          disabled={disabled}
+          disabled={disabled || !canManageAssignments}
           multiple
           buttonVariant={(issue?.assignee_ids || []).length > 0 ? "transparent-without-text" : "border-without-text"}
           buttonClassName={(issue?.assignee_ids || []).length > 0 ? "hover:bg-transparent px-0" : ""}

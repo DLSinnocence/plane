@@ -5,8 +5,10 @@
 # Python imports
 import copy
 import json
+from functools import partial
 
 # Django imports
+from django.db import transaction
 from django.contrib.postgres.aggregates import ArrayAgg
 from django.contrib.postgres.fields import ArrayField
 from django.core.serializers.json import DjangoJSONEncoder
@@ -68,6 +70,7 @@ from plane.utils.grouper import (
     issue_on_results,
     issue_queryset_grouper,
 )
+from plane.utils.issue_workflow_activity import issue_activity_payload
 from plane.utils.host import base_host
 from plane.utils.issue_filters import issue_filters
 from plane.utils.order_queryset import order_issue_queryset
@@ -176,6 +179,7 @@ class IssueListEndpoint(BaseAPIView):
                 "id",
                 "name",
                 "state_id",
+                "state_assignees",
                 "sort_order",
                 "completed_at",
                 "estimate_point",
@@ -408,6 +412,7 @@ class IssueViewSet(BaseViewSet):
         serializer = IssueCreateSerializer(
             data=request.data,
             context={
+                "request": request,
                 "project_id": project_id,
                 "workspace_id": project.workspace_id,
                 "default_assignee_id": project.default_assignee_id,
@@ -418,16 +423,19 @@ class IssueViewSet(BaseViewSet):
             serializer.save()
 
             # Track the issue
-            issue_activity.delay(
-                type="issue.activity.created",
-                requested_data=json.dumps(self.request.data, cls=DjangoJSONEncoder),
-                actor_id=str(request.user.id),
-                issue_id=str(serializer.data.get("id", None)),
-                project_id=str(project_id),
-                current_instance=None,
-                epoch=int(timezone.now().timestamp()),
-                notification=True,
-                origin=base_host(request=request, is_app=True),
+            transaction.on_commit(
+                partial(
+                    issue_activity.delay,
+                    type="issue.activity.created",
+                    requested_data=issue_activity_payload(self.request.data, serializer.instance),
+                    actor_id=str(request.user.id),
+                    issue_id=str(serializer.data.get("id", None)),
+                    project_id=str(project_id),
+                    current_instance=None,
+                    epoch=int(timezone.now().timestamp()),
+                    notification=True,
+                    origin=base_host(request=request, is_app=True),
+                )
             )
             queryset = self.get_queryset()
             queryset = self.apply_annotations(queryset)
@@ -441,6 +449,7 @@ class IssueViewSet(BaseViewSet):
                     "id",
                     "name",
                     "state_id",
+                    "state_assignees",
                     "sort_order",
                     "completed_at",
                     "estimate_point",
@@ -677,23 +686,39 @@ class IssueViewSet(BaseViewSet):
         current_instance = json.dumps(IssueDetailSerializer(issue).data, cls=DjangoJSONEncoder)
 
         requested_data = json.dumps(self.request.data, cls=DjangoJSONEncoder)
-        serializer = IssueCreateSerializer(issue, data=request.data, partial=True, context={"project_id": project_id})
+        serializer = IssueCreateSerializer(
+            issue,
+            data=request.data,
+            partial=True,
+            context={"request": request, "project_id": project_id, "workspace_id": issue.workspace_id},
+        )
         if serializer.is_valid():
+            previous_state_id = issue.state_id
             serializer.save()
-            # Check if the update is a migration description update
-            is_migration_description_update = skip_activity and is_description_update
+            requested_data = issue_activity_payload(
+                requested_data, serializer.instance, previous_state_id=previous_state_id
+            )
+            # Description migration suppression must not hide workflow handoffs.
+            is_migration_description_update = (
+                skip_activity
+                and is_description_update
+                and not any(field in request.data for field in ("state_id", "state_assignees", "assignee_ids"))
+            )
             # Log all the updates
             if not is_migration_description_update:
-                issue_activity.delay(
-                    type="issue.activity.updated",
-                    requested_data=requested_data,
-                    actor_id=str(request.user.id),
-                    issue_id=str(pk),
-                    project_id=str(project_id),
-                    current_instance=current_instance,
-                    epoch=int(timezone.now().timestamp()),
-                    notification=True,
-                    origin=base_host(request=request, is_app=True),
+                transaction.on_commit(
+                    partial(
+                        issue_activity.delay,
+                        type="issue.activity.updated",
+                        requested_data=requested_data,
+                        actor_id=str(request.user.id),
+                        issue_id=str(pk),
+                        project_id=str(project_id),
+                        current_instance=current_instance,
+                        epoch=int(timezone.now().timestamp()),
+                        notification=True,
+                        origin=base_host(request=request, is_app=True),
+                    )
                 )
                 model_activity.delay(
                     model_name="issue",
@@ -709,6 +734,12 @@ class IssueViewSet(BaseViewSet):
                     updated_issue=current_instance,
                     issue_id=str(serializer.data.get("id", None)),
                     user_id=request.user.id,
+                )
+            if any(field in request.data for field in ("state_id", "assignee_ids", "state_assignees")):
+                workflow_fields = ("id", "state_id", "state_assignees", "assignee_ids", "completed_at", "updated_at")
+                return Response(
+                    {field: serializer.data[field] for field in workflow_fields},
+                    status=status.HTTP_200_OK,
                 )
             return Response(status=status.HTTP_204_NO_CONTENT)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -872,6 +903,7 @@ class IssuePaginatedViewSet(BaseViewSet):
             "id",
             "name",
             "state_id",
+            "state_assignees",
             "state__group",
             "sort_order",
             "completed_at",

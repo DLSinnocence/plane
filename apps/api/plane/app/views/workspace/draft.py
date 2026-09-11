@@ -4,8 +4,10 @@
 
 # Python imports
 import json
+from functools import partial
 
 # Django imports
+from django.db import transaction
 from django.utils import timezone
 from django.core import serializers
 from django.core.serializers.json import DjangoJSONEncoder
@@ -40,6 +42,7 @@ from plane.db.models import (
 from .. import BaseViewSet
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.utils.issue_filters import issue_filters
+from plane.utils.issue_workflow_activity import issue_activity_payload
 from plane.utils.host import base_host
 
 
@@ -109,12 +112,14 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
         )
 
     @allow_permission(allowed_roles=[ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
+    @transaction.atomic
     def create(self, request, slug):
         workspace = Workspace.objects.get(slug=slug)
 
         serializer = DraftIssueCreateSerializer(
             data=request.data,
             context={
+                "request": request,
                 "workspace_id": workspace.id,
                 "project_id": request.data.get("project_id", None),
             },
@@ -159,8 +164,11 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
         model=Issue,
         level="WORKSPACE",
     )
+    @transaction.atomic
     def partial_update(self, request, slug, pk):
-        issue = self.get_queryset().filter(pk=pk, created_by=request.user).first()
+        issue = DraftIssue.objects.select_for_update().filter(
+            pk=pk, workspace__slug=slug, created_by=request.user
+        ).first()
 
         if not issue:
             return Response({"error": "Issue not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -172,6 +180,7 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
             data=request.data,
             partial=True,
             context={
+                "request": request,
                 "project_id": project_id,
                 "cycle_id": request.data.get("cycle_id", "not_provided"),
             },
@@ -203,8 +212,12 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @allow_permission(allowed_roles=[ROLE.ADMIN, ROLE.MEMBER], level="WORKSPACE")
+    @transaction.atomic
     def create_draft_to_issue(self, request, slug, draft_id):
-        draft_issue = self.get_queryset().filter(pk=draft_id).first()
+        draft_issue = DraftIssue.objects.select_for_update().filter(workspace__slug=slug, pk=draft_id).first()
+
+        if not draft_issue:
+            return Response({"error": "Draft issue not found"}, status=status.HTTP_404_NOT_FOUND)
 
         if not draft_issue.project_id:
             return Response(
@@ -215,6 +228,7 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
         serializer = IssueCreateSerializer(
             data=request.data,
             context={
+                "request": request,
                 "project_id": draft_issue.project_id,
                 "workspace_id": draft_issue.project.workspace_id,
                 "default_assignee_id": draft_issue.project.default_assignee_id,
@@ -224,16 +238,19 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
         if serializer.is_valid():
             serializer.save()
 
-            issue_activity.delay(
-                type="issue.activity.created",
-                requested_data=json.dumps(self.request.data, cls=DjangoJSONEncoder),
-                actor_id=str(request.user.id),
-                issue_id=str(serializer.data.get("id", None)),
-                project_id=str(draft_issue.project_id),
-                current_instance=None,
-                epoch=int(timezone.now().timestamp()),
-                notification=True,
-                origin=base_host(request=request, is_app=True),
+            transaction.on_commit(
+                partial(
+                    issue_activity.delay,
+                    type="issue.activity.created",
+                    requested_data=issue_activity_payload(self.request.data, serializer.instance),
+                    actor_id=str(request.user.id),
+                    issue_id=str(serializer.data.get("id", None)),
+                    project_id=str(draft_issue.project_id),
+                    current_instance=None,
+                    epoch=int(timezone.now().timestamp()),
+                    notification=True,
+                    origin=base_host(request=request, is_app=True),
+                )
             )
 
             if request.data.get("cycle_id", None):

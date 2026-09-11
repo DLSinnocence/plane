@@ -107,6 +107,7 @@ def issue_on_results(
         "id",
         "name",
         "state_id",
+        "state_assignees",
         "sort_order",
         "completed_at",
         "estimate_point",

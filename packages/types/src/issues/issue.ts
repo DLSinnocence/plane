@@ -52,6 +52,8 @@ export type TBaseIssue = {
   priority: TIssuePriorities | null;
   label_ids: string[];
   assignee_ids: string[];
+  /** Per-state owners. An omitted state inherits the current assignees; [] explicitly leaves it unassigned. */
+  state_assignees?: Record<string, string[]>;
   estimate_point: string | null;
 
   sub_issues_count: number;

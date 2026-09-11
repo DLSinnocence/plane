@@ -1,5 +1,18 @@
 {
   "workflows": {
+    "state_assignees": {
+      "title": "各状态负责人",
+      "description": "进入状态后自动交给该状态负责人；未单独设置时沿用当前负责人。",
+      "permission_hint": "仅当前状态负责人或项目管理人员可以流转状态。",
+      "inherited": "沿用当前负责人",
+      "unassigned": "未分配",
+      "reset": "恢复沿用",
+      "reset_label": "{state}：恢复沿用当前负责人",
+      "current": "当前",
+      "loading": "正在加载状态…",
+      "load_error": "状态加载失败，请重试。",
+      "retry": "重试"
+    },
     "workflow_states": {
       "work_item_creation": "允许新工作项",
       "work_item_creation_disable_tooltip": "工作项创建在此状态中被禁用",

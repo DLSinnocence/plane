@@ -4,8 +4,10 @@
 
 # Python imports
 import json
+from functools import partial
 
 # Django import
+from django.db import transaction
 from django.utils import timezone
 from django.db.models import Q, Count, OuterRef, Func, F, Prefetch, Subquery
 from django.core.serializers.json import DjangoJSONEncoder
@@ -50,6 +52,7 @@ from plane.bgtasks.issue_description_version_task import issue_description_versi
 from plane.app.views.base import BaseAPIView
 from plane.utils.timezone_converter import user_timezone_converter
 from plane.utils.global_paginator import paginate
+from plane.utils.issue_workflow_activity import issue_activity_payload
 from plane.utils.host import base_host
 from plane.db.models.intake import SourceType
 
@@ -226,6 +229,7 @@ class IntakeIssueViewSet(BaseViewSet):
         )
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
+    @transaction.atomic
     def create(self, request, slug, project_id):
         if not request.data.get("issue", {}).get("name", False):
             return Response({"error": "Name is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -260,6 +264,7 @@ class IntakeIssueViewSet(BaseViewSet):
         serializer = IssueCreateSerializer(
             data=request.data.get("issue"),
             context={
+                "request": request,
                 "project_id": project_id,
                 "workspace_id": project.workspace_id,
                 "default_assignee_id": project.default_assignee_id,
@@ -277,24 +282,30 @@ class IntakeIssueViewSet(BaseViewSet):
                 source=SourceType.IN_APP,
             )
             # Create an Issue Activity
-            issue_activity.delay(
-                type="issue.activity.created",
-                requested_data=json.dumps(request.data, cls=DjangoJSONEncoder),
-                actor_id=str(request.user.id),
-                issue_id=str(serializer.data["id"]),
-                project_id=str(project_id),
-                current_instance=None,
-                epoch=int(timezone.now().timestamp()),
-                notification=True,
-                origin=base_host(request=request, is_app=True),
-                intake=str(intake_issue.id),
+            transaction.on_commit(
+                partial(
+                    issue_activity.delay,
+                    type="issue.activity.created",
+                    requested_data=issue_activity_payload(request.data.get("issue", {}), serializer.instance),
+                    actor_id=str(request.user.id),
+                    issue_id=str(serializer.data["id"]),
+                    project_id=str(project_id),
+                    current_instance=None,
+                    epoch=int(timezone.now().timestamp()),
+                    notification=True,
+                    origin=base_host(request=request, is_app=True),
+                    intake=str(intake_issue.id),
+                )
             )
             # updated issue description version
-            issue_description_version_task.delay(
-                updated_issue=json.dumps(request.data, cls=DjangoJSONEncoder),
-                issue_id=str(serializer.data["id"]),
-                user_id=request.user.id,
-                is_creating=True,
+            transaction.on_commit(
+                partial(
+                    issue_description_version_task.delay,
+                    updated_issue=json.dumps(request.data, cls=DjangoJSONEncoder),
+                    issue_id=str(serializer.data["id"]),
+                    user_id=request.user.id,
+                    is_creating=True,
+                )
             )
             intake_issue = (
                 IntakeIssue.objects.select_related("issue")
@@ -332,17 +343,19 @@ class IntakeIssueViewSet(BaseViewSet):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @allow_permission(allowed_roles=[ROLE.ADMIN], creator=True, model=Issue)
+    @transaction.atomic
     def partial_update(self, request, slug, project_id, pk):
         skip_activity = request.data.pop("skip_activity", False)
         is_description_update = request.data.get("description_html") is not None
 
         intake_id = Intake.objects.filter(workspace__slug=slug, project_id=project_id).first()
-        intake_issue = IntakeIssue.objects.get(
+        intake_issue = IntakeIssue.objects.select_for_update().get(
             issue_id=pk,
             workspace__slug=slug,
             project_id=project_id,
             intake_id=intake_id,
         )
+        intake_issue.issue = Issue.objects.select_for_update().get(pk=intake_issue.issue_id)
 
         project_member = ProjectMember.objects.filter(
             workspace__slug=slug,
@@ -412,7 +425,15 @@ class IntakeIssueViewSet(BaseViewSet):
             issue_requested_data = json.dumps(issue_data, cls=DjangoJSONEncoder)
 
             issue_serializer = IssueCreateSerializer(
-                issue, data=issue_data, partial=True, context={"project_id": project_id, "allow_triage_state": True}
+                issue,
+                data=issue_data,
+                partial=True,
+                context={
+                    "request": request,
+                    "project_id": project_id,
+                    "workspace_id": intake_issue.workspace_id,
+                    "allow_triage_state": True,
+                },
             )
 
             if not issue_serializer.is_valid():
@@ -424,53 +445,103 @@ class IntakeIssueViewSet(BaseViewSet):
 
         if (project_member and project_member.role > ROLE.MEMBER.value) or is_workspace_admin:
             intake_current_instance = json.dumps(IntakeIssueSerializer(intake_issue).data, cls=DjangoJSONEncoder)
-            intake_serializer = IntakeIssueSerializer(intake_issue, data=request.data, partial=True)
+            intake_serializer = IntakeIssueSerializer(
+                intake_issue,
+                data=request.data,
+                partial=True,
+                context={
+                    "request": request,
+                    "project_id": project_id,
+                    "workspace_id": intake_issue.workspace_id,
+                    "allow_triage_state": True,
+                },
+            )
 
             if not intake_serializer.is_valid():
                 return Response(intake_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Both serializers are valid, now save them
+        # Snapshot the workflow before either serializer can change assignments.
+        issue = Issue.objects.select_for_update().get(pk=intake_issue.issue_id, project_id=project_id)
+        previous_workflow = {
+            "state_id": str(issue.state_id),
+            "assignee_ids": [
+                str(member_id)
+                for member_id in issue.issue_assignee.filter(deleted_at__isnull=True)
+                .order_by("assignee_id")
+                .values_list("assignee_id", flat=True)
+            ],
+        }
+        if issue_current_instance is None:
+            issue_current_instance = json.dumps(previous_workflow, cls=DjangoJSONEncoder)
+
+        # Save both before building activity data: acceptance can trigger another handoff.
         if issue_serializer:
             issue_serializer.save()
+        if intake_serializer:
+            intake_issue = intake_serializer.save()
+            issue = intake_issue.issue
+        elif issue_serializer:
+            issue = issue_serializer.instance
+        issue.refresh_from_db()
+        current_workflow = {
+            "state_id": str(issue.state_id),
+            "assignee_ids": [
+                str(member_id)
+                for member_id in issue.issue_assignee.filter(deleted_at__isnull=True)
+                .order_by("assignee_id")
+                .values_list("assignee_id", flat=True)
+            ],
+        }
+        workflow_changed = previous_workflow != current_workflow
+        activity_data = json.loads(issue_requested_data) if issue_requested_data else {}
+        if previous_workflow["state_id"] != current_workflow["state_id"]:
+            activity_data["state_id"] = current_workflow["state_id"]
 
-            # Check if the update is a migration description update
-            is_migration_description_update = skip_activity and is_description_update
-            # Log all the updates
-            if not is_migration_description_update:
-                if issue is not None:
-                    issue_activity.delay(
-                        type="issue.activity.updated",
-                        requested_data=issue_requested_data,
-                        actor_id=str(request.user.id),
-                        issue_id=str(issue.id),
-                        project_id=str(project_id),
-                        current_instance=issue_current_instance,
-                        epoch=int(timezone.now().timestamp()),
-                        notification=True,
-                        origin=base_host(request=request, is_app=True),
-                        intake=str(intake_issue.id),
-                    )
-                    # updated issue description version
-                    issue_description_version_task.delay(
+        is_migration_description_update = skip_activity and is_description_update and not workflow_changed
+        if (issue_serializer or workflow_changed) and not is_migration_description_update:
+            transaction.on_commit(
+                partial(
+                    issue_activity.delay,
+                    type="issue.activity.updated",
+                    requested_data=issue_activity_payload(
+                        activity_data, issue, previous_state_id=previous_workflow["state_id"]
+                    ),
+                    actor_id=str(request.user.id),
+                    issue_id=str(issue.id),
+                    project_id=str(project_id),
+                    current_instance=issue_current_instance,
+                    epoch=int(timezone.now().timestamp()),
+                    notification=True,
+                    origin=base_host(request=request, is_app=True),
+                    intake=str(intake_issue.id),
+                )
+            )
+            if issue_serializer:
+                transaction.on_commit(
+                    partial(
+                        issue_description_version_task.delay,
                         updated_issue=issue_current_instance,
                         issue_id=str(pk),
                         user_id=request.user.id,
                     )
+                )
 
         if intake_serializer:
-            intake_serializer.save()
             # create a activity for status change
-            issue_activity.delay(
-                type="intake.activity.created",
-                requested_data=json.dumps(request.data, cls=DjangoJSONEncoder),
-                actor_id=str(request.user.id),
-                issue_id=str(pk),
-                project_id=str(project_id),
-                current_instance=intake_current_instance,
-                epoch=int(timezone.now().timestamp()),
-                notification=False,
-                origin=base_host(request=request, is_app=True),
-                intake=str(intake_issue.id),
+            transaction.on_commit(
+                partial(
+                    issue_activity.delay,
+                    type="intake.activity.created",
+                    requested_data=json.dumps(request.data, cls=DjangoJSONEncoder),
+                    actor_id=str(request.user.id),
+                    issue_id=str(pk),
+                    project_id=str(project_id),
+                    current_instance=intake_current_instance,
+                    epoch=int(timezone.now().timestamp()),
+                    notification=False,
+                    origin=base_host(request=request, is_app=True),
+                    intake=str(intake_issue.id),
+                )
             )
 
         # Fetch and return the updated intake issue

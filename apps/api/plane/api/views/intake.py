@@ -4,9 +4,11 @@
 
 # Python imports
 import json
+from functools import partial
 
 # Django imports
 from django.core.serializers.json import DjangoJSONEncoder
+from django.db import transaction
 from django.utils import timezone
 from django.db.models import Q, Value, UUIDField
 from django.db.models.functions import Coalesce
@@ -28,6 +30,7 @@ from plane.api.serializers import (
 from plane.app.permissions import ProjectLitePermission
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.db.models import Intake, IntakeIssue, Issue, Project, ProjectMember, State, StateGroup
+from plane.utils.issue_workflow_activity import issue_activity_payload
 from plane.utils.host import base_host
 from plane.utils.content_validator import validate_html_content
 from .base import BaseAPIView
@@ -140,6 +143,7 @@ class IntakeIssueListCreateAPIEndpoint(BaseAPIView):
             400: INVALID_REQUEST_RESPONSE,
         },
     )
+    @transaction.atomic
     def post(self, request, slug, project_id):
         """Create intake work item
 
@@ -192,14 +196,24 @@ class IntakeIssueListCreateAPIEndpoint(BaseAPIView):
         raw_description_html = issue_data.get("description_html", "<p></p>")
         _, _, sanitized_description_html = validate_html_content(raw_description_html)
         safe_description_html = sanitized_description_html if sanitized_description_html is not None else "<p></p>"
-        issue = Issue.objects.create(
-            name=issue_data.get("name"),
-            description_json=description_json,
-            description_html=safe_description_html,
-            priority=issue_data.get("priority", "none"),
-            project_id=project_id,
-            state_id=triage_state.id,
+        issue_serializer = IssueSerializer(
+            data={
+                "name": issue_data.get("name"),
+                "description_json": description_json,
+                "description_html": safe_description_html,
+                "priority": issue_data.get("priority", "none"),
+                "state": str(triage_state.id),
+            },
+            context={
+                "request": request,
+                "project_id": project_id,
+                "workspace_id": project.workspace_id,
+                "default_assignee_id": project.default_assignee_id,
+                "allow_triage_state": True,
+            },
         )
+        issue_serializer.is_valid(raise_exception=True)
+        issue = issue_serializer.save()
 
         # create an intake issue
         intake_issue = IntakeIssue.objects.create(
@@ -209,15 +223,18 @@ class IntakeIssueListCreateAPIEndpoint(BaseAPIView):
             source=SourceType.IN_APP,
         )
         # Create an Issue Activity
-        issue_activity.delay(
-            type="issue.activity.created",
-            requested_data=json.dumps(request.data, cls=DjangoJSONEncoder),
-            actor_id=str(request.user.id),
-            issue_id=str(issue.id),
-            project_id=str(project_id),
-            current_instance=None,
-            epoch=int(timezone.now().timestamp()),
-            intake=str(intake_issue.id),
+        transaction.on_commit(
+            partial(
+                issue_activity.delay,
+                type="issue.activity.created",
+                requested_data=issue_activity_payload(issue_data, issue_serializer.instance, "assignees"),
+                actor_id=str(request.user.id),
+                issue_id=str(issue.id),
+                project_id=str(project_id),
+                current_instance=None,
+                epoch=int(timezone.now().timestamp()),
+                intake=str(intake_issue.id),
+            )
         )
 
         serializer = IntakeIssueSerializer(intake_issue)
@@ -305,6 +322,7 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
             400: INVALID_REQUEST_RESPONSE,
         },
     )
+    @transaction.atomic
     def patch(self, request, slug, project_id, issue_id):
         """Update intake work item
 
@@ -322,13 +340,14 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Get the intake issue
-        intake_issue = IntakeIssue.objects.get(
+        # Get and lock persisted workflow state before validating the update.
+        intake_issue = IntakeIssue.objects.select_for_update().get(
             issue_id=issue_id,
             workspace__slug=slug,
             project_id=project_id,
             intake_id=intake.id,
         )
+        intake_issue.issue = Issue.objects.select_for_update().get(pk=intake_issue.issue_id)
 
         # Get the project member
         project_member = ProjectMember.objects.get(
@@ -384,59 +403,111 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
                     "description_json": description_json,
                 }
 
-            issue_serializer = IssueSerializer(issue, data=issue_data, partial=True)
+            issue_serializer = IssueSerializer(
+                issue,
+                data=issue_data,
+                partial=True,
+                context={
+                    "request": request,
+                    "project_id": project_id,
+                    "workspace_id": project.workspace_id,
+                    "allow_triage_state": True,
+                },
+            )
 
             if not issue_serializer.is_valid():
                 return Response(issue_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         # Only project admins and members can edit intake issue attributes
         if project_member.role > 15:
-            intake_serializer = IntakeIssueUpdateSerializer(intake_issue, data=request.data, partial=True)
+            intake_serializer = IntakeIssueUpdateSerializer(
+                intake_issue,
+                data=request.data,
+                partial=True,
+                context={
+                    "request": request,
+                    "project_id": project_id,
+                    "workspace_id": project.workspace_id,
+                    "allow_triage_state": True,
+                },
+            )
 
             if not intake_serializer.is_valid():
                 return Response(intake_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Both serializers are valid, now save them
+        # Snapshot before either save; acceptance can also change state and assignments.
+        issue = intake_issue.issue
+        issue_current_instance = json.dumps(IssueSerializer(issue).data, cls=DjangoJSONEncoder)
+        previous_workflow = {
+            "state": str(issue.state_id),
+            "assignees": [
+                str(member_id)
+                for member_id in issue.issue_assignee.filter(deleted_at__isnull=True)
+                .order_by("assignee_id")
+                .values_list("assignee_id", flat=True)
+            ],
+        }
+        intake_current_instance = json.dumps(IntakeIssueSerializer(intake_issue).data, cls=DjangoJSONEncoder)
         if issue_serializer:
-            current_instance = issue
-            # Log all the updates
-            requested_data = json.dumps(issue_data, cls=DjangoJSONEncoder)
-            issue_activity.delay(
-                type="issue.activity.updated",
-                requested_data=requested_data,
-                actor_id=str(request.user.id),
-                issue_id=str(issue_id),
-                project_id=str(project_id),
-                current_instance=json.dumps(
-                    IssueSerializer(current_instance).data,
-                    cls=DjangoJSONEncoder,
-                ),
-                epoch=int(timezone.now().timestamp()),
-                intake=str(intake_issue.id),
-            )
             issue_serializer.save()
-
-        # Save intake issue (state transition happens in serializer's update method)
         if intake_serializer:
-            current_instance = json.dumps(IntakeIssueSerializer(intake_issue).data, cls=DjangoJSONEncoder)
-            intake_serializer.save()
+            intake_issue = intake_serializer.save()
+            issue = intake_issue.issue
+        elif issue_serializer:
+            issue = issue_serializer.instance
+        issue.refresh_from_db()
+        intake_issue.issue = issue
+        current_workflow = {
+            "state": str(issue.state_id),
+            "assignees": [
+                str(member_id)
+                for member_id in issue.issue_assignee.filter(deleted_at__isnull=True)
+                .order_by("assignee_id")
+                .values_list("assignee_id", flat=True)
+            ],
+        }
+        workflow_changed = previous_workflow != current_workflow
+        activity_data = dict(issue_data) if issue_serializer else {}
+        if previous_workflow["state"] != current_workflow["state"]:
+            activity_data["state"] = current_workflow["state"]
 
-            # create a activity for status change
-            issue_activity.delay(
-                type="intake.activity.created",
-                requested_data=json.dumps(request.data, cls=DjangoJSONEncoder),
-                actor_id=str(request.user.id),
-                issue_id=str(issue_id),
-                project_id=str(project_id),
-                current_instance=current_instance,
-                epoch=int(timezone.now().timestamp()),
-                notification=False,
-                origin=base_host(request=request, is_app=True),
-                intake=str(intake_issue.id),
+        if issue_serializer or workflow_changed:
+            transaction.on_commit(
+                partial(
+                    issue_activity.delay,
+                    type="issue.activity.updated",
+                    requested_data=issue_activity_payload(
+                        activity_data, issue, "assignees", previous_state_id=previous_workflow["state"]
+                    ),
+                    actor_id=str(request.user.id),
+                    issue_id=str(issue_id),
+                    project_id=str(project_id),
+                    current_instance=issue_current_instance,
+                    epoch=int(timezone.now().timestamp()),
+                    notification=True,
+                    origin=base_host(request=request, is_app=True),
+                    intake=str(intake_issue.id),
+                )
             )
-            return Response(IntakeIssueSerializer(intake_issue).data, status=status.HTTP_200_OK)
-        else:
-            return Response(IntakeIssueSerializer(intake_issue).data, status=status.HTTP_200_OK)
+
+        if intake_serializer:
+            # create a activity for status change
+            transaction.on_commit(
+                partial(
+                    issue_activity.delay,
+                    type="intake.activity.created",
+                    requested_data=json.dumps(request.data, cls=DjangoJSONEncoder),
+                    actor_id=str(request.user.id),
+                    issue_id=str(issue_id),
+                    project_id=str(project_id),
+                    current_instance=intake_current_instance,
+                    epoch=int(timezone.now().timestamp()),
+                    notification=False,
+                    origin=base_host(request=request, is_app=True),
+                    intake=str(intake_issue.id),
+                )
+            )
+        return Response(IntakeIssueSerializer(intake_issue).data, status=status.HTTP_200_OK)
 
     @intake_docs(
         operation_id="delete_intake_work_item",

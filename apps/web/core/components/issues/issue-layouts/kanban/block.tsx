@@ -30,6 +30,9 @@ import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import { useKanbanView } from "@/hooks/store/use-kanban-view";
 import { useProject } from "@/hooks/store/use-project";
 import useIssuePeekOverviewRedirection from "@/hooks/use-issue-peek-overview-redirection";
+import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
+import { useIssues } from "@/hooks/store/use-issues";
+import { useIssueStoreType } from "@/hooks/use-issue-layout-store";
 import { usePlatformOS } from "@/hooks/use-platform-os";
 // local components
 import type { TRenderQuickActions } from "../list/list-view-types";
@@ -178,7 +181,14 @@ export const KanbanIssueBlock = observer(function KanbanIssueBlock(props: IssueB
 
   const canEditIssueProperties = canEditProperties(issue?.project_id ?? undefined);
 
-  const isDragAllowed = canDragIssuesInCurrentGrouping && !issue?.tempId && canEditIssueProperties;
+  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug ?? "");
+  const storeType = useIssueStoreType();
+  const { issuesFilter } = useIssues(storeType);
+  const displayFilters = issuesFilter?.issueFilters?.displayFilters;
+  const groupings = new Set([displayFilters?.group_by, displayFilters?.sub_group_by]);
+  const canDragWorkflow =
+    (!groupings.has("state") || canTransition) && (!groupings.has("assignees") || canManageAssignments);
+  const isDragAllowed = canDragIssuesInCurrentGrouping && !issue?.tempId && canEditIssueProperties && canDragWorkflow;
   const projectIdentifier = getProjectIdentifierById(issue?.project_id);
 
   const workItemLink = generateWorkItemLink({
@@ -250,9 +260,11 @@ export const KanbanIssueBlock = observer(function KanbanIssueBlock(props: IssueB
             setToast({
               type: TOAST_TYPE.WARNING,
               title: "Cannot move work item",
-              message: !canEditIssueProperties
-                ? "You are not allowed to move this work item"
-                : "Drag and drop is disabled for the current grouping",
+              message: !canDragWorkflow
+                ? "Only the current assignee, project lead, or an admin can move this work item between workflow groups"
+                : !canEditIssueProperties
+                  ? "You are not allowed to move this work item"
+                  : "Drag and drop is disabled for the current grouping",
             });
           }
         }}

@@ -4,13 +4,14 @@
 
 # Python imports
 import json
+from functools import partial
 import uuid
 import re
 
 # Django imports
 from django.core.serializers.json import DjangoJSONEncoder
 from django.http import HttpResponseRedirect
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import (
     Case,
     CharField,
@@ -87,6 +88,7 @@ from plane.utils.order_queryset import (
 )
 from plane.bgtasks.storage_metadata_task import get_asset_object_metadata
 from .base import BaseAPIView
+from plane.utils.issue_workflow_activity import issue_activity_payload
 from plane.utils.host import base_host
 from plane.utils.issue_relation_mapper import get_actual_relation
 from plane.bgtasks.webhook_task import model_activity
@@ -457,6 +459,7 @@ class IssueListCreateAPIEndpoint(BaseAPIView):
         serializer = IssueSerializer(
             data=request.data,
             context={
+                "request": request,
                 "project_id": project_id,
                 "workspace_id": project.workspace_id,
                 "default_assignee_id": project.default_assignee_id,
@@ -496,16 +499,19 @@ class IssueListCreateAPIEndpoint(BaseAPIView):
             issue.save(update_fields=["created_at", "created_by"])
 
             # Track the issue
-            issue_activity.delay(
-                type="issue.activity.created",
-                requested_data=json.dumps(self.request.data, cls=DjangoJSONEncoder),
-                actor_id=str(request.user.id),
-                issue_id=str(serializer.data.get("id", None)),
-                project_id=str(project_id),
-                current_instance=None,
-                epoch=int(timezone.now().timestamp()),
-                notification=True,
-                origin=base_host(request=request, is_app=True),
+            transaction.on_commit(
+                partial(
+                    issue_activity.delay,
+                    type="issue.activity.created",
+                    requested_data=issue_activity_payload(self.request.data, serializer.instance, "assignees"),
+                    actor_id=str(request.user.id),
+                    issue_id=str(serializer.data.get("id", None)),
+                    project_id=str(project_id),
+                    current_instance=None,
+                    epoch=int(timezone.now().timestamp()),
+                    notification=True,
+                    origin=base_host(request=request, is_app=True),
+                )
             )
 
             # Send the model activity
@@ -648,6 +654,7 @@ class IssueDetailAPIEndpoint(BaseAPIView):
                     issue,
                     data=request.data,
                     context={
+                        "request": request,
                         "project_id": project_id,
                         "workspace_id": project.workspace_id,
                     },
@@ -656,17 +663,24 @@ class IssueDetailAPIEndpoint(BaseAPIView):
                 if serializer.is_valid():
                     # If the serializer is valid, save the issue and dispatch
                     # the update issue activity worker event.
+                    previous_state_id = issue.state_id
                     serializer.save()
-                    issue_activity.delay(
-                        type="issue.activity.updated",
-                        requested_data=requested_data,
-                        actor_id=str(request.user.id),
-                        issue_id=str(issue.id),
-                        project_id=str(project_id),
-                        current_instance=current_instance,
-                        epoch=int(timezone.now().timestamp()),
-                        notification=True,
-                        origin=base_host(request=request, is_app=True),
+                    requested_data = issue_activity_payload(
+                        requested_data, serializer.instance, "assignees", previous_state_id=previous_state_id
+                    )
+                    transaction.on_commit(
+                        partial(
+                            issue_activity.delay,
+                            type="issue.activity.updated",
+                            requested_data=requested_data,
+                            actor_id=str(request.user.id),
+                            issue_id=str(issue.id),
+                            project_id=str(project_id),
+                            current_instance=current_instance,
+                            epoch=int(timezone.now().timestamp()),
+                            notification=True,
+                            origin=base_host(request=request, is_app=True),
+                        )
                     )
                     # Send the model activity for webhook dispatch
                     model_activity.delay(
@@ -693,6 +707,7 @@ class IssueDetailAPIEndpoint(BaseAPIView):
                 serializer = IssueSerializer(
                     data=request.data,
                     context={
+                        "request": request,
                         "project_id": project_id,
                         "workspace_id": project.workspace_id,
                         "default_assignee_id": project.default_assignee_id,
@@ -717,16 +732,19 @@ class IssueDetailAPIEndpoint(BaseAPIView):
                     issue.created_by_id = request.data.get("created_by", request.user.id)
                     issue.save(update_fields=["created_at", "created_by"])
 
-                    issue_activity.delay(
-                        type="issue.activity.created",
-                        requested_data=json.dumps(self.request.data, cls=DjangoJSONEncoder),
-                        actor_id=str(request.user.id),
-                        issue_id=str(serializer.data.get("id", None)),
-                        project_id=str(project_id),
-                        current_instance=None,
-                        epoch=int(timezone.now().timestamp()),
-                        notification=True,
-                        origin=base_host(request=request, is_app=True),
+                    transaction.on_commit(
+                        partial(
+                            issue_activity.delay,
+                            type="issue.activity.created",
+                            requested_data=issue_activity_payload(self.request.data, serializer.instance, "assignees"),
+                            actor_id=str(request.user.id),
+                            issue_id=str(serializer.data.get("id", None)),
+                            project_id=str(project_id),
+                            current_instance=None,
+                            epoch=int(timezone.now().timestamp()),
+                            notification=True,
+                            origin=base_host(request=request, is_app=True),
+                        )
                     )
                     # Send the model activity for webhook dispatch
                     model_activity.delay(
@@ -781,7 +799,7 @@ class IssueDetailAPIEndpoint(BaseAPIView):
         serializer = IssueSerializer(
             issue,
             data=request.data,
-            context={"project_id": project_id, "workspace_id": project.workspace_id},
+            context={"request": request, "project_id": project_id, "workspace_id": project.workspace_id},
             partial=True,
         )
         if serializer.is_valid():
@@ -803,17 +821,23 @@ class IssueDetailAPIEndpoint(BaseAPIView):
                     status=status.HTTP_409_CONFLICT,
                 )
 
+            previous_state_id = issue.state_id
             serializer.save()
-            issue_activity.delay(
-                type="issue.activity.updated",
-                requested_data=requested_data,
-                actor_id=str(request.user.id),
-                issue_id=str(pk),
-                project_id=str(project_id),
-                current_instance=current_instance,
-                epoch=int(timezone.now().timestamp()),
-                notification=True,
-                origin=base_host(request=request, is_app=True),
+            transaction.on_commit(
+                partial(
+                    issue_activity.delay,
+                    type="issue.activity.updated",
+                    requested_data=issue_activity_payload(
+                        requested_data, serializer.instance, "assignees", previous_state_id=previous_state_id
+                    ),
+                    actor_id=str(request.user.id),
+                    issue_id=str(pk),
+                    project_id=str(project_id),
+                    current_instance=current_instance,
+                    epoch=int(timezone.now().timestamp()),
+                    notification=True,
+                    origin=base_host(request=request, is_app=True),
+                )
             )
             # Send the model activity for webhook dispatch
             model_activity.delay(
