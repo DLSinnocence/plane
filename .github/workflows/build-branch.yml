@@ -113,7 +113,11 @@ jobs:
           BUILD_PRERELEASE=false
           RELVERSION="latest"
 
-          BUILD_AIO=${{ env.AIO_BUILD }}
+          BUILD_AIO="${{ env.AIO_BUILD }}"
+          # Keep the rolling AIO image in sync with every preview/canary push.
+          if [ "$GITHUB_EVENT_NAME" == "push" ]; then
+            BUILD_AIO=true
+          fi
 
           if [ "${{ env.BUILD_TYPE }}" == "Release" ]; then
             FLAT_RELEASE_VERSION=$(echo "${{ env.RELEASE_VERSION }}" | sed 's/[^a-zA-Z0-9.-]//g')

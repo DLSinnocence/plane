@@ -167,6 +167,16 @@ is an image-build template, not a deployment input.
 
 ## Publishing to GHCR
 
+Pushes to `preview` and `canary` automatically build and publish the AIO image
+alongside the component images, using the matching branch tag. These push builds
+use `linux/amd64`. To build ARM64 as well, run **Branch Build CE** manually with
+`build_type=Build`, `aio_build=true`, and `arm64=true`. Manual Build runs continue
+to respect the `aio_build` checkbox; Release runs always include AIO.
+
+After **Build-Push AIO Docker Image** and **Merge AIO Manifest** succeed, update
+an existing deployment with `docker compose up -d --pull always plane`. Publishing
+a new image does not replace containers already running on your server.
+
 In **Actions > Branch Build CE > Run workflow**, select the release branch,
 choose `build_type=Release`, and enter an unused version such as `v1.4.3`.
 Formal releases automatically build both native architectures and publish the
