@@ -90,7 +90,7 @@ class MeowAliveOIDCClient:
         params.update(
             client_id=self.client_id,
             response_type="code",
-            scope="openid profile email",
+            scope="openid profile email phone",
             redirect_uri=redirect_uri,
             state=state,
             nonce=nonce,
@@ -191,4 +191,14 @@ class MeowAliveOIDCClient:
             verified = claims.get("email_verified") is True and claims.get("email") == email
         if not verified:
             raise OIDCUnverifiedEmail("The provider did not verify the user's email address")
+        # Only supplement phone claims, after signature/identity/email checks.
+        # A present (even empty or malformed) UserInfo phone is authoritative.
+        if "phone_number" not in profile and "phone" not in profile:
+            profile = dict(profile)
+            for key in ("phone_number", "phone_number_verified", "phone", "phoneCountryCode", "phoneVerified"):
+                if key in claims and key not in profile:
+                    profile[key] = claims[key]
+            for key in ("phone_number_verified", "phoneVerified"):
+                if key in claims and claims[key] is not True:
+                    profile[key] = False
         return tokens, profile

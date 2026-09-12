@@ -92,6 +92,7 @@ def test_authorization_uses_code_nonce_and_pkce_without_secret(oidc):
     )
     params = parse_qs(urlsplit(url).query)
     assert params["response_type"] == ["code"]
+    assert params["scope"] == ["openid profile email phone"]
     assert params["state"] == ["session-state"]
     assert params["nonce"] == ["login-nonce"]
     assert params["redirect_uri"] == [CALLBACK]
@@ -115,6 +116,67 @@ def test_authentication_verifies_real_signature_and_verified_profile(oidc):
     assert token_call.kwargs["data"]["code_verifier"] == "v" * 64
     assert token_call.kwargs["data"]["redirect_uri"] == CALLBACK
     assert token_call.kwargs["data"]["client_secret"] == "test-client-secret"
+
+
+@pytest.mark.parametrize(
+    "phone_claims",
+    [
+        {"phone_number": "+8613800138000", "phone_number_verified": True},
+        {"phone": "13800138000", "phoneCountryCode": "CN", "phoneVerified": True},
+        {"phone_number": "+8613800138000", "phone_number_verified": False},
+    ],
+)
+def test_phone_fallback_uses_verified_signed_claims_only(oidc, phone_claims):
+    oidc[1].update(phone_claims, given_name="Token-only name", picture="https://example.com/token-avatar")
+    profile = authenticate(client())[1]
+    for key, value in phone_claims.items():
+        assert profile[key] == value
+    assert "given_name" not in profile
+    assert "picture" not in profile
+
+
+@pytest.mark.parametrize("value", ["", None, "malformed", "+14155552671"])
+@pytest.mark.parametrize("key", ["phone_number", "phone"])
+def test_present_userinfo_phone_prevents_all_token_phone_fallback(oidc, key, value):
+    oidc[1].update(phone_number="+8613800138000", phone_number_verified=True, phone="13800138000")
+    oidc[3][key] = value
+    profile = authenticate(client())[1]
+    assert profile[key] == value
+    assert "phone_number_verified" not in profile
+    assert ("phone" if key == "phone_number" else "phone_number") not in profile
+
+
+@pytest.mark.parametrize("key", ["phone_number_verified", "phoneVerified"])
+def test_userinfo_verification_denial_survives_phone_fallback(oidc, key):
+    oidc[3][key] = False
+    oidc[1].update(phone_number="+8613800138000", phone_number_verified=True, phoneVerified=True)
+    profile = authenticate(client())[1]
+    assert profile[key] is False
+
+
+@pytest.mark.parametrize("key", ["phone_number_verified", "phoneVerified"])
+def test_signed_phone_verification_denial_survives_userinfo_flag(oidc, key):
+    oidc[3][key] = True
+    oidc[1].update(phone_number="+8613800138000")
+    oidc[1][key] = False
+    assert authenticate(client())[1][key] is False
+
+
+@pytest.mark.parametrize("failure", ["unsigned", "subject"])
+def test_token_phone_claims_do_not_bypass_identity_verification(oidc, failure):
+    oidc[1].update(phone_number="+8613800138000", phone_number_verified=True)
+    if failure == "unsigned":
+        oidc[2]["id_token"] = jwt.encode(oidc[1], key=None, algorithm="none")
+    else:
+        oidc[3]["sub"] = "another-user"
+    with pytest.raises(OIDCError):
+        authenticate(client())
+
+
+def test_no_phone_claims_remain_absent(oidc):
+    profile = authenticate(client())[1]
+    assert "phone" not in profile
+    assert "phone_number" not in profile
 
 
 def test_basic_client_authentication_when_discovery_omits_methods(oidc):

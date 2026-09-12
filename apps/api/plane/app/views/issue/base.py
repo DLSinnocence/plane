@@ -1166,6 +1166,7 @@ class IssueBulkUpdateDateEndpoint(BaseAPIView):
         issues = list(Issue.objects.filter(id__in=issue_ids, workspace__slug=slug, project_id=project_id))
         issues_dict = {str(issue.id): issue for issue in issues}
         issues_to_update = []
+        activity_events = []
 
         for update in updates:
             issue_id = update["id"]
@@ -1183,34 +1184,32 @@ class IssueBulkUpdateDateEndpoint(BaseAPIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            changed_dates = {}
+            previous_dates = {}
             if start_date:
-                issue_activity.delay(
-                    type="issue.activity.updated",
-                    requested_data=json.dumps({"start_date": update.get("start_date")}),
-                    current_instance=json.dumps({"start_date": str(issue.start_date)}),
-                    issue_id=str(issue_id),
-                    actor_id=str(request.user.id),
-                    project_id=str(project_id),
-                    epoch=epoch,
-                )
+                changed_dates["start_date"] = start_date
+                previous_dates["start_date"] = str(issue.start_date) if issue.start_date else None
                 issue.start_date = start_date
-                issues_to_update.append(issue)
-
             if target_date:
-                issue_activity.delay(
-                    type="issue.activity.updated",
-                    requested_data=json.dumps({"target_date": update.get("target_date")}),
-                    current_instance=json.dumps({"target_date": str(issue.target_date)}),
-                    issue_id=str(issue_id),
-                    actor_id=str(request.user.id),
-                    project_id=str(project_id),
-                    epoch=epoch,
-                )
+                changed_dates["target_date"] = target_date
+                previous_dates["target_date"] = str(issue.target_date) if issue.target_date else None
                 issue.target_date = target_date
+            if changed_dates:
                 issues_to_update.append(issue)
+                activity_events.append({
+                    "type": "issue.activity.updated",
+                    "requested_data": json.dumps(changed_dates),
+                    "current_instance": json.dumps(previous_dates),
+                    "issue_id": str(issue_id),
+                    "actor_id": str(request.user.id),
+                    "project_id": str(project_id),
+                    "epoch": epoch,
+                })
 
-        # Bulk update issues
+        # Publish events only after every row validates and the bulk update succeeds.
         Issue.objects.bulk_update(issues_to_update, ["start_date", "target_date"])
+        for event in activity_events:
+            transaction.on_commit(partial(issue_activity.delay, **event))
 
         return Response({"message": "Issues updated successfully"}, status=status.HTTP_200_OK)
 

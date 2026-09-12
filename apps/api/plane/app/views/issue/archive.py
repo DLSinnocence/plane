@@ -5,8 +5,10 @@
 # Python imports
 import copy
 import json
+from functools import partial
 
 # Django imports
+from django.db import transaction
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db.models import OuterRef, Q, Prefetch, Exists, Subquery, Count
 from django.utils import timezone
@@ -316,6 +318,7 @@ class BulkArchiveIssuesEndpoint(BaseAPIView):
             "state"
         )
         bulk_archive_issues = []
+        activity_events = []
         for issue in issues:
             if issue.state.group not in ["completed", "cancelled"]:
                 return Response(
@@ -325,19 +328,21 @@ class BulkArchiveIssuesEndpoint(BaseAPIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            issue_activity.delay(
-                type="issue.activity.updated",
-                requested_data=json.dumps({"archived_at": str(timezone.now().date()), "automation": False}),
-                actor_id=str(request.user.id),
-                issue_id=str(issue.id),
-                project_id=str(project_id),
-                current_instance=json.dumps(IssueSerializer(issue).data, cls=DjangoJSONEncoder),
-                epoch=int(timezone.now().timestamp()),
-                notification=True,
-                origin=base_host(request=request, is_app=True),
-            )
+            activity_events.append({
+                "type": "issue.activity.updated",
+                "requested_data": json.dumps({"archived_at": str(timezone.now().date()), "automation": False}),
+                "actor_id": str(request.user.id),
+                "issue_id": str(issue.id),
+                "project_id": str(project_id),
+                "current_instance": json.dumps(IssueSerializer(issue).data, cls=DjangoJSONEncoder),
+                "epoch": int(timezone.now().timestamp()),
+                "notification": True,
+                "origin": base_host(request=request, is_app=True),
+            })
             issue.archived_at = timezone.now().date()
             bulk_archive_issues.append(issue)
         Issue.objects.bulk_update(bulk_archive_issues, ["archived_at"])
+        for event in activity_events:
+            transaction.on_commit(partial(issue_activity.delay, **event))
 
         return Response({"archived_at": str(timezone.now().date())}, status=status.HTTP_200_OK)

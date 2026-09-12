@@ -17,6 +17,7 @@ from django.utils import timezone
 # Module imports
 from plane.app.serializers import IssueActivitySerializer
 from plane.bgtasks.notification_task import notifications
+from plane.bgtasks.issue_event_task import IssueActivityTask
 from plane.db.models import (
     CommentReaction,
     Cycle,
@@ -578,7 +579,9 @@ def create_issue_activity(
     issue_activity.actor_id = issue.created_by_id
     issue_activity.save(update_fields=["created_at", "actor_id"])
     requested_data = json.loads(requested_data) if requested_data is not None else None
-    if requested_data and (requested_data.get("assignee_ids") is not None or requested_data.get("assignees") is not None):
+    if requested_data and (
+        requested_data.get("assignee_ids") is not None or requested_data.get("assignees") is not None
+    ):
         track_assignees(
             requested_data,
             current_instance,
@@ -1500,7 +1503,7 @@ def create_intake_activity(
 
 
 # Receive message from room group
-@shared_task
+@shared_task(base=IssueActivityTask)
 def issue_activity(
     type,
     requested_data,

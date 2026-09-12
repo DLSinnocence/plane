@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from plane.authentication.adapter.error import AUTHENTICATION_ERROR_CODES, AuthenticationException
 from plane.authentication.adapter.oauth import OauthAdapter
+from plane.utils.phone import normalize_phone_number
 from plane.license.utils.instance_value import get_configuration_value
 
 from .oidc import MeowAliveOIDCClient, OIDCError, OIDCUnverifiedEmail
@@ -14,7 +15,7 @@ from .oidc import MeowAliveOIDCClient, OIDCError, OIDCUnverifiedEmail
 
 class MeowAliveOAuthProvider(OauthAdapter):
     provider = "meowalive"
-    scope = "openid profile email"
+    scope = "openid profile email phone"
 
     def __init__(self, request, *, state, nonce, code_verifier, redirect_uri, code=None, callback=None):
         enabled, issuer, client_id, client_secret = get_configuration_value(
@@ -94,6 +95,20 @@ class MeowAliveOAuthProvider(OauthAdapter):
                 "id_token": tokens["id_token"],
             }
         )
+
+    def save_user_data(self, user):
+        # The configured SSO issuer is trusted when phone verification is absent.
+        # Explicit verification must be boolean true; malformed flags fail closed.
+        # Clear unavailable numbers on every login to avoid stale recipients,
+        # independently of the optional name/avatar profile synchronization.
+        profile = self.profile or {}
+        if any(key in profile and profile[key] is not True for key in ("phone_number_verified", "phoneVerified")):
+            user.mobile_number = ""
+        elif "phone_number" in profile:
+            user.mobile_number = normalize_phone_number(profile["phone_number"])
+        else:
+            user.mobile_number = normalize_phone_number(profile.get("phone"), profile.get("phoneCountryCode"))
+        return super().save_user_data(user)
 
     def set_user_data(self):
         super().set_user_data(

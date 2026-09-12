@@ -6,6 +6,7 @@
 import hashlib
 import hmac
 import logging
+import re
 import time
 
 # Django imports
@@ -134,6 +135,11 @@ class APITokenLogMiddleware:
         # If the API key is not present, return
         if not api_key:
             return
+
+        # Omit the entire configuration body, including malformed JSON/form input.
+        # This endpoint accepts a write-only app_secret even with an API-key header.
+        if re.fullmatch(r"/api/workspaces/[^/]+/integrations/feishu/?", request.path_info):
+            request_body = None
 
         try:
             log_data = {

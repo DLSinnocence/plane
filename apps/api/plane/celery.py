@@ -42,6 +42,10 @@ app = Celery("plane")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 
 app.conf.beat_schedule = {
+    "recover-feishu-messages": {
+        "task": "plane.bgtasks.feishu_task.recover_feishu_messages",
+        "schedule": crontab(minute="*/2"),
+    },
     # Intra day recurring jobs
     "check-every-five-minutes-to-send-email-notifications": {
         "task": "plane.bgtasks.email_notification_task.stack_email_notification",

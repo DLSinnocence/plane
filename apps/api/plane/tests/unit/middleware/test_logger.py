@@ -56,9 +56,7 @@ class TestAPITokenLogMiddleware:
     def test_token_identifier_is_hashed_not_plaintext(self, middleware, request_factory):
         log_data = self._captured_log_data(middleware, request_factory)
 
-        expected_hash = hmac.new(
-            settings.SECRET_KEY.encode(), self.API_KEY.encode(), hashlib.sha256
-        ).hexdigest()
+        expected_hash = hmac.new(settings.SECRET_KEY.encode(), self.API_KEY.encode(), hashlib.sha256).hexdigest()
         assert log_data["token_identifier"] == expected_hash
         assert self.API_KEY not in log_data["token_identifier"]
 
@@ -70,6 +68,48 @@ class TestAPITokenLogMiddleware:
         assert self.AUTHORIZATION not in log_data["headers"]
         assert self.COOKIE not in log_data["headers"]
         assert "[REDACTED]" in log_data["headers"]
+
+    @pytest.mark.parametrize("trailing_slash", ["", "/"])
+    @pytest.mark.parametrize(
+        "body",
+        [
+            b'{"app_secret":"feishu-secret-value"}',
+            b"app_secret=feishu-secret-value",
+            b'{"app_secret":"feishu-secret-value',
+        ],
+    )
+    def test_feishu_config_body_is_omitted(self, middleware, request_factory, trailing_slash, body):
+        request = request_factory.patch(
+            f"/api/workspaces/team/integrations/feishu{trailing_slash}",
+            data=body,
+            content_type="application/json",
+            HTTP_X_API_KEY=self.API_KEY,
+        )
+        request.user = AnonymousUser()
+        with patch("plane.middleware.logger.process_logs") as process_logs:
+            middleware(request)
+        log_data = process_logs.delay.call_args.kwargs["log_data"]
+        assert log_data["body"] is None
+        assert "feishu-secret-value" not in str(log_data)
+        assert log_data["method"] == "PATCH"
+        assert log_data["response_code"] == 200
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/workspaces/",
+            "/api/workspaces/team/integrations/feishu/members/",
+            "/api/workspaces/team/integrations/feishu-other/",
+        ],
+    )
+    def test_other_route_bodies_are_preserved(self, middleware, request_factory, path):
+        request = request_factory.post(
+            path, data=b'{"name":"normal-value"}', content_type="application/json", HTTP_X_API_KEY=self.API_KEY
+        )
+        request.user = AnonymousUser()
+        with patch("plane.middleware.logger.process_logs") as process_logs:
+            middleware(request)
+        assert process_logs.delay.call_args.kwargs["log_data"]["body"] == '{"name":"normal-value"}'
 
     def test_no_log_without_api_key(self, middleware, request_factory):
         request = request_factory.get("/api/v1/workspaces/")

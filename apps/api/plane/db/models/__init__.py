@@ -77,6 +77,7 @@ from .workspace import (
     WorkspaceUserPreference,
 )
 
+from .feishu import FeishuIntegration, FeishuMessage
 from .favorite import UserFavorite
 
 from .issue_type import IssueType
