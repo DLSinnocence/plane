@@ -142,6 +142,79 @@ def test_unrelated_member_cannot_edit_assignments(endpoint, workflow, edit_kind)
     assert_denied(serializer_for(endpoint, workflow, workflow.other, data))
 
 
+@pytest.mark.parametrize("edit_kind", ["plan", "current", "reset"])
+@pytest.mark.parametrize("with_transition", [False, True])
+def test_current_assignee_cannot_reconfigure_assignments(endpoint, workflow, edit_kind, with_transition):
+    # The creator is distinct from the person currently processing the work item.
+    workflow.issue.save(created_by_id=workflow.other.id)
+    original_plan = dict(workflow.issue.state_assignees)
+    _, state_key, assignees_key = endpoint
+    if edit_kind == "plan":
+        data = {"state_assignees": {str(workflow.acceptance.id): [str(workflow.developer.id)]}}
+    elif edit_kind == "current":
+        data = {assignees_key: [str(workflow.developer.id)]}
+    else:
+        data = {"state_assignees": {}}
+    if with_transition:
+        data[state_key] = str(workflow.acceptance.id)
+    assert_denied(serializer_for(endpoint, workflow, workflow.developer, data))
+    workflow.issue.refresh_from_db()
+    assert workflow.issue.state_id == workflow.development.id
+    assert workflow.issue.state_assignees == original_plan
+    assert set(IssueAssignee.objects.filter(issue=workflow.issue).values_list("assignee_id", flat=True)) == {
+        workflow.developer.id
+    }
+
+
+def test_non_owner_assignee_can_still_handoff_to_configured_reviewer(endpoint, workflow):
+    workflow.issue.save(created_by_id=workflow.other.id)
+    _, state_key, _ = endpoint
+    issue = save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.acceptance.id)}))
+    assert issue.state_id == workflow.acceptance.id
+    assert set(IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)) == {
+        workflow.reviewer.id
+    }
+
+
+@pytest.mark.parametrize("edit_kind", ["plan", "current", "reset"])
+def test_owner_can_configure_after_handoff(endpoint, workflow, edit_kind):
+    _, state_key, assignees_key = endpoint
+    save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.acceptance.id)}))
+    if edit_kind == "plan":
+        data = {"state_assignees": {str(workflow.acceptance.id): [str(workflow.other.id)]}}
+    elif edit_kind == "current":
+        data = {assignees_key: [str(workflow.other.id)]}
+    else:
+        data = {"state_assignees": {}}
+    issue = save(serializer_for(endpoint, workflow, workflow.developer, data))
+    assert issue.state_id == workflow.acceptance.id
+    expected = workflow.reviewer.id if edit_kind == "reset" else workflow.other.id
+    assert set(IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)) == {expected}
+    if edit_kind == "reset":
+        assert issue.state_assignees == {}
+    # Editing assignments never grants the creator an implicit state-transition bypass.
+    assert_denied(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.development.id)}))
+
+
+@pytest.mark.parametrize("edit_kind", ["plan", "current"])
+def test_project_lead_without_admin_role_cannot_configure(endpoint, workflow, edit_kind):
+    workflow.project.project_lead = workflow.other
+    workflow.project.save()
+    _, _, assignees_key = endpoint
+    data = (
+        {"state_assignees": {str(workflow.acceptance.id): [str(workflow.other.id)]}}
+        if edit_kind == "plan"
+        else {assignees_key: [str(workflow.other.id)]}
+    )
+    assert_denied(serializer_for(endpoint, workflow, workflow.other, data))
+
+
+def test_stale_creator_cannot_reconfigure_assignments(endpoint, workflow):
+    stale = Issue.objects.get(pk=workflow.issue.pk)
+    workflow.issue.save(created_by_id=workflow.other.id)
+    assert_denied(serializer_for(endpoint, workflow, workflow.developer, {"state_assignees": {}}, instance=stale))
+
+
 @pytest.mark.parametrize("configured", [True, False])
 def test_missing_destination_preserves_but_explicit_empty_clears(endpoint, workflow, configured):
     workflow.issue.state_assignees = {str(workflow.acceptance.id): []} if configured else {}
@@ -230,12 +303,12 @@ def test_creator_can_bootstrap_but_cannot_combine_with_transition(endpoint, work
     save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.acceptance.id)}))
 
 
-def test_creator_cannot_bootstrap_over_existing_actual_assignments(endpoint, workflow):
+def test_owner_can_reassign_even_with_existing_actual_assignments(endpoint, workflow):
     workflow.issue.state_assignees = {str(workflow.development.id): []}
     workflow.issue.save()
     IssueAssignee.objects.filter(issue=workflow.issue).delete()
     IssueAssignee.objects.create(issue=workflow.issue, project=workflow.project, assignee=workflow.reviewer)
-    assert_denied(
+    issue = save(
         serializer_for(
             endpoint,
             workflow,
@@ -243,6 +316,9 @@ def test_creator_cannot_bootstrap_over_existing_actual_assignments(endpoint, wor
             {"state_assignees": {str(workflow.development.id): [str(workflow.developer.id)]}},
         )
     )
+    assert set(IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)) == {
+        workflow.developer.id
+    }
 
 
 def test_current_plan_edit_updates_actual_assignees(endpoint, workflow):

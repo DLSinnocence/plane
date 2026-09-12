@@ -212,3 +212,94 @@ def test_current_owner_handoff_returns_actual_owners_and_revokes_access(workflow
     assert rejected.status_code == status.HTTP_403_FORBIDDEN, rejected.data
     workflow_issue.issue.refresh_from_db()
     assert workflow_issue.issue.state_id == workflow_issue.acceptance.pk
+
+
+@pytest.mark.parametrize("assignment_source", ["actual-assignees", "state-plan", "reset"])
+@pytest.mark.parametrize("with_transition", [False, True])
+def test_current_assignee_cannot_change_assignments(
+    workflow_endpoint, workflow_issue, assignment_source, with_transition
+):
+    endpoint = workflow_endpoint
+    endpoint.client.force_authenticate(user=workflow_issue.current_owner)
+    if assignment_source == "actual-assignees":
+        payload = {endpoint.assignee_field: [str(workflow_issue.current_owner.pk)]}
+    elif assignment_source == "state-plan":
+        payload = {"state_assignees": {str(workflow_issue.acceptance.pk): [str(workflow_issue.current_owner.pk)]}}
+    else:
+        payload = {"state_assignees": {}}
+    if with_transition:
+        payload[endpoint.state_field] = str(workflow_issue.acceptance.pk)
+    response = endpoint.client.patch(endpoint.url, payload, format="json")
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.data
+    assert_workflow_unchanged(workflow_issue)
+
+
+@pytest.mark.parametrize("assignment_source", ["actual-assignees", "state-plan", "reset"])
+def test_owner_can_manage_an_already_assigned_work_item(workflow_endpoint, workflow_issue, assignment_source):
+    endpoint = workflow_endpoint
+    owner_id = str(workflow_issue.actor.pk)
+    if assignment_source == "actual-assignees":
+        payload = {endpoint.assignee_field: [owner_id]}
+    elif assignment_source == "state-plan":
+        payload = {"state_assignees": {str(workflow_issue.development.pk): [owner_id]}}
+    else:
+        payload = {"state_assignees": {}}
+    response = endpoint.client.patch(endpoint.url, payload, format="json")
+    assert response.status_code == status.HTTP_200_OK, response.data
+    assert response.json()[endpoint.state_field] == str(workflow_issue.development.pk)
+    expected_assignees = [str(workflow_issue.current_owner.pk)] if assignment_source == "reset" else [owner_id]
+    assert response.json()[endpoint.assignee_field] == expected_assignees
+    if assignment_source == "reset":
+        assert response.json()["state_assignees"] == {}
+
+
+@pytest.mark.parametrize("administrator", ["project", "workspace"])
+def test_non_owner_administrator_can_manage_assignments(workflow_endpoint, workflow_issue, administrator):
+    endpoint = workflow_endpoint
+    administrator_user = workflow_issue.current_owner
+    endpoint.client.force_authenticate(user=administrator_user)
+    if administrator == "project":
+        ProjectMember.objects.filter(project=workflow_issue.issue.project, member=administrator_user).update(role=20)
+    else:
+        WorkspaceMember.objects.filter(workspace=workflow_issue.issue.workspace, member=administrator_user).update(
+            role=20
+        )
+    response = endpoint.client.patch(
+        endpoint.url, {endpoint.assignee_field: [str(workflow_issue.actor.pk)]}, format="json"
+    )
+    assert response.status_code == status.HTTP_200_OK, response.data
+    assert response.json()[endpoint.assignee_field] == [str(workflow_issue.actor.pk)]
+
+
+def test_project_lead_does_not_gain_assignment_configuration_permissions(workflow_endpoint, workflow_issue):
+    endpoint = workflow_endpoint
+    project = workflow_issue.issue.project
+    project.project_lead = workflow_issue.current_owner
+    project.save(update_fields=["project_lead"])
+    endpoint.client.force_authenticate(user=workflow_issue.current_owner)
+    response = endpoint.client.patch(endpoint.url, {"state_assignees": {}}, format="json")
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.data
+    assert_workflow_unchanged(workflow_issue)
+
+
+@pytest.mark.parametrize("invalid_membership", ["inactive", "guest"])
+def test_owner_requires_active_member_access_to_configure(workflow_endpoint, workflow_issue, invalid_membership):
+    ProjectMember.objects.filter(pk=workflow_issue.membership.pk).update(
+        **({"is_active": False} if invalid_membership == "inactive" else {"role": 5})
+    )
+    response = workflow_endpoint.client.patch(workflow_endpoint.url, {"state_assignees": {}}, format="json")
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.data
+    assert_workflow_unchanged(workflow_issue)
+
+
+def test_current_assignee_cannot_spoof_work_item_ownership(workflow_endpoint, workflow_issue):
+    endpoint = workflow_endpoint
+    endpoint.client.force_authenticate(user=workflow_issue.current_owner)
+    response = endpoint.client.patch(
+        endpoint.url,
+        {"created_by": str(workflow_issue.current_owner.pk), "state_assignees": {}},
+        format="json",
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.data
+    assert_workflow_unchanged(workflow_issue)
+    assert workflow_issue.issue.created_by_id == workflow_issue.actor.pk

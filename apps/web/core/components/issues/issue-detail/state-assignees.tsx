@@ -72,6 +72,11 @@ export const IssueStateAssignees = observer(function IssueStateAssignees(props: 
     <section className="mt-5 border-t border-subtle pt-4 pb-3" aria-busy={isSaving}>
       <h6 className="text-body-xs-medium">{t("workflows.state_assignees.title")}</h6>
       <p className="mt-1 text-body-xs-regular text-secondary">{t("workflows.state_assignees.description")}</p>
+      {!disabled && !canManageAssignments && (
+        <p className="mt-2 text-body-xs-regular text-secondary">
+          {t("workflows.state_assignees.configuration_permission_hint")}
+        </p>
+      )}
       {!disabled && !canTransition && (
         <p className="mt-2 text-body-xs-regular text-secondary">{t("workflows.state_assignees.permission_hint")}</p>
       )}

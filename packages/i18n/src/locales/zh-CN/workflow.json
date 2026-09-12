@@ -4,6 +4,7 @@
       "title": "各状态负责人",
       "description": "进入状态后自动交给该状态负责人；未单独设置时沿用当前负责人。",
       "permission_hint": "仅当前状态负责人或项目管理人员可以流转状态。",
+      "configuration_permission_hint": "仅工作项所有者（创建者）或管理员可以修改负责人。",
       "inherited": "沿用当前负责人",
       "unassigned": "未分配",
       "reset": "恢复沿用",

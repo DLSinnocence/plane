@@ -23,11 +23,10 @@ export const getIssueWorkflowPermissions = ({ issue, userId, role, leadId }: TIs
   const assignees =
     (issue?.state_id ? issue.state_assignees?.[issue.state_id] : undefined) ?? issue?.assignee_ids ?? [];
   const isResponsible = !!userId && assignees.includes(userId);
-  const canBootstrap =
-    !!userId && issue?.created_by === userId && assignees.length === 0 && (issue?.assignee_ids?.length ?? 0) === 0;
+  const isOwner = !!userId && issue?.created_by === userId;
 
   return {
     canTransition: !!issue && !!userId && isMember && (isManager || isResponsible),
-    canManageAssignments: !!issue && !!userId && isMember && (isManager || isResponsible || canBootstrap),
+    canManageAssignments: !!issue && !!userId && isMember && (role === EUserPermissions.ADMIN || isOwner),
   };
 };

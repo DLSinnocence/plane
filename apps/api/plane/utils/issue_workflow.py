@@ -137,30 +137,27 @@ class IssueWorkflowSerializerMixin:
             if actor_id and getattr(actor, "is_active", False)
             else None
         )
-        privileged = membership is not None and (
+        administrator = membership is not None and (
             membership.role == 20
-            or (membership.role >= 15 and issue.project.project_lead_id == actor_id)
             or WorkspaceMember.objects.filter(
                 workspace_id=issue.workspace_id, member_id=actor_id, role=20, is_active=True
             ).exists()
+        )
+        owner = membership is not None and membership.role >= 15 and actor_id == issue.created_by_id
+        if changing_assignment and not (administrator or owner):
+            raise PermissionDenied("Only the work item owner or administrators may change workflow assignments.")
+        if not changing_state:
+            return
+        transition_manager = administrator or (
+            membership is not None and membership.role >= 15 and issue.project.project_lead_id == actor_id
         )
         key = str(issue.state_id)
         actual = [str(pk) for pk in IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)]
         current = issue.state_assignees[key] if key in issue.state_assignees else actual
         responsible = membership is not None and membership.role >= 15 and str(actor_id) in (current or [])
-        bootstrap = (
-            changing_assignment
-            and not changing_state
-            and not current
-            and not actual
-            and actor_id == issue.created_by_id
-            and membership is not None
-            and membership.role >= 15
-        )
-        if not (privileged or responsible or bootstrap):
+        if not (transition_manager or responsible):
             raise PermissionDenied(
-                "Only current responsible members, project admins, or the project lead "
-                "may change workflow assignments or state."
+                "Only current responsible members, project admins, or the project lead may change state."
             )
 
     def _replace_workflow_assignees(self, issue, members):

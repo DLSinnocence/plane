@@ -11,7 +11,8 @@ import { getIssueWorkflowPermissions } from "./issue-workflow.ts";
 
 const allowed = { canTransition: true, canManageAssignments: true };
 const denied = { canTransition: false, canManageAssignments: false };
-const bootstrapOnly = { canTransition: false, canManageAssignments: true };
+const assignmentsOnly = { canTransition: false, canManageAssignments: true };
+const transitionOnly = { canTransition: true, canManageAssignments: false };
 const issue = {
   state_id: "todo",
   state_assignees: { todo: ["current"], doing: ["next"] },
@@ -21,37 +22,43 @@ const issue = {
 const permissions = (userId, overrides = {}) =>
   getIssueWorkflowPermissions({ issue, userId, role: EUserPermissions.MEMBER, leadId: "lead", ...overrides });
 
-test("only the current state owner gains responsibility; the next owner waits for transition", () => {
-  assert.deepEqual(permissions("current"), allowed);
+test("current state assignees can transition but cannot configure assignments", () => {
+  assert.deepEqual(permissions("current"), transitionOnly);
   assert.deepEqual(permissions("next"), denied);
   const transitioned = { ...issue, state_id: "doing", assignee_ids: ["next"] };
   assert.deepEqual(permissions("current", { issue: transitioned }), denied);
-  assert.deepEqual(permissions("next", { issue: transitioned }), allowed);
+  assert.deepEqual(permissions("next", { issue: transitioned }), transitionOnly);
+});
+
+test("the owner can configure an already assigned issue without gaining transition permission", () => {
+  assert.deepEqual(permissions("creator"), assignmentsOnly);
+  assert.deepEqual(permissions("creator", { issue: { ...issue, state_assignees: { todo: ["creator"] } } }), allowed);
 });
 
 test("an explicit empty current assignment overrides stale flat assignees", () => {
   const unassigned = { ...issue, state_assignees: { todo: [], doing: ["next"] } };
   assert.deepEqual(permissions("current", { issue: unassigned }), denied);
   assert.deepEqual(permissions("next", { issue: unassigned }), denied);
-  assert.deepEqual(permissions("creator", { issue: unassigned }), denied);
-  assert.deepEqual(permissions("creator", { issue: { ...unassigned, assignee_ids: [] } }), bootstrapOnly);
+  assert.deepEqual(permissions("creator", { issue: unassigned }), assignmentsOnly);
+  assert.deepEqual(permissions("creator", { issue: { ...unassigned, assignee_ids: [] } }), assignmentsOnly);
 });
 
 test("an omitted current state entry or map falls back to flat assignees", () => {
   for (const state_assignees of [undefined, {}, { doing: ["next"] }]) {
-    assert.deepEqual(permissions("current", { issue: { ...issue, state_assignees } }), allowed);
-    assert.deepEqual(permissions("creator", { issue: { ...issue, state_assignees } }), denied);
+    assert.deepEqual(permissions("current", { issue: { ...issue, state_assignees } }), transitionOnly);
+    assert.deepEqual(permissions("creator", { issue: { ...issue, state_assignees } }), assignmentsOnly);
   }
 });
 
-test("admins and project leads bypass responsibility while ordinary members do not", () => {
+test("admins can configure and transition while member project leads can only transition", () => {
   assert.deepEqual(permissions("admin", { role: EUserPermissions.ADMIN }), allowed);
-  assert.deepEqual(permissions("lead"), allowed);
+  assert.deepEqual(permissions("lead"), transitionOnly);
+  assert.deepEqual(permissions("lead", { issue: { ...issue, created_by: "lead" } }), allowed);
+  assert.deepEqual(permissions("lead", { role: EUserPermissions.ADMIN }), allowed);
   assert.deepEqual(permissions("other"), denied);
-  assert.deepEqual(permissions("creator"), denied);
 });
 
-test("guests and users without project membership cannot act even when assigned, creator, or lead", () => {
+test("guests and users without project membership cannot act even when assigned, owner, or lead", () => {
   for (const role of [EUserPermissions.GUEST, undefined]) {
     for (const userId of ["current", "creator", "lead"]) {
       assert.deepEqual(permissions(userId, { role }), denied);
@@ -60,11 +67,11 @@ test("guests and users without project membership cannot act even when assigned,
   }
 });
 
-test("the unassigned creator can bootstrap assignments but cannot transition", () => {
+test("the unassigned owner can configure assignments but cannot transition", () => {
   const unassigned = { ...issue, assignee_ids: [], state_assignees: {} };
-  assert.deepEqual(permissions("creator", { issue: unassigned }), bootstrapOnly);
+  assert.deepEqual(permissions("creator", { issue: unassigned }), assignmentsOnly);
   assert.deepEqual(permissions("other", { issue: unassigned }), denied);
-  assert.deepEqual(permissions("lead", { issue: unassigned }), allowed);
+  assert.deepEqual(permissions("lead", { issue: unassigned }), transitionOnly);
 });
 
 test("missing issue or unidentified member never gains permissions", () => {

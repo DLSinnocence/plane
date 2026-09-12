@@ -22,9 +22,10 @@ def authorize(
     responsible=False,
     active_user=True,
     active_membership=True,
-    bootstrap=False,
+    owner=False,
     actual=None,
     transition=True,
+    assignment_field=None,
 ):
     actor_id, current_state, next_state = uuid4(), uuid4(), uuid4()
     actor = SimpleNamespace(pk=actor_id, is_active=active_user)
@@ -35,12 +36,14 @@ def authorize(
         state_id=current_state,
         state=SimpleNamespace(pk=current_state),
         state_assignees={str(current_state): current},
-        created_by_id=actor_id if bootstrap else uuid4(),
+        created_by_id=actor_id if owner else uuid4(),
         project=SimpleNamespace(project_lead_id=actor_id if lead else None),
     )
     serializer = SimpleNamespace(context={"request": SimpleNamespace(user=actor)}, workflow_assignee_field="assignees")
     membership = SimpleNamespace(role=project_role) if project_role is not None and active_membership else None
-    payload = {"state": SimpleNamespace(pk=next_state)} if transition else {"state_assignees": {}}
+    payload = {"state": SimpleNamespace(pk=next_state)} if transition else {}
+    if assignment_field:
+        payload[assignment_field] = {} if assignment_field == "state_assignees" else []
     with (
         patch("plane.utils.issue_workflow.ProjectMember.objects.filter") as project_members,
         patch("plane.utils.issue_workflow.WorkspaceMember.objects.filter") as workspace_members,
@@ -65,6 +68,7 @@ def authorize(
         ({"lead": True}, True),
         ({"project_role": 5, "lead": True}, False),
         ({"responsible": True}, True),
+        ({"owner": True}, False),
         ({}, False),
         ({"project_role": 20, "active_user": False}, False),
         ({"project_role": 20, "active_membership": False, "workspace_admin": True}, False),
@@ -78,17 +82,41 @@ def test_manager_and_current_responsibility_policy(context, allowed):
             authorize(**context)
 
 
-def test_creator_bootstrap_allows_assignment_plan_only():
-    authorize(bootstrap=True, transition=False)
+@pytest.mark.parametrize("assignment_field", ["state_assignees", "assignees"])
+@pytest.mark.parametrize(
+    "context,allowed",
+    [
+        ({"owner": True}, True),
+        ({"owner": True, "actual": [str(uuid4())]}, True),
+        ({"project_role": 20}, True),
+        ({"workspace_admin": True}, True),
+        ({"project_role": 5, "workspace_admin": True}, True),
+        ({"lead": True}, False),
+        ({"responsible": True}, False),
+        ({"responsible": True, "lead": True}, False),
+        ({"owner": True, "responsible": True}, True),
+        ({"owner": True, "project_role": 5}, False),
+        ({"owner": True, "active_user": False}, False),
+        ({"owner": True, "active_membership": False}, False),
+        ({"project_role": None, "workspace_admin": True}, False),
+        ({}, False),
+    ],
+)
+def test_only_owner_and_administrators_can_manage_assignments(context, allowed, assignment_field):
+    if allowed:
+        authorize(**context, transition=False, assignment_field=assignment_field)
+    else:
+        with pytest.raises(PermissionDenied):
+            authorize(**context, transition=False, assignment_field=assignment_field)
+
+
+@pytest.mark.parametrize("assignment_field", ["state_assignees", "assignees"])
+def test_combined_requests_require_both_permissions(assignment_field):
     with pytest.raises(PermissionDenied):
-        authorize(bootstrap=True, transition=True)
-
-
-def test_creator_bootstrap_requires_actual_assignees_empty_too():
+        authorize(owner=True, transition=True, assignment_field=assignment_field)
     with pytest.raises(PermissionDenied):
-        authorize(bootstrap=True, transition=False, actual=[str(uuid4())])
-
-
-def test_guest_creator_cannot_bootstrap():
+        authorize(responsible=True, transition=True, assignment_field=assignment_field)
     with pytest.raises(PermissionDenied):
-        authorize(project_role=5, bootstrap=True, transition=False)
+        authorize(lead=True, transition=True, assignment_field=assignment_field)
+    authorize(owner=True, responsible=True, transition=True, assignment_field=assignment_field)
+    authorize(project_role=20, transition=True, assignment_field=assignment_field)
