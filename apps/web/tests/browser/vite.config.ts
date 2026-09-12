@@ -6,15 +6,30 @@
 
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import applicationRoutes from "../../app/routes";
 
 const path = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 
 export default defineConfig({
   root: path("./fixtures/"),
   define: { "process.env": JSON.stringify({ NODE_ENV: "test" }) },
+  plugins: [
+    {
+      name: "application-route-fixture",
+      resolveId(id) {
+        if (id === "virtual:application-routes") return "\0virtual:application-routes";
+      },
+      load(id) {
+        if (id === "\0virtual:application-routes") return `export default ${JSON.stringify(applicationRoutes)};`;
+      },
+    },
+  ],
   resolve: {
     alias: [
       { find: "@/hooks/store/use-member", replacement: path("./fixtures/mocks.tsx") },
+      { find: "@/hooks/store/use-workspace", replacement: path("./fixtures/mocks.tsx") },
+      { find: "@/app", replacement: path("../../app") },
+      { find: "@/helpers", replacement: path("../../helpers") },
       { find: "@/hooks/store/user", replacement: path("./fixtures/mocks.tsx") },
       { find: "@/components/workflow", replacement: path("./fixtures/mocks.tsx") },
       { find: "next/navigation", replacement: path("./fixtures/mocks.tsx") },

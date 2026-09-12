@@ -15,6 +15,7 @@ import { PriorityDropdown } from "@/components/dropdowns/priority";
 import { ModalCore } from "../../../../../packages/ui/src/modals/modal-core";
 import { CustomSearchSelect } from "./ui";
 import { users } from "./mocks";
+import { IntegrationRouteFixture } from "./integration-route";
 
 function App() {
   const [memberIds, setMemberIds] = useState<string[]>([]);
@@ -100,7 +101,9 @@ function App() {
   );
 }
 createRoot(document.getElementById("root")!).render(
-  new URLSearchParams(window.location.search).has("settings") ? (
+  window.location.pathname.startsWith("/workspace/") ? (
+    <IntegrationRouteFixture />
+  ) : new URLSearchParams(window.location.search).has("settings") ? (
     <MemoryRouter initialEntries={["/workspace/settings/integrations/"]}>
       <Routes>
         <Route path="/:workspaceSlug/*" element={<WorkspaceSettingsSidebarItemCategories />} />

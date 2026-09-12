@@ -15,8 +15,14 @@ export const useUser = () => ({ data: users.developer });
 export const useUserProfile = () => ({ data: { start_of_the_week: 1 } });
 export const useMember = () => ({
   getUserDetails: (id: string) => users[id as keyof typeof users],
-  workspace: { isUserSuspended: () => false },
+  workspace: {
+    isUserSuspended: () => false,
+    fetchWorkspaceMembers: async () => [],
+    getWorkspaceMemberIds: () => [],
+    getWorkspaceMemberDetails: () => null,
+  },
 });
+export const useWorkspace = () => ({ currentWorkspace: { slug: "workspace", name: "Test workspace" } });
 export const useParams = () => ({ workspaceSlug: "workspace" });
 export const usePathname = () => "/workspace/settings/integrations/";
 export const useUserPermissions = () => ({
