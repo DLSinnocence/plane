@@ -8,11 +8,12 @@ import { observer } from "mobx-react";
 import useSWR from "swr";
 import { useTranslation } from "@plane/i18n";
 import type { IWorkspaceMemberInvitation } from "@plane/types";
+import { Spinner } from "@plane/ui";
 // components
-import { LogoSpinner } from "@/components/common/logo-spinner";
 import { WorkspaceLogo } from "@/components/workspace/logo";
 // helpers
-import { EAuthModes, EAuthSteps } from "@/helpers/authentication.helper";
+import type { EAuthSteps } from "@/helpers/authentication.helper";
+import { EAuthModes } from "@/helpers/authentication.helper";
 // services
 import { WorkspaceService } from "@/services/workspace.service";
 
@@ -24,42 +25,10 @@ type TAuthHeader = {
   currentAuthStep: EAuthSteps;
 };
 
-const Titles = {
-  [EAuthModes.SIGN_IN]: {
-    [EAuthSteps.EMAIL]: {
-      header: "Work in all dimensions.",
-      subHeader: "Welcome back to Plane.",
-    },
-    [EAuthSteps.PASSWORD]: {
-      header: "Work in all dimensions.",
-      subHeader: "Welcome back to Plane.",
-    },
-    [EAuthSteps.UNIQUE_CODE]: {
-      header: "Work in all dimensions.",
-      subHeader: "Welcome back to Plane.",
-    },
-  },
-  [EAuthModes.SIGN_UP]: {
-    [EAuthSteps.EMAIL]: {
-      header: "Work in all dimensions.",
-      subHeader: "Create your Plane account.",
-    },
-    [EAuthSteps.PASSWORD]: {
-      header: "Work in all dimensions.",
-      subHeader: "Create your Plane account.",
-    },
-    [EAuthSteps.UNIQUE_CODE]: {
-      header: "Work in all dimensions.",
-      subHeader: "Create your Plane account.",
-    },
-  },
-};
-
 const workSpaceService = new WorkspaceService();
 
 export const AuthHeader = observer(function AuthHeader(props: TAuthHeader) {
-  const { workspaceSlug, invitationId, invitationEmail, authMode, currentAuthStep } = props;
-  // plane imports
+  const { workspaceSlug, invitationId, invitationEmail, authMode } = props;
   const { t } = useTranslation();
 
   const { data: invitation, isLoading } = useSWR(
@@ -72,13 +41,12 @@ export const AuthHeader = observer(function AuthHeader(props: TAuthHeader) {
   );
 
   const getHeaderSubHeader = (
-    step: EAuthSteps,
     mode: EAuthModes,
-    invitation: IWorkspaceMemberInvitation | undefined,
+    workspaceInvitation: IWorkspaceMemberInvitation | undefined,
     email: string | undefined
   ) => {
-    if (invitation && email && invitation.email === email && invitation.workspace) {
-      const workspace = invitation.workspace;
+    if (workspaceInvitation && email && workspaceInvitation.email === email && workspaceInvitation.workspace) {
+      const workspace = workspaceInvitation.workspace;
       return {
         header: (
           <div className="relative inline-flex items-center gap-2">
@@ -87,22 +55,19 @@ export const AuthHeader = observer(function AuthHeader(props: TAuthHeader) {
             {workspace.name}
           </div>
         ),
-        subHeader:
-          mode == EAuthModes.SIGN_UP
-            ? "Create an account to start managing work with your team."
-            : "Log in to start managing work with your team.",
+        subHeader: mode == EAuthModes.SIGN_UP ? t("auth.sign_up.header.label") : t("auth.sign_in.header.label"),
       };
     }
 
-    return Titles[mode][step];
+    return { header: t(mode === EAuthModes.SIGN_UP ? "auth.common.create_account" : "auth.common.login") };
   };
 
-  const { header, subHeader } = getHeaderSubHeader(currentAuthStep, authMode, invitation || undefined, invitationEmail);
+  const { header, subHeader } = getHeaderSubHeader(authMode, invitation || undefined, invitationEmail);
 
   if (isLoading)
     return (
       <div className="flex h-full w-full items-center justify-center">
-        <LogoSpinner />
+        <Spinner />
       </div>
     );
 
@@ -111,14 +76,14 @@ export const AuthHeader = observer(function AuthHeader(props: TAuthHeader) {
 
 type TAuthHeaderBase = {
   header: React.ReactNode;
-  subHeader: string;
+  subHeader?: string;
 };
 
 export function AuthHeaderBase(props: TAuthHeaderBase) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-h4-semibold text-primary">{props.header}</span>
-      <span className="text-h4-semibold text-placeholder">{props.subHeader}</span>
+      {props.subHeader && <span className="text-h4-semibold text-placeholder">{props.subHeader}</span>}
     </div>
   );
 }

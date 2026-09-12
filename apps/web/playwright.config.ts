@@ -10,9 +10,17 @@ export default defineConfig({
   testDir: "./tests/browser",
   testMatch: "**/*.spec.ts",
   use: { baseURL: "http://127.0.0.1:4179", headless: true, viewport: { width: 1440, height: 1000 } },
-  webServer: {
-    command: "pnpm exec vite --config tests/browser/vite.config.ts --host 127.0.0.1 --port 4179 --strictPort",
-    url: "http://127.0.0.1:4179",
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command: "pnpm exec vite --config tests/browser/vite.config.ts --host 127.0.0.1 --port 4179 --strictPort",
+      url: "http://127.0.0.1:4179",
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command:
+        "pnpm exec vite --config tests/browser/language.vite.config.ts --host 127.0.0.1 --port 4180 --strictPort",
+      url: "http://127.0.0.1:4180",
+      reuseExistingServer: !process.env.CI,
+    },
+  ],
 });

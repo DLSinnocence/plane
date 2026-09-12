@@ -12,9 +12,9 @@ const isValidNextPath = new Function(
 const redirectSource = readFileSync(new URL("./authentication-redirect.ts", import.meta.url), "utf8");
 const helpers = new Function(
   "isValidNextPath",
-  `${stripTypeScriptTypes(redirectSource.replace(/import .* from "@plane\/utils";\n/, "")).replaceAll("export function", "function")}; return {getSafeNextPath, getOnboardingPath, getSignInPath, getOAuthNextPathQuery};`
+  `${stripTypeScriptTypes(redirectSource.replace(/import .* from "@plane\/utils";\n/, "")).replaceAll("export function", "function")}; return {getSafeNextPath, getOnboardingPath, getSignInPath, getOAuthNextPathQuery, isInvitationPath};`
 )(isValidNextPath);
-const { getSafeNextPath, getOnboardingPath, getSignInPath, getOAuthNextPathQuery } = helpers;
+const { getSafeNextPath, getOnboardingPath, getSignInPath, getOAuthNextPathQuery, isInvitationPath } = helpers;
 
 test("preserve complete invitation destination through authentication and onboarding", () => {
   for (const invitation of [
@@ -60,6 +60,21 @@ test("OAuth providers retain the entire invitation as one encoded redirect param
     assert.equal(url.searchParams.has("project_id"), false);
   }
   assert.equal(getOAuthNextPathQuery("//evil.example"), "");
+});
+
+test("recognize only safe invitation return routes", () => {
+  assert.equal(isInvitationPath("/workspace-invitations/?invitation_id=i&slug=w&token=secret"), true);
+  assert.equal(isInvitationPath("/workspace-invitations?invitation_id=i&slug=w&token=secret"), true);
+  for (const path of [
+    "https://evil.example/workspace-invitations",
+    "//evil.example/workspace-invitations",
+    "/workspace-invitations-extra",
+    "/onboarding",
+    "/workspace/settings",
+    undefined,
+  ]) {
+    assert.equal(isInvitationPath(path), false);
+  }
 });
 
 test("leave normal onboarding defaults and local destinations unchanged", () => {

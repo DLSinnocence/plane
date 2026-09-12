@@ -9,6 +9,7 @@ import { observer } from "mobx-react";
 import { useSearchParams } from "next/navigation";
 // plane imports
 import { Banner } from "@makeplane/propel/components/banner";
+import { useTranslation } from "@plane/i18n";
 import { OAuthOptions } from "@plane/ui";
 // helpers
 import type { TAuthErrorInfo } from "@/helpers/authentication.helper";
@@ -23,7 +24,6 @@ import {
 import { useOAuthConfig } from "@/hooks/oauth";
 import { useInstance } from "@/hooks/store/use-instance";
 // local imports
-import { TermsAndConditions } from "../terms-and-conditions";
 import { AuthHeader, AuthHeaderBase } from "./auth-header";
 import { AuthFormRoot } from "./form-root";
 
@@ -48,8 +48,9 @@ export const AuthRoot = observer(function AuthRoot(props: TAuthRoot) {
   const [errorInfo, setErrorInfo] = useState<TAuthErrorInfo | undefined>(undefined);
   // store hooks
   const { config } = useInstance();
+  const { t } = useTranslation();
   // derived values
-  const oAuthActionText = authMode === EAuthModes.SIGN_UP ? "Sign up" : "Sign in";
+  const oAuthActionText = t(authMode === EAuthModes.SIGN_UP ? "auth.common.create_account" : "auth.common.login");
   const { isOAuthEnabled, oAuthOptions } = useOAuthConfig(oAuthActionText);
   const isEmailBasedAuthEnabled = config?.is_email_password_enabled || config?.is_magic_login_enabled;
   const noAuthMethodsAvailable = !isOAuthEnabled && !isEmailBasedAuthEnabled;
@@ -106,8 +107,8 @@ export const AuthRoot = observer(function AuthRoot(props: TAuthRoot) {
     return (
       <AuthContainer>
         <AuthHeaderBase
-          header="No authentication methods available"
-          subHeader="Please contact your administrator to enable authentication for your instance."
+          header={t("auth.common.no_auth_methods")}
+          subHeader={t("auth.common.no_auth_methods_description")}
         />
       </AuthContainer>
     );
@@ -136,6 +137,7 @@ export const AuthRoot = observer(function AuthRoot(props: TAuthRoot) {
           options={oAuthOptions}
           compact={authStep === EAuthSteps.PASSWORD}
           showDivider={isEmailBasedAuthEnabled}
+          dividerText={t("common.or")}
         />
       )}
       {isEmailBasedAuthEnabled && (
@@ -143,14 +145,13 @@ export const AuthRoot = observer(function AuthRoot(props: TAuthRoot) {
           authStep={authStep}
           authMode={authMode}
           email={email}
-          setEmail={(email) => setEmail(email)}
-          setAuthMode={(authMode) => setAuthMode(authMode)}
-          setAuthStep={(authStep) => setAuthStep(authStep)}
-          setErrorInfo={(errorInfo) => setErrorInfo(errorInfo)}
+          setEmail={setEmail}
+          setAuthMode={setAuthMode}
+          setAuthStep={setAuthStep}
+          setErrorInfo={setErrorInfo}
           currentAuthMode={currentAuthMode}
         />
       )}
-      <TermsAndConditions authType={authMode} />
     </AuthContainer>
   );
 });

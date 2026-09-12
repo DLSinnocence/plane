@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-function boot({ browser = false, storedLanguage = null, changeTo = null } = {}) {
+function boot({ browser = false, storedLanguage = null, storageFailure = null, changeTo = null } = {}) {
   // Each process starts the actual singleton with a fresh browser/server context.
   const result = spawnSync(
     process.execPath,
@@ -20,30 +20,48 @@ function boot({ browser = false, storedLanguage = null, changeTo = null } = {}) 
       "--eval",
       `
     const browser = ${JSON.stringify(browser)};
-    let storedLanguage = ${JSON.stringify(storedLanguage)};
+    const values = new Map([["unrelatedSetting", "untouched"]]);
+    const storedLanguage = ${JSON.stringify(storedLanguage)};
+    if (storedLanguage !== null) values.set("userLanguage", storedLanguage);
+    const storageFailure = ${JSON.stringify(storageFailure)};
     if (browser) {
       globalThis.window = {};
-      globalThis.document = { documentElement: { lang: "" } };
-      globalThis.localStorage = {
-        getItem: () => storedLanguage,
-        setItem: (_key, value) => { storedLanguage = value; },
+      globalThis.document = { documentElement: { lang: "zh-CN" } };
+      const storage = {
+        getItem: (key) => {
+          if (storageFailure === "read") throw new Error("Storage denied");
+          return values.get(key) ?? null;
+        },
+        setItem: (key, value) => {
+          if (storageFailure === "write") throw new Error("Storage full");
+          values.set(key, value);
+        },
       };
+      Object.defineProperty(window, "localStorage", {
+        get: () => {
+          if (storageFailure === "access") throw new Error("Storage unavailable");
+          return storage;
+        },
+      });
     }
     const { i18nInstance, initPromise } = await import("./src/core/instance.ts");
     await initPromise;
     const initialLanguage = i18nInstance.language;
     const initialLabel = i18nInstance.t("language");
+    const initialDocumentLanguage = globalThis.document?.documentElement.lang;
     const changeTo = ${JSON.stringify(changeTo)};
-    if (changeTo) {
+    if (changeTo !== null) {
       const { setLanguage } = await import("./src/core/set-language.ts");
       await setLanguage(changeTo);
     }
     console.log("RESULT " + JSON.stringify({
       initialLanguage,
       initialLabel,
+      initialDocumentLanguage,
       language: i18nInstance.language,
       label: i18nInstance.t("language"),
-      storedLanguage,
+      storedLanguage: values.get("userLanguage") ?? null,
+      storage: Object.fromEntries(values),
       documentLanguage: globalThis.document?.documentElement.lang,
     }));
   `,
@@ -61,30 +79,71 @@ function boot({ browser = false, storedLanguage = null, changeTo = null } = {}) 
   return JSON.parse(line.slice("RESULT ".length));
 }
 
+function assertChinese(result) {
+  assert.equal(result.initialLanguage, "zh-CN");
+  assert.equal(result.initialLabel, "语言");
+}
+
 test("fresh server rendering loads Simplified Chinese resources", () => {
-  const result = boot();
-  assert.equal(result.initialLanguage, "zh-CN");
-  assert.equal(result.initialLabel, "语言");
+  assertChinese(boot());
 });
 
-test("a new browser defaults to Simplified Chinese", () => {
+test("a new browser defaults to Chinese without changing storage", () => {
   const result = boot({ browser: true });
-  assert.equal(result.initialLanguage, "zh-CN");
-  assert.equal(result.initialLabel, "语言");
+  assertChinese(result);
+  assert.equal(result.initialDocumentLanguage, "zh-CN");
+  assert.deepEqual(result.storage, { unrelatedSetting: "untouched" });
 });
 
-test("an existing user's saved English preference takes priority", () => {
+test("saved English remains a preference and updates HTML on boot", () => {
   const result = boot({ browser: true, storedLanguage: "en" });
   assert.equal(result.initialLanguage, "en");
   assert.equal(result.initialLabel, "Language");
-  assert.equal(result.storedLanguage, "en");
+  assert.equal(result.initialDocumentLanguage, "en");
+  assert.deepEqual(result.storage, { unrelatedSetting: "untouched", userLanguage: "en" });
 });
 
-test("users can still select and persist a different language", () => {
+test("other supported cached locales are preserved", () => {
+  for (const language of ["fr", "zh-TW"]) {
+    const result = boot({ browser: true, storedLanguage: language });
+    assert.equal(result.initialLanguage, language);
+    assert.equal(result.storedLanguage, language);
+    assert.equal(result.initialDocumentLanguage, language);
+  }
+});
+
+test("unsupported and empty caches fall back to Chinese without overwriting storage", () => {
+  for (const storedLanguage of ["invalid", "", null]) {
+    const result = boot({ browser: true, storedLanguage });
+    assertChinese(result);
+    assert.equal(result.initialDocumentLanguage, "zh-CN");
+    assert.equal(result.storedLanguage, storedLanguage);
+  }
+});
+
+test("unavailable storage does not crash boot or explicit language selection", () => {
+  for (const storageFailure of ["access", "read", "write"]) {
+    const result = boot({ browser: true, storageFailure, changeTo: "en" });
+    assertChinese(result);
+    assert.equal(result.language, "en");
+    assert.equal(result.documentLanguage, "en");
+  }
+});
+
+test("explicit English persists and survives another boot", () => {
   const result = boot({ browser: true, changeTo: "en" });
-  assert.equal(result.initialLanguage, "zh-CN");
+  assertChinese(result);
   assert.equal(result.language, "en");
   assert.equal(result.label, "Language");
-  assert.equal(result.storedLanguage, "en");
   assert.equal(result.documentLanguage, "en");
+  assert.deepEqual(result.storage, { unrelatedSetting: "untouched", userLanguage: "en" });
+  const nextBoot = boot({ browser: true, storedLanguage: result.storedLanguage });
+  assert.equal(nextBoot.initialLanguage, "en");
+});
+
+test("unsupported runtime profile language is normalized before loading and persistence", () => {
+  const result = boot({ browser: true, changeTo: "not-supported" });
+  assert.equal(result.language, "zh-CN");
+  assert.equal(result.storedLanguage, "zh-CN");
+  assert.equal(result.documentLanguage, "zh-CN");
 });

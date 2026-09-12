@@ -52,8 +52,8 @@ export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
     },
     {
       id: "google",
-      text: `${oauthActionText} with Google`,
-      icon: <img src={googleLogo} height={18} width={18} alt="Google Logo" />,
+      text: t("auth.common.oauth_with_provider", { action: oauthActionText, provider: "Google" }),
+      icon: <img src={googleLogo} height={18} width={18} alt="" />,
       onClick: () => {
         window.location.assign(`${API_BASE_URL}/auth/google/${nextPathQuery}`);
       },
@@ -61,15 +61,8 @@ export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
     },
     {
       id: "github",
-      text: `${oauthActionText} with GitHub`,
-      icon: (
-        <img
-          src={resolvedTheme === "dark" ? GithubDarkLogo : GithubLightLogo}
-          height={18}
-          width={18}
-          alt="GitHub Logo"
-        />
-      ),
+      text: t("auth.common.oauth_with_provider", { action: oauthActionText, provider: "GitHub" }),
+      icon: <img src={resolvedTheme === "dark" ? GithubDarkLogo : GithubLightLogo} height={18} width={18} alt="" />,
       onClick: () => {
         window.location.assign(`${API_BASE_URL}/auth/github/${nextPathQuery}`);
       },
@@ -77,8 +70,8 @@ export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
     },
     {
       id: "gitlab",
-      text: `${oauthActionText} with GitLab`,
-      icon: <img src={gitlabLogo} height={18} width={18} alt="GitLab Logo" />,
+      text: t("auth.common.oauth_with_provider", { action: oauthActionText, provider: "GitLab" }),
+      icon: <img src={gitlabLogo} height={18} width={18} alt="" />,
       onClick: () => {
         window.location.assign(`${API_BASE_URL}/auth/gitlab/${nextPathQuery}`);
       },
@@ -86,8 +79,8 @@ export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
     },
     {
       id: "gitea",
-      text: `${oauthActionText} with Gitea`,
-      icon: <img src={giteaLogo} height={18} width={18} alt="Gitea Logo" />,
+      text: t("auth.common.oauth_with_provider", { action: oauthActionText, provider: "Gitea" }),
+      icon: <img src={giteaLogo} height={18} width={18} alt="" />,
       onClick: () => {
         window.location.assign(`${API_BASE_URL}/auth/gitea/${nextPathQuery}`);
       },

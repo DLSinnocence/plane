@@ -28,6 +28,7 @@ export default defineConfig({
     alias: [
       { find: "@/hooks/store/use-member", replacement: path("./fixtures/mocks.tsx") },
       { find: "@/hooks/store/use-workspace", replacement: path("./fixtures/mocks.tsx") },
+      { find: "@/hooks/use-app-router", replacement: path("./fixtures/mocks.tsx") },
       { find: "@/app", replacement: path("../../app") },
       { find: "@/helpers", replacement: path("../../helpers") },
       { find: "@/hooks/store/user", replacement: path("./fixtures/mocks.tsx") },

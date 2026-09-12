@@ -6,7 +6,8 @@
 
 import { useCallback } from "react";
 import { useTranslation as useI18nextTranslation } from "react-i18next";
-import { SUPPORTED_LANGUAGES, LANGUAGE_STORAGE_KEY } from "../constants/language";
+import { SUPPORTED_LANGUAGES } from "../constants/language";
+import { normalizeLanguage, persistLanguagePreference, updateDocumentLanguage } from "../core/language-preference";
 import type { TLanguage, ILanguageOption } from "../types";
 
 export type TTranslationStore = {
@@ -46,10 +47,10 @@ export function useTranslation(): TTranslationStore {
     (lng: TLanguage) => {
       void (async () => {
         try {
-          await i18n.changeLanguage(lng);
-          if (typeof window === "undefined") return;
-          localStorage.setItem(LANGUAGE_STORAGE_KEY, lng);
-          document.documentElement.lang = lng;
+          const language = normalizeLanguage(lng);
+          await i18n.changeLanguage(language);
+          persistLanguagePreference(language);
+          updateDocumentLanguage(i18n.resolvedLanguage ?? i18n.language);
         } catch (err) {
           console.error("Failed to change language:", err);
         }
@@ -61,7 +62,7 @@ export function useTranslation(): TTranslationStore {
   return {
     t: (key: string, params?: Record<string, unknown>) =>
       coerceToString(key, params === undefined ? t(key) : t(key, params)),
-    currentLocale: i18n.language as TLanguage,
+    currentLocale: normalizeLanguage(i18n.resolvedLanguage ?? i18n.language),
     changeLanguage,
     languages: SUPPORTED_LANGUAGES,
   };

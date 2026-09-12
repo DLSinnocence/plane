@@ -27,10 +27,12 @@ import { isStaleAssetError, recoverFromStaleAsset } from "@/lib/stale-asset-erro
 // local
 import { CustomErrorComponent } from "./error";
 // fonts
+/* eslint-disable import/no-unassigned-import -- These font packages register global font-face styles. */
 import "@fontsource-variable/inter";
 import interVariableWoff2 from "@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url";
 import "@fontsource/material-symbols-rounded";
 import "@fontsource/ibm-plex-mono";
+/* eslint-enable import/no-unassigned-import */
 
 const APP_TITLE = "Plane | Simple, extensible, open-source project management tool.";
 
@@ -55,7 +57,7 @@ export const links: LinksFunction = () => [
 
 export function Layout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="zh-CN" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

@@ -15,6 +15,7 @@ export enum EPageTypes {
   SET_PASSWORD = "SET_PASSWORD",
   ONBOARDING = "ONBOARDING",
   AUTHENTICATED = "AUTHENTICATED",
+  INVITATION = "INVITATION",
 }
 
 export enum EAuthModes {

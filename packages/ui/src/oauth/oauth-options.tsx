@@ -20,12 +20,20 @@ type OAuthOptionsProps = {
   options: TOAuthOption[];
   compact?: boolean;
   showDivider?: boolean;
+  dividerText?: string;
   className?: string;
   containerClassName?: string;
 };
 
 export function OAuthOptions(props: OAuthOptionsProps) {
-  const { options, compact = false, showDivider = true, className = "", containerClassName = "" } = props;
+  const {
+    options,
+    compact = false,
+    showDivider = true,
+    dividerText = "or",
+    className = "",
+    containerClassName = "",
+  } = props;
 
   // Filter enabled options
   const enabledOptions = options.filter((option) => option.enabled !== false);
@@ -45,6 +53,7 @@ export function OAuthOptions(props: OAuthOptionsProps) {
           <OAuthButton
             key={option.id}
             text={option.text}
+            aria-label={option.text}
             icon={option.icon}
             onClick={option.onClick}
             compact={compact}
@@ -56,7 +65,9 @@ export function OAuthOptions(props: OAuthOptionsProps) {
       {showDivider && (
         <div className="mt-4 flex items-center transition-all duration-300">
           <hr className="w-full border-strong transition-colors duration-300" />
-          <p className="mx-3 flex-shrink-0 text-center text-13 text-placeholder transition-colors duration-300">or</p>
+          <p className="mx-3 flex-shrink-0 text-center text-13 text-placeholder transition-colors duration-300">
+            {dividerText}
+          </p>
           <hr className="w-full border-strong transition-colors duration-300" />
         </div>
       )}

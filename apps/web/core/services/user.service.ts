@@ -52,12 +52,17 @@ export class UserService extends APIService {
       });
   }
 
-  async currentUser(): Promise<IUser> {
-    // Using validateStatus: null to bypass interceptors for unauthorized errors.
+  async currentUser(): Promise<IUser | undefined> {
+    // Anonymous sessions are expected here; keep their error payloads out of the user store.
     return this.get("/api/users/me/", { validateStatus: null })
-      .then((response) => response?.data)
+      .then((response) => {
+        if (response.status === 401 || response.status === 403) return undefined;
+        if (response.status < 200 || response.status >= 300) throw response;
+        const user = response.data;
+        return user && typeof user.id === "string" && typeof user.email === "string" ? user : undefined;
+      })
       .catch((error) => {
-        throw error?.response;
+        throw error?.response ?? error;
       });
   }
 

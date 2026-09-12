@@ -17,6 +17,7 @@ import { CustomSearchSelect } from "./ui";
 import { users } from "./mocks";
 import { IntegrationRouteFixture } from "./integration-route";
 import { InvitationResultFixture } from "./invitation-result";
+import { authFixtureEnabled } from "./invitation-auth-state";
 
 function App() {
   const [memberIds, setMemberIds] = useState<string[]>([]);
@@ -104,7 +105,9 @@ function App() {
 createRoot(document.getElementById("root")!).render(
   new URLSearchParams(window.location.search).has("invitation-result") ? (
     <InvitationResultFixture />
-  ) : window.location.pathname.startsWith("/workspace/") ? (
+  ) : authFixtureEnabled() ||
+    window.location.pathname.startsWith("/workspace-invitations") ||
+    window.location.pathname.startsWith("/workspace/") ? (
     <IntegrationRouteFixture />
   ) : new URLSearchParams(window.location.search).has("settings") ? (
     <MemoryRouter initialEntries={["/workspace/settings/integrations/"]}>

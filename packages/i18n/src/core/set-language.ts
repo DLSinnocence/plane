@@ -5,14 +5,13 @@
  */
 
 import { initPromise, i18nInstance } from "./instance";
-import { LANGUAGE_STORAGE_KEY } from "../constants/language";
+import { normalizeLanguage, persistLanguagePreference, updateDocumentLanguage } from "./language-preference";
 import type { TLanguage } from "../types";
 
 export async function setLanguage(lng: TLanguage): Promise<void> {
   await initPromise;
-  await i18nInstance.changeLanguage(lng);
-  if (typeof window !== "undefined") {
-    localStorage.setItem(LANGUAGE_STORAGE_KEY, lng);
-    document.documentElement.lang = lng;
-  }
+  const language = normalizeLanguage(lng);
+  await i18nInstance.changeLanguage(language);
+  persistLanguagePreference(language);
+  updateDocumentLanguage(i18nInstance.resolvedLanguage ?? i18nInstance.language);
 }

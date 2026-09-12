@@ -10,6 +10,12 @@ export function getSafeNextPath(value: string | null | undefined): string | unde
   return path;
 }
 
+export function isInvitationPath(value: string | null | undefined): boolean {
+  const destination = getSafeNextPath(value);
+  if (!destination) return false;
+  return new URL(destination, "https://plane.invalid").pathname.replace(/\/$/, "") === "/workspace-invitations";
+}
+
 export function getOAuthNextPathQuery(nextPath: string | null | undefined): string {
   const destination = getSafeNextPath(nextPath);
   return destination ? `?next_path=${encodeURIComponent(destination)}` : "";

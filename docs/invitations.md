@@ -1,6 +1,8 @@
 # Invitations
 
-An invited email address does **not** need an existing Plane account. Creating an invitation saves a pending record; it does not create a user or add workspace/project membership. The recipient follows the invitation link, signs in or registers (including the instance's configured SSO), and explicitly accepts using the invited email address.
+An invited email address does **not** need an existing Plane account. Creating an invitation saves a pending record; it does not create a user or add workspace/project membership. An anonymous visitor following the link is automatically sent to the normal sign-in page, with the full invitation URL preserved as `next_path`. After signing in or registering (including the instance's configured SSO), they return to the invitation and explicitly accept using the invited email address. Invitation details are not fetched until authentication is confirmed.
+
+New users can accept an invitation before completing workspace onboarding. Once they accept, Plane refreshes their joined workspaces and settings; any remaining profile/onboarding steps occur when entering the workspace, preserving that destination.
 
 ## Without an email service
 
@@ -50,7 +52,7 @@ Email input is trimmed, lowercased and deduplicated before queries. Workspace/pr
 
 ## Routes and security
 
-The declared React Router route is `/workspace-invitations` in `apps/web/app/routes/core.ts`. Workspace links use `invitation_id`, `slug`, and `token`; project links additionally use `project_id` on the same page. Project links must not target the undeclared `/project-invitations` path. Sign-in and signup links carry the complete invitation URL as an encoded `next_path`. The authentication wrapper carries that validated path into onboarding and uses it after onboarding completes; if authentication is required again, the query survives the sign-in return too. Validation reuses `isValidNextPath` and rejects external, scheme-relative, backslash, and control-character destinations. Without a valid return path, existing onboarding/workspace defaults remain unchanged.
+The declared React Router route is `/workspace-invitations` in `apps/web/app/routes/core.ts`. Workspace links use `invitation_id`, `slug`, and `token`; project links additionally use `project_id` on the same page. Project links must not target the undeclared `/project-invitations` path. Sign-in and signup links carry the complete invitation URL as an encoded `next_path`. Authenticated users return directly to invitations, including users who have not yet completed onboarding. If authentication is required again, API and page redirects retain the original query, including the acceptance token. Other protected pages preserve their destination through any remaining onboarding steps. Validation reuses `isValidNextPath` and rejects external, scheme-relative, backslash, and control-character destinations. Without a valid return path, existing onboarding/workspace defaults remain unchanged.
 
 Public invitation details exclude `token`, `invite_link`, and the email `message` (which can contain a token-bearing link). Authorized invitation management returns copyable links. The accept endpoints require a boolean `accepted` value, the exact saved token, an authenticated user, and matching email. Project membership updates are scoped to the invited project.
 

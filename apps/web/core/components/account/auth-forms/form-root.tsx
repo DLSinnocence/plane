@@ -12,6 +12,7 @@ import type { IEmailCheckData } from "@plane/types";
 // helpers
 import type { TAuthErrorInfo } from "@/helpers/authentication.helper";
 import { authErrorHandler } from "@/helpers/authentication.helper";
+import { getOAuthNextPathQuery } from "@/helpers/authentication-redirect";
 // hooks
 import { useInstance } from "@/hooks/store/use-instance";
 import { useAppRouter } from "@/hooks/use-app-router";
@@ -74,6 +75,7 @@ export const AuthFormRoot = observer(function AuthFormRoot(props: TAuthFormRoot)
           }
         }
         setIsExistingEmail(response.existing);
+        return response;
       })
       .catch((error) => {
         const errorhandler = authErrorHandler(error?.error_code?.toString(), data?.email || undefined);
@@ -86,13 +88,13 @@ export const AuthFormRoot = observer(function AuthFormRoot(props: TAuthFormRoot)
     setErrorInfo(undefined);
     setEmail("");
     setAuthStep(EAuthSteps.EMAIL);
-    router.push(currentAuthMode === EAuthModes.SIGN_IN ? `/` : "/sign-up");
+    router.push(`${currentAuthMode === EAuthModes.SIGN_IN ? "/" : "/sign-up"}${getOAuthNextPathQuery(nextPath)}`);
   };
 
   // generating the unique code
-  const generateEmailUniqueCode = async (email: string): Promise<{ code: string } | undefined> => {
+  const generateEmailUniqueCode = async (enteredEmail: string): Promise<{ code: string } | undefined> => {
     if (!isSMTPConfigured) return;
-    const payload = { email: email };
+    const payload = { email: enteredEmail };
     return await authService
       .generateUniqueCode(payload)
       .then(() => ({ code: "" }))

@@ -7,6 +7,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { AxiosInstance, AxiosRequestConfig } from "axios";
 import { create } from "axios";
+import { getSignInPath } from "@/helpers/authentication-redirect";
 
 export abstract class APIService {
   protected baseURL: string;
@@ -27,8 +28,7 @@ export abstract class APIService {
       (response) => response,
       (error) => {
         if (error.response && error.response.status === 401) {
-          const currentPath = window.location.pathname;
-          window.location.replace(`/${currentPath ? `?next_path=${currentPath}` : ``}`);
+          window.location.replace(getSignInPath(window.location.pathname, window.location.search.slice(1)));
         }
         return Promise.reject(error);
       }

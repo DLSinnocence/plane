@@ -7,24 +7,25 @@
 import React from "react";
 import { observer } from "mobx-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useTranslation } from "@plane/i18n";
-import { PlaneLockup } from "@plane/propel/icons";
 import { PageHead } from "@/components/core/page-title";
+import { getOAuthNextPathQuery } from "@/helpers/authentication-redirect";
 import { EAuthModes } from "@/helpers/authentication.helper";
 import { useInstance } from "@/hooks/store/use-instance";
 
 const authContentMap = {
   [EAuthModes.SIGN_IN]: {
-    pageTitle: "Sign up",
-    text: "auth.common.new_to_plane",
-    linkText: "Sign up",
+    pageTitle: "auth.common.login",
+    text: "auth.common.no_account",
+    linkText: "auth.common.create_account",
     linkHref: "/sign-up",
   },
   [EAuthModes.SIGN_UP]: {
-    pageTitle: "Sign in",
+    pageTitle: "auth.common.create_account",
     text: "auth.common.already_have_an_account",
-    linkText: "Sign in",
-    linkHref: "/sign-in",
+    linkText: "auth.common.login",
+    linkHref: "/",
   },
 };
 
@@ -34,6 +35,8 @@ type AuthHeaderProps = {
 
 export const AuthHeader = observer(function AuthHeader({ type }: AuthHeaderProps) {
   const { t } = useTranslation();
+  const searchParams = useSearchParams();
+  const nextPathQuery = getOAuthNextPathQuery(searchParams.get("next_path"));
   // store
   const { config } = useInstance();
   // derived values
@@ -47,7 +50,7 @@ export const AuthHeader = observer(function AuthHeader({ type }: AuthHeaderProps
           <div className="flex flex-col items-end text-center text-13 font-medium text-tertiary sm:flex-row sm:items-center sm:gap-2">
             <span className="text-body-sm-regular text-tertiary">{t(authContentMap[type].text)}</span>
             <Link
-              href={authContentMap[type].linkHref}
+              href={`${authContentMap[type].linkHref}${nextPathQuery}`}
               className="text-body-sm-semibold text-accent-primary hover:underline"
             >
               {t(authContentMap[type].linkText)}
@@ -68,13 +71,8 @@ export function AuthHeaderBase(props: TAuthHeaderBase) {
   const { pageTitle, additionalAction } = props;
   return (
     <>
-      <PageHead title={pageTitle + " - Plane"} />
-      <div className="sticky top-0 flex w-full flex-shrink-0 items-center justify-between gap-6">
-        <Link href="/">
-          <PlaneLockup height={20} width={95} className="text-primary" />
-        </Link>
-        {additionalAction}
-      </div>
+      <PageHead title={pageTitle} />
+      <div className="sticky top-0 flex w-full flex-shrink-0 items-center justify-end gap-6">{additionalAction}</div>
     </>
   );
 }

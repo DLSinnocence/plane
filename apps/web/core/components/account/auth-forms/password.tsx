@@ -105,11 +105,9 @@ export const AuthPasswordForm = observer(function AuthPasswordForm(props: Props)
 
   const isButtonDisabled = useMemo(
     () =>
-      !isSubmitting &&
-      !!passwordFormData.password &&
-      (mode === EAuthModes.SIGN_UP ? passwordFormData.password === passwordFormData.confirm_password : true)
-        ? false
-        : true,
+      isSubmitting ||
+      !passwordFormData.password ||
+      (mode === EAuthModes.SIGN_UP && passwordFormData.password !== passwordFormData.confirm_password),
     [isSubmitting, mode, passwordFormData.confirm_password, passwordFormData.password]
   );
 
@@ -205,6 +203,7 @@ export const AuthPasswordForm = observer(function AuthPasswordForm(props: Props)
               onFocus={() => setIsPasswordInputFocused(true)}
               onBlur={() => setIsPasswordInputFocused(false)}
               autoComplete="off"
+              // eslint-disable-next-line jsx-a11y/no-autofocus -- Focus the password field after the user advances from the email step.
               autoFocus
             />
             <button
@@ -294,7 +293,7 @@ export const AuthPasswordForm = observer(function AuthPasswordForm(props: Props)
             </>
           ) : (
             <Button type="submit" variant="primary" className="w-full" size="xl" disabled={isButtonDisabled}>
-              {isSubmitting ? <Spinner height="20px" width="20px" /> : "Create account"}
+              {isSubmitting ? <Spinner height="20px" width="20px" /> : t("auth.common.create_account")}
             </Button>
           )}
         </div>

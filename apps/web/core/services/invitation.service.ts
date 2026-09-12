@@ -17,15 +17,29 @@ export class InvitationService extends APIService {
 
   private endpoint(slug: string, id: string, projectId?: string | null) {
     return projectId
-      ? `/api/workspaces/${slug}/projects/${projectId}/join/${id}/`
-      : `/api/workspaces/${slug}/invitations/${id}/join/`;
+      ? `/api/workspaces/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectId)}/join/${encodeURIComponent(id)}/`
+      : `/api/workspaces/${encodeURIComponent(slug)}/invitations/${encodeURIComponent(id)}/join/`;
   }
 
   async detail(slug: string, id: string, projectId?: string | null): Promise<InvitationDetail> {
     return this.get(this.endpoint(slug, id, projectId))
-      .then((response) => response.data)
+      .then((response) => {
+        const data = response.data;
+        if (
+          !data ||
+          typeof data !== "object" ||
+          typeof data.id !== "string" ||
+          !data.workspace ||
+          typeof data.workspace.name !== "string" ||
+          typeof data.workspace.slug !== "string" ||
+          (data.email !== undefined && typeof data.email !== "string") ||
+          (data.project != null && (typeof data.project.id !== "string" || typeof data.project.name !== "string"))
+        )
+          throw new Error("Invalid invitation response");
+        return data;
+      })
       .catch((error) => {
-        throw error?.response?.data;
+        throw error?.response?.data ?? error;
       });
   }
 
@@ -33,7 +47,7 @@ export class InvitationService extends APIService {
     return this.post(this.endpoint(slug, id, projectId), { token, accepted })
       .then(() => undefined)
       .catch((error) => {
-        throw error?.response?.data;
+        throw error?.response?.data ?? error;
       });
   }
 }

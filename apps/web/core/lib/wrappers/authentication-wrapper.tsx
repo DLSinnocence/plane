@@ -8,11 +8,12 @@ import type { ReactNode } from "react";
 import { observer } from "mobx-react";
 import { useSearchParams, usePathname } from "next/navigation";
 import useSWR from "swr";
+import { Navigate } from "react-router";
 // components
 import { LogoSpinner } from "@/components/common/logo-spinner";
 // helpers
 import { EPageTypes } from "@/helpers/authentication.helper";
-import { getSafeNextPath, getOnboardingPath, getSignInPath } from "@/helpers/authentication-redirect";
+import { getSafeNextPath, getOnboardingPath, getSignInPath, isInvitationPath } from "@/helpers/authentication-redirect";
 // hooks
 import { useWorkspace } from "@/hooks/store/use-workspace";
 import { useUser, useUserProfile, useUserSettings } from "@/hooks/store/user";
@@ -80,8 +81,17 @@ export const AuthenticationWrapper = observer(function AuthenticationWrapper(pro
 
   if (pageType === EPageTypes.PUBLIC) return <>{children}</>;
 
+  if (pageType === EPageTypes.INVITATION) {
+    return currentUser?.id ? (
+      <>{children}</>
+    ) : (
+      <Navigate to={getSignInPath(pathname, searchParams.toString())} replace />
+    );
+  }
+
   if (pageType === EPageTypes.NON_AUTHENTICATED) {
     if (!currentUser?.id) return <>{children}</>;
+    else if (nextPath && isInvitationPath(nextPath)) return <Navigate to={nextPath} replace />;
     else {
       if (currentUserProfile?.id && isUserOnboard) {
         const currentRedirectRoute = getWorkspaceRedirectionUrl();
@@ -124,7 +134,10 @@ export const AuthenticationWrapper = observer(function AuthenticationWrapper(pro
     if (currentUser?.id) {
       if (currentUserProfile && currentUserProfile?.id && isUserOnboard) return <>{children}</>;
       else {
-        router.push(getOnboardingPath(nextPath));
+        const currentDestination = pathname
+          ? `${pathname}${searchParams.size ? `?${searchParams.toString()}` : ""}`
+          : undefined;
+        router.push(getOnboardingPath(nextPath ?? currentDestination));
         return <></>;
       }
     } else {

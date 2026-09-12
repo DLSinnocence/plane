@@ -4,24 +4,25 @@
  * See the LICENSE file for details.
  */
 
-import i18n from "i18next";
+import { createInstance } from "i18next";
 import { initReactI18next } from "react-i18next";
 import ICU from "i18next-icu";
 import resourcesToBackend from "i18next-resources-to-backend";
-import { SUPPORTED_LANGUAGES, FALLBACK_LANGUAGE, LANGUAGE_STORAGE_KEY } from "../constants/language";
+import { SUPPORTED_LANGUAGES, FALLBACK_LANGUAGE } from "../constants/language";
+import { getInitialLanguage, updateDocumentLanguage } from "./language-preference";
 import { NAMESPACES, DEFAULT_NAMESPACE } from "../constants/namespaces";
 
 import type { i18n as I18nInstance } from "i18next";
 
-export const i18nInstance: I18nInstance = i18n.createInstance();
+export const i18nInstance: I18nInstance = createInstance();
 
 i18nInstance
   .use(ICU)
   .use(initReactI18next)
   .use(resourcesToBackend((language: string, namespace: string) => import(`../locales/${language}/${namespace}.json`)));
 
-const initialLng =
-  typeof window !== "undefined" ? localStorage.getItem(LANGUAGE_STORAGE_KEY) || FALLBACK_LANGUAGE : FALLBACK_LANGUAGE;
+const initialLng = getInitialLanguage();
+i18nInstance.on("languageChanged", updateDocumentLanguage);
 
 export const initPromise = i18nInstance
   .init({
@@ -49,4 +50,8 @@ export const initPromise = i18nInstance
   // Eagerly pre-load all namespaces for the initial language so they're cached
   // before any component renders. This prevents the re-render cascade that occurs
   // when react-i18next triggers concurrent async loads for unloaded namespaces.
-  .then(() => i18nInstance.loadNamespaces(NAMESPACES));
+  .then(async () => {
+    const translate = await i18nInstance.loadNamespaces(NAMESPACES);
+    updateDocumentLanguage(i18nInstance.resolvedLanguage ?? i18nInstance.language);
+    return translate;
+  });
