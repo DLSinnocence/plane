@@ -28,6 +28,7 @@ catalog:
   "@hocuspocus/transformer": "2.15.2"
   "@hypermod/utils": "^0.7.1"
   "@makeplane/propel": "0.3.0"
+  "@playwright/test": "1.63.0"
   "@popperjs/core": "^2.11.8"
   "@radix-ui/react-scroll-area": "^1.2.3"
   "@react-pdf/renderer": "^4.8.1"

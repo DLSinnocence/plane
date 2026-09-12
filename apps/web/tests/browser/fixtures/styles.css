@@ -1,0 +1,131 @@
+body {
+  margin: 0;
+  background: #151515;
+  color: #eee;
+  font: 14px system-ui;
+  min-height: 1500px;
+}
+.inset-0 {
+  inset: 0;
+}
+.overflow-y-auto {
+  overflow-y: auto;
+}
+[role="dialog"] .panel {
+  width: 960px;
+}
+button,
+input {
+  font: inherit;
+  color: inherit;
+  background: #292929;
+  border: 1px solid #666;
+  border-radius: 4px;
+  padding: 6px;
+}
+button {
+  cursor: pointer;
+}
+ul {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+li,
+[role="option"] {
+  padding: 8px;
+  cursor: pointer;
+}
+svg {
+  max-width: 18px;
+  max-height: 18px;
+}
+.panel {
+  position: relative;
+  transform: translateZ(0);
+  margin: 140px 60px 40px 340px;
+  padding: 24px;
+  background: #222;
+  border: 1px solid #444;
+  border-radius: 10px;
+}
+.spacer {
+  height: 250px;
+}
+.controls {
+  display: flex;
+  gap: 18px;
+}
+.control {
+  height: 32px;
+}
+.timezone-container {
+  margin: 40px 80px 40px 620px;
+  width: 480px;
+}
+.timezone-container > div > button {
+  width: 100%;
+}
+.fixed {
+  position: fixed;
+}
+.relative {
+  position: relative;
+}
+.flex {
+  display: flex;
+}
+.items-center {
+  align-items: center;
+}
+.justify-between {
+  justify-content: space-between;
+}
+.h-full {
+  height: 100%;
+}
+.w-full {
+  width: 100%;
+}
+.w-48,
+.min-w-48 {
+  min-width: 192px;
+}
+.gap-2,
+.gap-1\.5 {
+  gap: 6px;
+}
+.my-1 {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+.bg-surface-1 {
+  background: #242424;
+}
+.bg-surface-2 {
+  background: #333;
+}
+.z-30 {
+  z-index: 30;
+}
+.z-10 {
+  z-index: 10;
+}
+.px-2 {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.py-2\.5 {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.max-h-48 {
+  max-height: 192px;
+}
+.overflow-y-scroll {
+  overflow-y: auto;
+}
+output {
+  display: block;
+  padding: 20px;
+}

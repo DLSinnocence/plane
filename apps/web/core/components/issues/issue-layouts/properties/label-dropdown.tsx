@@ -45,6 +45,11 @@ export interface ILabelDropdownProps {
   label: React.ReactNode;
 }
 
+const preventPropagation = (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+  e.stopPropagation();
+  e.preventDefault();
+};
+
 export function LabelDropdown(props: ILabelDropdownProps) {
   const {
     projectId,
@@ -62,7 +67,7 @@ export function LabelDropdown(props: ILabelDropdownProps) {
     renderByDefault = true,
     fullWidth = false,
     fullHeight = false,
-    label,
+    label: triggerLabel,
   } = props;
   const { t } = useTranslation();
 
@@ -82,7 +87,7 @@ export function LabelDropdown(props: ILabelDropdownProps) {
 
   // popper-js refs
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null);
-  const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null);
+  const [popperElement, setPopperElement] = useState<HTMLElement | null>(null);
 
   //hooks
   const { fetchProjectLabels, getProjectLabels, createLabel } = useLabel();
@@ -214,7 +219,7 @@ export function LabelDropdown(props: ILabelDropdownProps) {
         onClick={handleOnClick}
         disabled={disabled}
       >
-        {label}
+        {triggerLabel}
         {!hideDropdownArrow && !disabled && <ChevronDownOutline className="h-3 w-3" aria-hidden="true" />}
       </button>
     ),
@@ -224,20 +229,19 @@ export function LabelDropdown(props: ILabelDropdownProps) {
       fullWidth,
       handleOnClick,
       hideDropdownArrow,
-      label,
+      triggerLabel,
       maxRender,
       value.length,
       setReferenceElement,
     ]
   );
 
-  const preventPropagation = (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
-    e.stopPropagation();
-    e.preventDefault();
-  };
-
   return (
+    // This boundary only stops child clicks from activating the surrounding issue row.
+    // oxlint-disable-next-line jsx_a11y/click-events-have-key-events, jsx_a11y/no-static-element-interactions
     <div className={`${fullHeight ? "h-full" : "h-5"}`} onClick={preventPropagation}>
+      {/* Keyboard events bubble here from the trigger and search input. */}
+      {/* oxlint-disable-next-line jsx_a11y/no-static-element-interactions */}
       <ComboDropDown
         as="div"
         ref={dropdownRef}
@@ -251,83 +255,85 @@ export function LabelDropdown(props: ILabelDropdownProps) {
         multiple
       >
         {isOpen && (
-          <Combobox.Options as="ul" className="fixed z-10" static>
-            <div
-              className={`z-10 my-1 h-auto w-48 rounded-sm border border-strong bg-surface-1 px-2 py-2.5 text-caption-sm-regular whitespace-nowrap shadow-raised-200 focus:outline-none ${optionsClassName}`}
-              ref={setPopperElement}
-              style={styles.popper}
-              {...attributes.popper}
-            >
-              <div className="flex w-full items-center justify-start rounded-sm border border-subtle bg-surface-2 px-2">
-                <SearchOutline className="h-3.5 w-3.5 text-tertiary" />
-                <Combobox.Input
-                  ref={inputRef}
-                  className="w-full bg-transparent px-2 py-1 text-caption-sm-regular text-secondary placeholder:text-placeholder focus:outline-none"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={t("common.search.label")}
-                  displayValue={(assigned: any) => assigned?.name || ""}
-                  onKeyDown={searchInputKeyDown}
-                />
-              </div>
-              <div className={`mt-2 max-h-48 overflow-y-scroll`}>
-                {isLoading ? (
-                  <p className="text-center text-secondary">{t("common.loading")}</p>
-                ) : filteredOptions && filteredOptions.length > 0 ? (
-                  <ul className="space-y-1">
-                    {filteredOptions.map((option) => (
-                      <Combobox.Option
-                        as="li"
-                        key={option.value}
-                        value={option.value}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }
-                        }}
-                        className={({ active, selected }) =>
-                          `flex cursor-pointer items-center justify-between gap-2 truncate rounded-sm px-1 py-1.5 select-none hover:bg-layer-1 ${
-                            active ? "bg-layer-1" : ""
-                          } ${selected ? "text-primary" : "text-secondary"}`
+          <Combobox.Options
+            modal={false}
+            as="div"
+            static
+            className={`fixed z-10 my-1 h-auto w-48 rounded-sm border border-strong bg-surface-1 px-2 py-2.5 text-caption-sm-regular whitespace-nowrap shadow-raised-200 focus:outline-none ${optionsClassName}`}
+            ref={setPopperElement}
+            style={styles.popper}
+            {...attributes.popper}
+          >
+            <div className="flex w-full items-center justify-start rounded-sm border border-subtle bg-surface-2 px-2">
+              <SearchOutline className="h-3.5 w-3.5 text-tertiary" />
+              <Combobox.Input
+                ref={inputRef}
+                className="w-full bg-transparent px-2 py-1 text-caption-sm-regular text-secondary placeholder:text-placeholder focus:outline-none"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t("common.search.label")}
+                displayValue={(assigned: any) => assigned?.name || ""}
+                onKeyDown={searchInputKeyDown}
+              />
+            </div>
+            <div className={`mt-2 max-h-48 overflow-y-scroll`}>
+              {isLoading ? (
+                <p className="text-center text-secondary">{t("common.loading")}</p>
+              ) : filteredOptions && filteredOptions.length > 0 ? (
+                <ul className="space-y-1">
+                  {filteredOptions.map((option) => (
+                    <Combobox.Option
+                      as="li"
+                      key={option.value}
+                      value={option.value}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          e.stopPropagation();
                         }
-                      >
-                        {({ selected }) => (
-                          <>
-                            {option.content}
-                            {selected && (
-                              <div className="flex-shrink-0">
-                                <TickOutline className={`h-3.5 w-3.5`} />
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </Combobox.Option>
-                    ))}
-                  </ul>
-                ) : submitting ? (
-                  <LoadingOutline className="h-3.5 w-3.5 animate-spin" />
-                ) : canCreateLabel ? (
-                  <p
-                    onClick={() => {
-                      if (!query.length) return;
-                      handleAddLabel(query);
-                    }}
-                    className={`text-left text-secondary ${query.length ? "cursor-pointer" : "cursor-default"}`}
-                  >
-                    {/* TODO: translate here */}
-                    {query.length ? (
-                      <>
-                        + Add <span className="text-primary">&quot;{query}&quot;</span> to labels
-                      </>
-                    ) : (
-                      t("label.create.type")
-                    )}
-                  </p>
-                ) : (
-                  <p className="text-left text-secondary">{t("common.search.no_matching_results")}</p>
-                )}
-              </div>
+                      }}
+                      className={({ active, selected }) =>
+                        `flex cursor-pointer items-center justify-between gap-2 truncate rounded-sm px-1 py-1.5 select-none hover:bg-layer-1 ${
+                          active ? "bg-layer-1" : ""
+                        } ${selected ? "text-primary" : "text-secondary"}`
+                      }
+                    >
+                      {({ selected }) => (
+                        <>
+                          {option.content}
+                          {selected && (
+                            <div className="flex-shrink-0">
+                              <TickOutline className={`h-3.5 w-3.5`} />
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </Combobox.Option>
+                  ))}
+                </ul>
+              ) : submitting ? (
+                <LoadingOutline className="h-3.5 w-3.5 animate-spin" />
+              ) : canCreateLabel ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!query.length) return;
+                    handleAddLabel(query);
+                  }}
+                  className={`block w-full text-left text-secondary ${query.length ? "cursor-pointer" : "cursor-default"}`}
+                >
+                  {/* TODO: translate here */}
+                  {query.length ? (
+                    <>
+                      + Add <span className="text-primary">&quot;{query}&quot;</span> to labels
+                    </>
+                  ) : (
+                    t("label.create.type")
+                  )}
+                </button>
+              ) : (
+                <p className="text-left text-secondary">{t("common.search.no_matching_results")}</p>
+              )}
             </div>
           </Combobox.Options>
         )}

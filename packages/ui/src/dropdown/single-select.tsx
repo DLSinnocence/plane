@@ -49,7 +49,7 @@ export function Dropdown(props: ISingleSelectDropdown) {
   // states
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null);
+  const [popperElement, setPopperElement] = useState<HTMLElement | null>(null);
   // refs
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   // popper-js refs
@@ -93,8 +93,8 @@ export function Dropdown(props: ISingleSelectDropdown) {
     if (!options) return undefined;
 
     const filteredOptions = queryArray
-      ? (options || []).filter((options) => {
-          const queryString = queryArray.map((query) => options.data[query]).join(" ");
+      ? options.filter((option) => {
+          const queryString = queryArray.map((queryKey) => option.data[queryKey]).join(" ");
           return queryString.toLowerCase().includes(query.toLowerCase());
         })
       : options;
@@ -106,7 +106,7 @@ export function Dropdown(props: ISingleSelectDropdown) {
       (option) => !(value ?? []).includes(option.data[option.value]),
       () => sortByKey && sortByKey.toLowerCase(),
     ]);
-  }, [query, options]);
+  }, [query, options, queryArray, disableSorting, sortByKey, firstItem, value]);
 
   // hooks
   const handleKeyDown = useDropdownKeyPressed(toggleDropdown, handleClose);
@@ -114,6 +114,8 @@ export function Dropdown(props: ISingleSelectDropdown) {
   useOutsideClickDetector(dropdownRef, handleClose, true);
 
   return (
+    // Keyboard events bubble here from the trigger and search input.
+    // oxlint-disable-next-line jsx_a11y/no-static-element-interactions
     <Combobox
       as="div"
       ref={dropdownRef}
@@ -142,33 +144,34 @@ export function Dropdown(props: ISingleSelectDropdown) {
         disabled={disabled}
       />
       {isOpen && (
-        <Combobox.Options as="ul" className="fixed z-10" static>
-          <div
-            className={cn(
-              "my-1 w-48 rounded-sm border-[0.5px] border-strong bg-surface-1 px-2 py-2 text-11 shadow-raised-200 focus:outline-none",
-              optionsContainerClassName
-            )}
-            ref={setPopperElement}
-            style={styles.popper}
-            {...attributes.popper}
-          >
-            <DropdownOptions
-              isOpen={isOpen}
-              query={query}
-              setQuery={setQuery}
-              inputIcon={inputIcon}
-              inputPlaceholder={inputPlaceholder}
-              inputClassName={inputClassName}
-              inputContainerClassName={inputContainerClassName}
-              disableSearch={disableSearch}
-              keyExtractor={keyExtractor}
-              options={sortedOptions}
-              value={value}
-              renderItem={renderItem}
-              loader={loader}
-              handleClose={handleClose}
-            />
-          </div>
+        <Combobox.Options
+          modal={false}
+          as="div"
+          static
+          className={cn(
+            "fixed z-10 my-1 w-48 rounded-sm border-[0.5px] border-strong bg-surface-1 px-2 py-2 text-11 shadow-raised-200 focus:outline-none",
+            optionsContainerClassName
+          )}
+          ref={setPopperElement}
+          style={styles.popper}
+          {...attributes.popper}
+        >
+          <DropdownOptions
+            isOpen={isOpen}
+            query={query}
+            setQuery={setQuery}
+            inputIcon={inputIcon}
+            inputPlaceholder={inputPlaceholder}
+            inputClassName={inputClassName}
+            inputContainerClassName={inputContainerClassName}
+            disableSearch={disableSearch}
+            keyExtractor={keyExtractor}
+            options={sortedOptions}
+            value={value}
+            renderItem={renderItem}
+            loader={loader}
+            handleClose={handleClose}
+          />
         </Combobox.Options>
       )}
     </Combobox>

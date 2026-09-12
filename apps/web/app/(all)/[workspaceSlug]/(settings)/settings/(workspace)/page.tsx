@@ -5,6 +5,9 @@
  */
 
 import { observer } from "mobx-react";
+import Link from "next/link";
+import { EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
+import { useUserPermissions } from "@/hooks/store/user";
 // plane imports
 import { useTranslation } from "@plane/i18n";
 // components
@@ -20,6 +23,12 @@ function GeneralWorkspaceSettingsPage() {
   // store hooks
   const { currentWorkspace } = useWorkspace();
   const { t } = useTranslation();
+  const { allowPermissions } = useUserPermissions();
+  const canConfigureIntegrations = allowPermissions(
+    [EUserPermissions.ADMIN],
+    EUserPermissionsLevel.WORKSPACE,
+    currentWorkspace?.slug
+  );
   // derived values
   const pageTitle = currentWorkspace?.name
     ? t("workspace_settings.page_label", { workspace: currentWorkspace.name })
@@ -28,6 +37,16 @@ function GeneralWorkspaceSettingsPage() {
   return (
     <SettingsContentWrapper header={<GeneralWorkspaceSettingsHeader />}>
       <PageHead title={pageTitle} />
+      {canConfigureIntegrations && currentWorkspace?.slug && (
+        <div className="mb-4 flex justify-end">
+          <Link
+            href={`/${currentWorkspace.slug}/settings/integrations/`}
+            className="rounded-md border border-strong px-3 py-2 text-body-xs-medium text-primary hover:bg-layer-transparent-hover"
+          >
+            {t("feishu_integration.name")} · {t("integrations.configure")}
+          </Link>
+        </div>
+      )}
       <WorkspaceDetails />
     </SettingsContentWrapper>
   );
