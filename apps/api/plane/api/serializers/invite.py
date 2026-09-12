@@ -43,18 +43,9 @@ class WorkspaceInviteSerializer(BaseSerializer):
             validate_email(value)
         except ValidationError:
             raise serializers.ValidationError("Invalid email address", code="INVALID_EMAIL_ADDRESS")
-        return value
+        return value.strip().lower()
 
     def validate_role(self, value):
         if value not in [ROLE.ADMIN.value, ROLE.MEMBER.value, ROLE.GUEST.value]:
             raise serializers.ValidationError("Invalid role", code="INVALID_WORKSPACE_MEMBER_ROLE")
         return value
-
-    def validate(self, data):
-        slug = self.context["slug"]
-        if (
-            data.get("email")
-            and WorkspaceMemberInvite.objects.filter(email=data["email"], workspace__slug=slug).exists()
-        ):
-            raise serializers.ValidationError("Email already invited", code="EMAIL_ALREADY_INVITED")
-        return data

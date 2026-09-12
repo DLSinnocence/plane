@@ -93,6 +93,7 @@ export const FeishuSettings = observer(function FeishuSettings({ workspaceSlug }
           {t("feishu_integration.name")}
         </h4>
         <p className="mt-1 text-13 text-secondary">{t("feishu_integration.description")}</p>
+        <p className="mt-2 text-13 text-secondary">{t("feishu_integration.nickname_help")}</p>
       </div>
       {error && (
         <p role="alert" className="text-13 text-danger-primary">

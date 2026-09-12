@@ -5,7 +5,7 @@
 import json
 import re
 import uuid
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import requests
 from cryptography.fernet import Fernet
@@ -86,6 +86,8 @@ class FeishuClient:
         self.app_id = app_id
         self.app_secret = app_secret
         self._access_token = None
+        self._display_names = {}
+        self._resolved_mobiles = {}
 
     def _post(self, url, **kwargs):
         if url not in {TOKEN_URL, MESSAGE_URL, CONTACT_URL}:
@@ -94,6 +96,10 @@ class FeishuClient:
             response = requests.post(url, timeout=(3.05, 10), allow_redirects=False, **kwargs)
         except requests.RequestException:
             raise FeishuError("network_error", retryable=True) from None
+        return self._response_data(response)
+
+    @staticmethod
+    def _response_data(response):
         if response.status_code == 429 or 500 <= response.status_code < 600:
             raise FeishuError("provider_unavailable", retryable=True)
         if not 200 <= response.status_code < 300:
@@ -130,12 +136,66 @@ class FeishuClient:
                     continue
                 raise
 
+    def _get_user(self, open_id):
+        if not valid_open_id(open_id):
+            raise FeishuError("invalid_provider_response")
+        url = f"https://open.feishu.cn/open-apis/contact/v3/users/{quote(open_id, safe='')}?user_id_type=open_id"
+        try:
+            response = requests.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {self._access_token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                timeout=(3.05, 10),
+                allow_redirects=False,
+            )
+        except requests.RequestException:
+            raise FeishuError("network_error", retryable=True) from None
+        return self._response_data(response)
+
+    def get_display_name(self, open_id) -> str:
+        """Return the official Feishu nickname, name, or English name for an open ID.
+
+        Cache successful lookups only for this client instance. Missing contact
+        permissions or unavailable names raise a sanitized FeishuError.
+        """
+        if not valid_open_id(open_id):
+            raise FeishuError("invalid_provider_response")
+        if open_id in self._display_names:
+            return self._display_names[open_id]
+        if not self._access_token:
+            self._access_token = self._token()
+        for refresh in range(2):
+            try:
+                data = self._get_user(open_id)
+                break
+            except FeishuError as exc:
+                if exc.token_expired and refresh == 0:
+                    self._access_token = self._token()
+                    continue
+                raise
+        body = data.get("data")
+        user = body.get("user") if isinstance(body, dict) else None
+        if not isinstance(user, dict):
+            raise FeishuError("user_name_unavailable")
+        if "open_id" in user and user["open_id"] != open_id:
+            raise FeishuError("invalid_provider_response")
+        for field in ("nickname", "name", "en_name"):
+            value = user.get(field)
+            if isinstance(value, str) and value.strip():
+                self._display_names[open_id] = value.strip()
+                return self._display_names[open_id]
+        raise FeishuError("user_name_unavailable")
+
     def resolve_mobile(self, mobile):
         normalized = normalize_phone_number(mobile)
         if not mobile:
             raise FeishuError("phone_missing")
         if not normalized or normalized != mobile:
             raise FeishuError("phone_invalid")
+        if normalized in self._resolved_mobiles:
+            return self._resolved_mobiles[normalized]
         data = self._authorized_post(CONTACT_URL, {"mobiles": [normalized], "include_resigned": False})
         body = data.get("data")
         if not isinstance(body, dict) or not isinstance(body.get("user_list"), list):
@@ -174,7 +234,9 @@ class FeishuClient:
             raise FeishuError("phone_ambiguous")
         if not open_ids:
             raise FeishuError("phone_not_found")
-        return open_ids.pop()
+        open_id = open_ids.pop()
+        self._resolved_mobiles[normalized] = open_id
+        return open_id
 
     def send_card(self, open_id, card, message_id):
         if not valid_open_id(open_id):

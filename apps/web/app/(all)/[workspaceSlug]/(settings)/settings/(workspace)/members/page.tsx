@@ -22,6 +22,9 @@ import { MemberListFiltersDropdown } from "@/components/project/dropdowns/filter
 import { WorkspaceMembersList } from "@/components/workspace/settings/members-list";
 import { SettingsContentWrapper } from "@/components/settings/content-wrapper";
 import { SendWorkspaceInvitationModal } from "@/components/workspace/members";
+import { InvitationResultPanel } from "@/components/workspace/invite-modal/result";
+import type { InvitationResult } from "@/helpers/invitations.helper";
+import { invitationErrorMessage, invitationStatusMessage } from "@/helpers/invitations.helper";
 // hooks
 import { useMember } from "@/hooks/store/use-member";
 import { useWorkspace } from "@/hooks/store/use-workspace";
@@ -33,6 +36,7 @@ import { MembersWorkspaceSettingsHeader } from "./header";
 const WorkspaceMembersSettingsPage = observer(function WorkspaceMembersSettingsPage({ params }: Route.ComponentProps) {
   // states
   const [inviteModal, setInviteModal] = useState(false);
+  const [invitationResult, setInvitationResult] = useState<InvitationResult>();
   const [searchQuery, setSearchQuery] = useState<string>("");
   // router
   const { workspaceSlug } = params;
@@ -53,25 +57,19 @@ const WorkspaceMembersSettingsPage = observer(function WorkspaceMembersSettingsP
 
   const handleWorkspaceInvite = async (data: IWorkspaceBulkInviteFormData) => {
     try {
-      await inviteMembersToWorkspace(workspaceSlug, data);
-
+      const result = await inviteMembersToWorkspace(workspaceSlug, data);
+      setInvitationResult(result);
       setInviteModal(false);
-
       setToast({
         type: TOAST_TYPE.SUCCESS,
-        title: "Success!",
-        message: t("workspace_settings.settings.members.invitations_sent_successfully"),
+        title: t("workspace_settings.settings.members.invitation_flow.created"),
+        message: invitationStatusMessage(result, t),
       });
     } catch (error: unknown) {
-      let message = undefined;
-      if (error instanceof Error) {
-        const err = error as Error & { error?: string };
-        message = err.error;
-      }
       setToast({
         type: TOAST_TYPE.ERROR,
-        title: "Error!",
-        message: `${message ?? t("something_went_wrong_please_try_again")}`,
+        title: t("workspace_settings.settings.members.invitation_flow.create_failed"),
+        message: invitationErrorMessage(error, t),
       });
 
       throw error;
@@ -106,6 +104,7 @@ const WorkspaceMembersSettingsPage = observer(function WorkspaceMembersSettingsP
         onClose={() => setInviteModal(false)}
         onSubmit={handleWorkspaceInvite}
       />
+      {invitationResult && canPerformWorkspaceAdminActions && <InvitationResultPanel result={invitationResult} />}
       <section
         className={cn("size-full", {
           "opacity-60": !canPerformWorkspaceMemberActions,

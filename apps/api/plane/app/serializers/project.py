@@ -197,6 +197,13 @@ class ProjectMemberRoleSerializer(DynamicBaseSerializer):
 class ProjectMemberInviteSerializer(BaseSerializer):
     project = ProjectLiteSerializer(read_only=True)
     workspace = WorkspaceLiteSerializer(read_only=True)
+    invite_link = serializers.SerializerMethodField()
+
+    def get_invite_link(self, obj):
+        return (
+            f"/workspace-invitations/?invitation_id={obj.id}&slug={obj.workspace.slug}"
+            f"&project_id={obj.project_id}&token={obj.token}"
+        )
 
     class Meta:
         model = ProjectMemberInvite
@@ -221,7 +228,6 @@ class ProjectMemberInvitePublicSerializer(BaseSerializer):
             "project",
             "workspace",
             "role",
-            "message",
             "accepted",
             "responded_at",
         ]

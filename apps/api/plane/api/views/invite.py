@@ -19,6 +19,11 @@ from plane.db.models import WorkspaceMemberInvite, Workspace
 from plane.api.serializers import WorkspaceInviteSerializer
 from plane.utils.permissions import WorkspaceOwnerPermission
 from plane.utils.openapi.parameters import WORKSPACE_SLUG_PARAMETER
+from plane.app.serializers import WorkSpaceMemberInviteSerializer
+from plane.bgtasks.workspace_invitation_task import workspace_invitation
+from plane.db.models import WorkspaceMember
+from plane.utils.host import base_host
+from plane.utils.invitations import persist_invitations, invitation_response
 
 
 class WorkspaceInvitationsViewset(BaseViewSet):
@@ -90,8 +95,24 @@ class WorkspaceInvitationsViewset(BaseViewSet):
         workspace = Workspace.objects.get(slug=slug)
         serializer = WorkspaceInviteSerializer(data=request.data, context={"slug": slug})
         serializer.is_valid(raise_exception=True)
-        serializer.save(workspace=workspace, created_by=request.user)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        recipient = {"email": serializer.validated_data["email"], "role": serializer.validated_data.get("role", 5)}
+        if WorkspaceMember.objects.filter(
+            workspace=workspace, member__email__iexact=recipient["email"], is_active=True
+        ).exists():
+            return Response({"error": "User is already a member of the workspace"}, status=status.HTTP_400_BAD_REQUEST)
+        invitations = persist_invitations(WorkspaceMemberInvite, workspace, [recipient], request.user)
+        payload = dict(WorkspaceInviteSerializer(invitations[0]).data)
+        payload.update(
+            invitation_response(
+                invitations,
+                WorkSpaceMemberInviteSerializer,
+                workspace_invitation,
+                workspace.id,
+                lambda: base_host(request=request, is_app=True),
+                request.user.email,
+            )
+        )
+        return Response(payload, status=status.HTTP_201_CREATED)
 
     @extend_schema(
         summary="Update workspace invite",

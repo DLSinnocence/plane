@@ -27,7 +27,10 @@ def project_invitation(email, project_id, token, current_site, invitor):
         project = Project.objects.get(pk=project_id)
         project_member_invite = ProjectMemberInvite.objects.get(token=token, email=email)
 
-        relativelink = f"/project-invitations/?invitation_id={project_member_invite.id}&email={email}&slug={project.workspace.slug}&project_id={str(project_id)}"  # noqa: E501
+        relativelink = (
+            f"/workspace-invitations/?invitation_id={project_member_invite.id}"
+            f"&slug={project.workspace.slug}&project_id={project_id}&token={token}"
+        )
         abs_url = current_site + relativelink
 
         subject = f"{user.first_name or user.display_name or user.email} invited you to join {project.name} on Plane"
@@ -57,6 +60,8 @@ def project_invitation(email, project_id, token, current_site, invitor):
             EMAIL_USE_SSL,
             EMAIL_FROM,
         ) = get_email_configuration()
+        if not EMAIL_HOST:
+            return
 
         connection = get_connection(
             host=EMAIL_HOST,

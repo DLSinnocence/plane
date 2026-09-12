@@ -12,6 +12,7 @@ import useSWR from "swr";
 import { LogoSpinner } from "@/components/common/logo-spinner";
 // helpers
 import { EPageTypes } from "@/helpers/authentication.helper";
+import { getSafeNextPath, getOnboardingPath, getSignInPath } from "@/helpers/authentication-redirect";
 // hooks
 import { useWorkspace } from "@/hooks/store/use-workspace";
 import { useUser, useUserProfile, useUserSettings } from "@/hooks/store/user";
@@ -24,16 +25,11 @@ type TAuthenticationWrapper = {
   pageType?: TPageType;
 };
 
-const isValidURL = (url: string): boolean => {
-  const disallowedSchemes = /^(https?|ftp):\/\//i;
-  return !disallowedSchemes.test(url);
-};
-
 export const AuthenticationWrapper = observer(function AuthenticationWrapper(props: TAuthenticationWrapper) {
   const pathname = usePathname();
   const router = useAppRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next_path");
+  const nextPath = getSafeNextPath(searchParams.get("next_path"));
   // props
   const { children, pageType = EPageTypes.AUTHENTICATED } = props;
   // hooks
@@ -59,10 +55,7 @@ export const AuthenticationWrapper = observer(function AuthenticationWrapper(pro
     let redirectionRoute = "/create-workspace";
 
     // validating the nextPath from the router query
-    if (nextPath && isValidURL(nextPath.toString())) {
-      redirectionRoute = nextPath.toString();
-      return redirectionRoute;
-    }
+    if (nextPath) return nextPath;
 
     // validate the last and fallback workspace_slug
     const currentWorkspaceSlug =
@@ -95,7 +88,7 @@ export const AuthenticationWrapper = observer(function AuthenticationWrapper(pro
         router.push(currentRedirectRoute);
         return <></>;
       } else {
-        router.push("/onboarding");
+        router.push(getOnboardingPath(nextPath));
         return <></>;
       }
     }
@@ -103,7 +96,7 @@ export const AuthenticationWrapper = observer(function AuthenticationWrapper(pro
 
   if (pageType === EPageTypes.ONBOARDING) {
     if (!currentUser?.id) {
-      router.push(`/${pathname ? `?next_path=${pathname}` : ``}`);
+      router.push(getSignInPath(pathname, searchParams.toString()));
       return <></>;
     } else {
       if (currentUser && currentUserProfile?.id && isUserOnboard) {
@@ -116,7 +109,7 @@ export const AuthenticationWrapper = observer(function AuthenticationWrapper(pro
 
   if (pageType === EPageTypes.SET_PASSWORD) {
     if (!currentUser?.id) {
-      router.push(`/${pathname ? `?next_path=${pathname}` : ``}`);
+      router.push(getSignInPath(pathname, searchParams.toString()));
       return <></>;
     } else {
       if (currentUser && !currentUser?.is_password_autoset && currentUserProfile?.id && isUserOnboard) {
@@ -131,11 +124,11 @@ export const AuthenticationWrapper = observer(function AuthenticationWrapper(pro
     if (currentUser?.id) {
       if (currentUserProfile && currentUserProfile?.id && isUserOnboard) return <>{children}</>;
       else {
-        router.push(`/onboarding`);
+        router.push(getOnboardingPath(nextPath));
         return <></>;
       }
     } else {
-      router.push(`/${pathname ? `?next_path=${pathname}` : ``}`);
+      router.push(getSignInPath(pathname, searchParams.toString()));
       return <></>;
     }
   }

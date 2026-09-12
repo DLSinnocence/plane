@@ -11,6 +11,7 @@ import { computedFn } from "mobx-utils";
 import type { EUserPermissions } from "@plane/constants";
 import type { IWorkspaceBulkInviteFormData, IWorkspaceMember, IWorkspaceMemberInvitation } from "@plane/types";
 // services
+import type { InvitationResult } from "@/helpers/invitations.helper";
 import { WorkspaceService } from "@/services/workspace.service";
 // types
 import type { IRouterStore } from "@/store/router.store";
@@ -52,7 +53,7 @@ export interface IWorkspaceMemberStore {
   updateMember: (workspaceSlug: string, userId: string, data: { role: EUserPermissions }) => Promise<void>;
   removeMemberFromWorkspace: (workspaceSlug: string, userId: string) => Promise<void>;
   // invite actions
-  inviteMembersToWorkspace: (workspaceSlug: string, data: IWorkspaceBulkInviteFormData) => Promise<void>;
+  inviteMembersToWorkspace: (workspaceSlug: string, data: IWorkspaceBulkInviteFormData) => Promise<InvitationResult>;
   updateMemberInvitation: (
     workspaceSlug: string,
     invitationId: string,
@@ -308,7 +309,13 @@ export class WorkspaceMemberStore implements IWorkspaceMemberStore {
    */
   inviteMembersToWorkspace = async (workspaceSlug: string, data: IWorkspaceBulkInviteFormData) => {
     const response = await this.workspaceService.inviteWorkspace(workspaceSlug, data);
-    await this.fetchWorkspaceMemberInvitations(workspaceSlug);
+    runInAction(() => {
+      const invitations = new Map(
+        (this.workspaceMemberInvitations[workspaceSlug] ?? []).map((invite) => [invite.id, invite])
+      );
+      for (const invitation of response.invitations ?? []) invitations.set(invitation.id, invitation);
+      set(this.workspaceMemberInvitations, workspaceSlug, [...invitations.values()]);
+    });
     return response;
   };
 

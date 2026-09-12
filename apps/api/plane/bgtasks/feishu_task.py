@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from plane.db.models import FeishuIntegration, FeishuMessage, Issue, ProjectMember, User, WorkspaceMember
 from plane.utils.feishu import FeishuClient, FeishuError, decrypt_secret, valid_open_id
+from plane.utils.feishu_card_people import hydrate_card_names
 from plane.utils.phone import normalize_phone_number
 
 MAX_ATTEMPTS = 4
@@ -183,7 +184,9 @@ def deliver_feishu_message(self, message_id):
         client = FeishuClient(integration.app_id, decrypt_secret(integration.app_secret))
         if not resolve_recipient(message, client, claim):
             return
-        # Contact resolution may take time; recheck phone, roles and app configuration.
+        if not hydrate_card_names(message, integration, client, claim, LEASE_SECONDS):
+            return
+        # Contact/name resolution may take time; recheck phone, roles and app configuration.
         integration = FeishuIntegration.objects.select_related("workspace").filter(pk=message.integration_id).first()
         reason = recipient_error(message, integration) if integration else "integration_disabled"
         if reason:

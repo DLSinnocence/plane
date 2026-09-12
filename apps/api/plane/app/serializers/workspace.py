@@ -118,6 +118,16 @@ class WorkSpaceMemberInviteSerializer(BaseSerializer):
     workspace = WorkspaceLiteSerializer(read_only=True)
     invite_link = serializers.SerializerMethodField()
 
+    def validate_role(self, value):
+        request = self.context.get("request")
+        if request and self.instance:
+            member_role = WorkspaceMember.objects.filter(
+                workspace=self.instance.workspace, member=request.user, is_active=True
+            ).values_list("role", flat=True).first()
+            if member_role is None or value > member_role:
+                raise serializers.ValidationError("You cannot invite a user with higher role")
+        return value
+
     def get_invite_link(self, obj):
         return f"/workspace-invitations/?invitation_id={obj.id}&slug={obj.workspace.slug}&token={obj.token}"
 
@@ -154,7 +164,6 @@ class WorkSpaceMemberInvitePublicSerializer(BaseSerializer):
             "email",
             "workspace",
             "role",
-            "message",
             "accepted",
             "responded_at",
             "created_at",

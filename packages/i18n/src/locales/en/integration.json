@@ -1,6 +1,7 @@
 {
   "feishu_integration": {
     "name": "Feishu",
+    "nickname_help": "Card names prefer Feishu nicknames. Enable Get basic information in contacts and Obtain user's basic information for the relevant people. Unavailable names are labelled accordingly and never fall back to SSO nicknames.",
     "description": "Send application bot direct-message cards for work item field changes, comments, and related activity. Reassignment and state handoffs notify both previous and new assignees. Cards link to work item details.",
     "app_id": "App ID",
     "app_secret": "App secret",

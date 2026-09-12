@@ -16,6 +16,7 @@ import { ModalCore } from "../../../../../packages/ui/src/modals/modal-core";
 import { CustomSearchSelect } from "./ui";
 import { users } from "./mocks";
 import { IntegrationRouteFixture } from "./integration-route";
+import { InvitationResultFixture } from "./invitation-result";
 
 function App() {
   const [memberIds, setMemberIds] = useState<string[]>([]);
@@ -101,7 +102,9 @@ function App() {
   );
 }
 createRoot(document.getElementById("root")!).render(
-  window.location.pathname.startsWith("/workspace/") ? (
+  new URLSearchParams(window.location.search).has("invitation-result") ? (
+    <InvitationResultFixture />
+  ) : window.location.pathname.startsWith("/workspace/") ? (
     <IntegrationRouteFixture />
   ) : new URLSearchParams(window.location.search).has("settings") ? (
     <MemoryRouter initialEntries={["/workspace/settings/integrations/"]}>

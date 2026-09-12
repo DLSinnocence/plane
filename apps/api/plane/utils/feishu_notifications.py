@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from django.db import transaction
 
 from plane.utils.feishu import configured_app_url
+from plane.utils.feishu_card_people import NAME_SLOTS_KEY, member_parts, render_parts
 from plane.utils.phone import normalize_phone_number
 
 from plane.db.models import (
@@ -51,7 +52,7 @@ FIELDS = {
 PRIORITIES = {"urgent": "紧急", "high": "高", "medium": "中", "low": "低", "none": "无"}
 EVENT_TITLES = {
     "issue.activity.created": "创建了工作项",
-    "issue.activity.updated": "更新了工作项",
+    "issue.activity.updated": "修改了工作项",
     "comment.activity.created": "发表了评论",
     "comment.activity.updated": "编辑了评论",
     "comment.activity.deleted": "删除了评论",
@@ -122,14 +123,9 @@ def normalized(field, value):
     return str(value)
 
 
-def member_names(ids):
-    names = dict(User.objects.filter(pk__in=ids).values_list("pk", "display_name"))
-    return "、".join(plain_text(names.get(UUID(member)) or "已移除成员", 80) for member in sorted(ids)) or "未分配"
-
-
 def display_value(field, value, issue):
     if field == "assignees":
-        return member_names(user_ids(value))
+        return render_parts(member_parts(user_ids(value)))
     if field == "labels":
         ids = user_ids(value)
         names = Label.objects.filter(project_id=issue.project_id, pk__in=ids).values_list("name", flat=True)
@@ -176,9 +172,9 @@ def plan_change_lines(before, after, issue):
             state = None
         old_ids, new_ids = user_ids(before.get(state_id)), user_ids(after.get(state_id))
         extra_recipients.update(old_ids | new_ids)
-        old_label = member_names(old_ids) if state_id in before else "沿用当前负责人"
-        new_label = member_names(new_ids) if state_id in after else "沿用当前负责人"
-        lines.append(f"{plain_text(state.name if state else '已移除状态', 100)}：{old_label} → {new_label}")
+        old_label = member_parts(old_ids) if state_id in before else ["沿用当前负责人"]
+        new_label = member_parts(new_ids) if state_id in after else ["沿用当前负责人"]
+        lines.append([f"{plain_text(state.name if state else '已移除状态', 100)}：", *old_label, " → ", *new_label])
     return lines, extra_recipients
 
 
@@ -194,6 +190,8 @@ def field_changes(before, after, issue):
             plan_lines, members = plan_change_lines(old_value, new_value, issue)
             lines.extend(plan_lines)
             extra_recipients.update(members)
+        elif field == "assignees":
+            lines.append([f"{label}：", *member_parts(user_ids(old_value)), " → ", *member_parts(user_ids(new_value))])
         else:
             lines.append(
                 f"{label}：{display_value(field, old_value, issue)} → {display_value(field, new_value, issue)}"
@@ -212,12 +210,28 @@ def issue_url(issue):
 
 
 def build_card(issue, actor, event_type, lines):
-    title = f"{issue.project.identifier}-{issue.sequence_id} {plain_text(issue.name, 180)}"
+    title = f"工作项更新提醒 - {plain_text(issue.name, 180)}"
     action = EVENT_TITLES[event_type]
-    summary = "\n".join(lines[:12])
+    action = action.replace("工作项", "与你有关的工作项", 1) if "工作项" in action else f"在与你有关的工作项中{action}"
+    actor_parts = [
+        f"工作项：{issue.project.identifier}-{issue.sequence_id}\n",
+        {"user_id": str(actor.pk)} if actor else "系统",
+        action,
+    ]
+    summary_parts = []
+    for line in lines[:12]:
+        if summary_parts:
+            summary_parts.append("\n")
+        summary_parts.extend(line if isinstance(line, list) else [line])
     if len(lines) > 12:
-        summary += f"\n另有 {len(lines) - 12} 项变更，请打开详情查看。"
+        summary_parts.append(f"\n另有 {len(lines) - 12} 项变更，请打开详情查看。")
+    if not summary_parts:
+        summary_parts.append(action)
     return {
+        NAME_SLOTS_KEY: [
+            {"element_index": 0, "parts": actor_parts},
+            {"element_index": 1, "parts": summary_parts},
+        ],
         "config": {"wide_screen_mode": True},
         "header": {"template": "blue", "title": {"tag": "plain_text", "content": title}},
         "elements": [
@@ -225,10 +239,10 @@ def build_card(issue, actor, event_type, lines):
                 "tag": "div",
                 "text": {
                     "tag": "plain_text",
-                    "content": f"{plain_text(actor.display_name if actor else '系统', 100)}{action}",
+                    "content": render_parts(actor_parts),
                 },
             },
-            {"tag": "div", "text": {"tag": "plain_text", "content": (summary or action)[:6000]}},
+            {"tag": "div", "text": {"tag": "plain_text", "content": render_parts(summary_parts)[:6000]}},
             {
                 "tag": "action",
                 "actions": [

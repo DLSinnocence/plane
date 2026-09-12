@@ -1,123 +1,134 @@
 /**
  * Copyright (c) 2023-present Plane Software, Inc. and contributors
  * SPDX-License-Identifier: AGPL-3.0-only
- * See the LICENSE file for details.
  */
 
+import { useState } from "react";
 import { observer } from "mobx-react";
 import { useSearchParams } from "next/navigation";
 import useSWR from "swr";
+import { useTranslation } from "@plane/i18n";
 import { BoxesOutline, CloseOutline, TickOutline, UserOutline } from "@makeplane/propel/icons";
-// components
 import { LogoSpinner } from "@/components/common/logo-spinner";
 import { EmptySpace, EmptySpaceItem } from "@/components/ui/empty-space";
-// constants
-import { WORKSPACE_INVITATION } from "@plane/constants";
-// helpers
 import { EPageTypes } from "@/helpers/authentication.helper";
-// hooks
+import { invitationErrorMessage } from "@/helpers/invitations.helper";
 import { useUser } from "@/hooks/store/user";
 import { useAppRouter } from "@/hooks/use-app-router";
-// wrappers
 import { AuthenticationWrapper } from "@/lib/wrappers/authentication-wrapper";
-import { WorkspaceService } from "@/services/workspace.service";
-// services
+import { InvitationService } from "@/services/invitation.service";
 
-// service initialization
-const workspaceService = new WorkspaceService();
+const invitationService = new InvitationService();
 
 function WorkspaceInvitationPage() {
-  // router
+  const { t } = useTranslation();
   const router = useAppRouter();
-  // query params
   const searchParams = useSearchParams();
-  const invitation_id = searchParams.get("invitation_id");
+  const invitationId = searchParams.get("invitation_id");
   const slug = searchParams.get("slug");
   const token = searchParams.get("token");
-  // store hooks
+  const projectId = searchParams.get("project_id");
   const { data: currentUser } = useUser();
-
-  const { data: invitationDetail, error } = useSWR(
-    invitation_id && slug && WORKSPACE_INVITATION(invitation_id.toString()),
-    invitation_id && slug
-      ? () => workspaceService.getWorkspaceInvitation(slug.toString(), invitation_id.toString())
-      : null
+  const [actionError, setActionError] = useState<string>();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const validLink = !!(invitationId && slug && token);
+  const nextPath = `/workspace-invitations/?${searchParams.toString()}`;
+  const loginHref = `/?next_path=${encodeURIComponent(nextPath)}`;
+  const signupHref = `/sign-up?next_path=${encodeURIComponent(nextPath)}`;
+  const { data: invitation, error } = useSWR(
+    validLink ? ["INVITATION", slug, invitationId, projectId] : null,
+    () => invitationService.detail(slug!, invitationId!, projectId),
+    { shouldRetryOnError: false }
+  );
+  const wrongEmail = !!(
+    currentUser &&
+    invitation?.email &&
+    currentUser.email.toLowerCase() !== invitation.email.toLowerCase()
   );
 
-  const handleAccept = () => {
-    if (!invitationDetail) return;
-    workspaceService
-      .joinWorkspace(invitationDetail.workspace.slug, invitationDetail.id, {
-        accepted: true,
-        token: token,
-      })
-      .then(() => {
-        if (invitationDetail.email === currentUser?.email) {
-          router.push(`/${invitationDetail.workspace.slug}`);
-        } else {
-          router.push("/");
-        }
-        return undefined;
-      })
-      .catch((err: unknown) => console.error(err));
-  };
-
-  const handleReject = () => {
-    if (!invitationDetail || !token) return;
-    void workspaceService
-      .joinWorkspace(invitationDetail.workspace.slug, invitationDetail.id, {
-        accepted: false,
-        token: token,
-      })
-      .then(() => {
-        router.push("/");
-        return undefined;
-      })
-      .catch((err: unknown) => console.error(err));
+  const respond = async (accepted: boolean) => {
+    if (!invitation || !slug || !token || !currentUser || wrongEmail || isSubmitting) return;
+    setIsSubmitting(true);
+    setActionError(undefined);
+    try {
+      await invitationService.respond(slug, invitation.id, token, accepted, projectId);
+      router.push(accepted ? (projectId ? `/${slug}/projects/${projectId}/issues` : `/${slug}`) : "/");
+    } catch (err) {
+      setActionError(invitationErrorMessage(err, t));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <AuthenticationWrapper pageType={EPageTypes.PUBLIC}>
-      <div className="flex h-full w-full flex-col items-center justify-center px-3">
-        {invitationDetail && !invitationDetail.responded_at ? (
-          error ? (
-            <div className="shadow-2xl flex w-full flex-col space-y-4 rounded-sm border border-subtle bg-surface-1 px-4 py-8 text-center md:w-1/3">
-              <h2 className="text-18 uppercase">INVITATION NOT FOUND</h2>
-            </div>
-          ) : (
-            <EmptySpace
-              title={`You have been invited to ${invitationDetail.workspace.name}`}
-              description="Your workspace is where you'll create projects, collaborate on your work items, and organize different streams of work in your Plane account."
-            >
-              <EmptySpaceItem Icon={TickOutline} title="Accept" action={handleAccept} />
-              <EmptySpaceItem Icon={CloseOutline} title="Ignore" action={handleReject} />
-            </EmptySpace>
-          )
-        ) : error || invitationDetail?.responded_at ? (
-          invitationDetail?.accepted ? (
-            <EmptySpace
-              title={`You are already a member of ${invitationDetail.workspace.name}`}
-              description="Your workspace is where you'll create projects, collaborate on your work items, and organize different streams of work in your Plane account."
-            >
-              <EmptySpaceItem Icon={BoxesOutline} title="Continue to home" href="/" />
-            </EmptySpace>
-          ) : (
-            <EmptySpace
-              title="This invitation link is not active anymore."
-              description="Your workspace is where you'll create projects, collaborate on your work items, and organize different streams of work in your Plane account."
-              link={{ text: "Or start from an empty project", href: "/" }}
-            >
-              {!currentUser ? (
-                <EmptySpaceItem Icon={UserOutline} title="Sign in to continue" href="/" />
-              ) : (
-                <EmptySpaceItem Icon={BoxesOutline} title="Continue to home" href="/" />
-              )}
-            </EmptySpace>
-          )
+      <div className="flex h-full w-full flex-col items-center justify-center gap-4 px-3">
+        {!validLink || error || invitation?.responded_at ? (
+          <EmptySpace
+            title={t("workspace_settings.settings.members.invitation_flow.invalid_link")}
+            description={t("workspace_settings.settings.members.invitation_flow.request_new_link")}
+          >
+            <EmptySpaceItem
+              Icon={BoxesOutline}
+              title={t("workspace_settings.settings.members.invitation_flow.home")}
+              href="/"
+            />
+          </EmptySpace>
+        ) : invitation ? (
+          <EmptySpace
+            title={t("workspace_settings.settings.members.invitation_flow.invited_to", {
+              name: invitation.project?.name ?? invitation.workspace.name,
+            })}
+            description={
+              invitation.email
+                ? t("workspace_settings.settings.members.invitation_flow.signin_email", { email: invitation.email })
+                : t("workspace_settings.settings.members.invitation_flow.signin_invited")
+            }
+          >
+            {!currentUser ? (
+              <>
+                <EmptySpaceItem
+                  Icon={UserOutline}
+                  title={t("workspace_settings.settings.members.invitation_flow.signin")}
+                  href={loginHref}
+                />
+                <EmptySpaceItem
+                  Icon={UserOutline}
+                  title={t("workspace_settings.settings.members.invitation_flow.signup")}
+                  href={signupHref}
+                />
+              </>
+            ) : wrongEmail ? (
+              <p role="alert" className="text-13 text-danger-primary">
+                {t("workspace_settings.settings.members.invitation_flow.wrong_email", {
+                  currentEmail: currentUser.email,
+                  invitedEmail: invitation.email,
+                })}
+              </p>
+            ) : isSubmitting ? (
+              <p role="status">{t("workspace_settings.settings.members.invitation_flow.saving")}</p>
+            ) : (
+              <>
+                <EmptySpaceItem
+                  Icon={TickOutline}
+                  title={t("workspace_settings.settings.members.invitation_flow.accept")}
+                  action={() => void respond(true)}
+                />
+                <EmptySpaceItem
+                  Icon={CloseOutline}
+                  title={t("workspace_settings.settings.members.invitation_flow.ignore")}
+                  action={() => void respond(false)}
+                />
+              </>
+            )}
+          </EmptySpace>
         ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            <LogoSpinner />
-          </div>
+          <LogoSpinner />
+        )}
+        {actionError && (
+          <p role="alert" className="text-13 text-danger-primary">
+            {actionError}
+          </p>
         )}
       </div>
     </AuthenticationWrapper>

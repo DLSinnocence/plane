@@ -2,15 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
-# Python imports
-from datetime import datetime
-
-import jwt
-
 # Django imports
-from django.conf import settings
-from django.core.exceptions import ValidationError
-from django.core.validators import validate_email
+from django.db import transaction
 from django.utils import timezone
 
 # Third party modules
@@ -27,9 +20,10 @@ from plane.app.serializers import (
 )
 from plane.app.views.base import BaseAPIView
 from plane.bgtasks.workspace_invitation_task import workspace_invitation
-from plane.db.models import User, Workspace, WorkspaceMember, WorkspaceMemberInvite
+from plane.db.models import Workspace, WorkspaceMember, WorkspaceMemberInvite
 from plane.utils.cache import invalidate_cache, invalidate_cache_directly
 from plane.utils.host import base_host
+from plane.utils.invitations import InvitationRequestSerializer, persist_invitations, invitation_response
 from .. import BaseViewSet
 
 
@@ -50,10 +44,9 @@ class WorkspaceInvitationsViewset(BaseViewSet):
         )
 
     def create(self, request, slug):
-        emails = request.data.get("emails", [])
-        # Check if email is provided
-        if not emails:
-            return Response({"error": "Emails are required"}, status=status.HTTP_400_BAD_REQUEST)
+        request_serializer = InvitationRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        emails = request_serializer.validated_data["emails"]
 
         # check for role level of the requesting user
         requesting_user = WorkspaceMember.objects.get(workspace__slug=slug, member=request.user, is_active=True)
@@ -84,48 +77,16 @@ class WorkspaceInvitationsViewset(BaseViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        workspace_invitations = []
-        for email in emails:
-            try:
-                validate_email(email.get("email"))
-                workspace_invitations.append(
-                    WorkspaceMemberInvite(
-                        email=email.get("email").strip().lower(),
-                        workspace_id=workspace.id,
-                        token=jwt.encode(
-                            {"email": email, "timestamp": datetime.now().timestamp()},
-                            settings.SECRET_KEY,
-                            algorithm="HS256",
-                        ),
-                        role=email.get("role", 5),
-                        created_by=request.user,
-                    )
-                )
-            except ValidationError:
-                return Response(
-                    {
-                        "error": f"Invalid email - {email} provided a valid email address is required to send the invite"  # noqa: E501
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-        # Create workspace member invite
-        workspace_invitations = WorkspaceMemberInvite.objects.bulk_create(
-            workspace_invitations, batch_size=10, ignore_conflicts=True
+        workspace_invitations = persist_invitations(WorkspaceMemberInvite, workspace, emails, request.user)
+        payload = invitation_response(
+            workspace_invitations,
+            WorkSpaceMemberInviteSerializer,
+            workspace_invitation,
+            workspace.id,
+            lambda: base_host(request=request, is_app=True),
+            request.user.email,
         )
-
-        current_site = base_host(request=request, is_app=True)
-
-        # Send invitations
-        for invitation in workspace_invitations:
-            workspace_invitation.delay(
-                invitation.email,
-                workspace.id,
-                invitation.token,
-                current_site,
-                request.user.email,
-            )
-
-        return Response({"message": "Emails sent successfully"}, status=status.HTTP_200_OK)
+        return Response(payload, status=status.HTTP_200_OK)
 
     def destroy(self, request, slug, pk):
         workspace_member_invite = WorkspaceMemberInvite.objects.get(pk=pk, workspace__slug=slug)
@@ -146,8 +107,9 @@ class WorkspaceJoinEndpoint(BaseAPIView):
         url_params=True,
     )
     @invalidate_cache(path="/api/users/me/settings/", multiple=True)
+    @transaction.atomic
     def post(self, request, slug, pk):
-        workspace_invite = WorkspaceMemberInvite.objects.get(pk=pk, workspace__slug=slug)
+        workspace_invite = WorkspaceMemberInvite.objects.select_for_update().get(pk=pk, workspace__slug=slug)
 
         token = request.data.get("token", "")
 
@@ -175,13 +137,16 @@ class WorkspaceJoinEndpoint(BaseAPIView):
 
         # If already responded then return error
         if workspace_invite.responded_at is None:
-            workspace_invite.accepted = request.data.get("accepted", False)
+            accepted = request.data.get("accepted", False)
+            if not isinstance(accepted, bool):
+                return Response({"error": "`accepted` must be a boolean"}, status=status.HTTP_400_BAD_REQUEST)
+            workspace_invite.accepted = accepted
             workspace_invite.responded_at = timezone.now()
             workspace_invite.save()
 
             if workspace_invite.accepted:
                 # Check if the user created account after invitation
-                user = User.objects.filter(email=workspace_invite.email).first()
+                user = request.user
 
                 # If the user is present then create the workspace member
                 if user is not None:
@@ -205,8 +170,9 @@ class WorkspaceJoinEndpoint(BaseAPIView):
                     user.last_workspace_id = workspace_invite.workspace.id
                     user.save()
 
-                    # Delete the invitation
-                    workspace_invite.delete()
+                    # Invitation rows have no dependent records to cascade. Use
+                    # the same soft-delete path as bulk acceptance, without a broker dependency.
+                    WorkspaceMemberInvite.objects.filter(pk=workspace_invite.pk).delete()
 
                 return Response(
                     {"message": "Workspace Invitation Accepted"},
@@ -238,16 +204,26 @@ class UserWorkspaceInvitationsViewSet(BaseViewSet):
     model = WorkspaceMemberInvite
 
     def get_queryset(self):
+        if not self.request.user.is_email_verified:
+            return WorkspaceMemberInvite.objects.none()
         return self.filter_queryset(
-            super().get_queryset().filter(email=self.request.user.email).select_related("workspace")
+            super()
+            .get_queryset()
+            .filter(email__iexact=self.request.user.email, responded_at__isnull=True)
+            .select_related("workspace")
         )
 
     @invalidate_cache(path="/api/workspaces/", user=False)
     @invalidate_cache(path="/api/users/me/workspaces/", multiple=True)
     def create(self, request):
+        if not request.user.is_email_verified:
+            return Response(
+                {"error": "Verify your email or use the invitation link to accept this invitation"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         invitations = request.data.get("invitations", [])
         workspace_invitations = WorkspaceMemberInvite.objects.filter(
-            pk__in=invitations, email=request.user.email
+            pk__in=invitations, email__iexact=request.user.email, responded_at__isnull=True
         ).order_by("-created_at")
 
         # If the user is already a member of workspace and was deactivated then activate the user

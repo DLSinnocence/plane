@@ -28,6 +28,7 @@ import type {
   IWorkspaceUserPropertiesResponse,
 } from "@plane/types";
 // services
+import type { InvitationResult } from "@/helpers/invitations.helper";
 import { APIService } from "@/services/api.service";
 
 export class WorkspaceService extends APIService {
@@ -75,7 +76,7 @@ export class WorkspaceService extends APIService {
       });
   }
 
-  async inviteWorkspace(workspaceSlug: string, data: IWorkspaceBulkInviteFormData): Promise<any> {
+  async inviteWorkspace(workspaceSlug: string, data: IWorkspaceBulkInviteFormData): Promise<InvitationResult> {
     return this.post(`/api/workspaces/${workspaceSlug}/invitations/`, data)
       .then((response) => response?.data)
       .catch((error) => {

@@ -19,12 +19,13 @@ import gitlabLogo from "@/app/assets/logos/gitlab-logo.svg?url";
 import googleLogo from "@/app/assets/logos/google-logo.svg?url";
 // hooks
 import { useInstance } from "@/hooks/store/use-instance";
+import { getOAuthNextPathQuery } from "@/helpers/authentication-redirect";
 
 export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
   //router
   const searchParams = useSearchParams();
   // query params
-  const next_path = searchParams.get("next_path");
+  const nextPathQuery = getOAuthNextPathQuery(searchParams.get("next_path"));
   // theme
   const { resolvedTheme } = useTheme();
   // store hooks
@@ -45,9 +46,7 @@ export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
       text: t("auth.common.continue_with_meowalive"),
       icon: <ShieldCheck size={18} aria-hidden="true" />,
       onClick: () => {
-        window.location.assign(
-          `${API_BASE_URL}/auth/meowalive/${next_path ? `?next_path=${encodeURIComponent(next_path)}` : ``}`
-        );
+        window.location.assign(`${API_BASE_URL}/auth/meowalive/${nextPathQuery}`);
       },
       enabled: config?.is_meowalive_enabled ?? false,
     },
@@ -56,7 +55,7 @@ export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
       text: `${oauthActionText} with Google`,
       icon: <img src={googleLogo} height={18} width={18} alt="Google Logo" />,
       onClick: () => {
-        window.location.assign(`${API_BASE_URL}/auth/google/${next_path ? `?next_path=${next_path}` : ``}`);
+        window.location.assign(`${API_BASE_URL}/auth/google/${nextPathQuery}`);
       },
       enabled: config?.is_google_enabled,
     },
@@ -72,7 +71,7 @@ export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
         />
       ),
       onClick: () => {
-        window.location.assign(`${API_BASE_URL}/auth/github/${next_path ? `?next_path=${next_path}` : ``}`);
+        window.location.assign(`${API_BASE_URL}/auth/github/${nextPathQuery}`);
       },
       enabled: config?.is_github_enabled,
     },
@@ -81,7 +80,7 @@ export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
       text: `${oauthActionText} with GitLab`,
       icon: <img src={gitlabLogo} height={18} width={18} alt="GitLab Logo" />,
       onClick: () => {
-        window.location.assign(`${API_BASE_URL}/auth/gitlab/${next_path ? `?next_path=${next_path}` : ``}`);
+        window.location.assign(`${API_BASE_URL}/auth/gitlab/${nextPathQuery}`);
       },
       enabled: config?.is_gitlab_enabled,
     },
@@ -90,7 +89,7 @@ export const useCoreOAuthConfig = (oauthActionText: string): TOAuthConfigs => {
       text: `${oauthActionText} with Gitea`,
       icon: <img src={giteaLogo} height={18} width={18} alt="Gitea Logo" />,
       onClick: () => {
-        window.location.assign(`${API_BASE_URL}/auth/gitea/${next_path ? `?next_path=${next_path}` : ``}`);
+        window.location.assign(`${API_BASE_URL}/auth/gitea/${nextPathQuery}`);
       },
       enabled: config?.is_gitea_enabled,
     },

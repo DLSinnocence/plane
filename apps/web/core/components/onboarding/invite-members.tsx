@@ -33,6 +33,9 @@ import type { IUser, IWorkspace } from "@plane/types";
 import { Spinner } from "@plane/ui";
 // services
 import { WorkspaceService } from "@/services/workspace.service";
+import { InvitationResultPanel } from "@/components/workspace/invite-modal/result";
+import type { InvitationResult } from "@/helpers/invitations.helper";
+import { invitationStatusMessage, invitationErrorMessage } from "@/helpers/invitations.helper";
 // components
 import { SwitchAccountDropdown } from "./switch-account-dropdown";
 
@@ -217,7 +220,7 @@ const InviteMemberInput = observer(function InviteMemberInput(props: InviteMembe
                     style={styles.popper}
                     {...attributes.popper}
                   >
-                    {Object.entries(ROLE_DETAILS).map(([key, value]) => (
+                    {Object.entries(ROLE_DETAILS).map(([key, roleDetails]) => (
                       <Listbox.Option
                         as="div"
                         key={key}
@@ -231,8 +234,8 @@ const InviteMemberInput = observer(function InviteMemberInput(props: InviteMembe
                         {({ selected }) => (
                           <div className="flex items-center gap-2 p-1 text-wrap">
                             <div className="flex flex-col">
-                              <div className="text-13 font-medium">{t(value.i18n_title)}</div>
-                              <div className="flex text-11 text-tertiary">{t(value.i18n_description)}</div>
+                              <div className="text-13 font-medium">{t(roleDetails.i18n_title)}</div>
+                              <div className="flex text-11 text-tertiary">{t(roleDetails.i18n_description)}</div>
                             </div>
                             {selected && <TickOutline className="h-4 w-4 shrink-0" />}
                           </div>
@@ -267,6 +270,7 @@ const InviteMemberInput = observer(function InviteMemberInput(props: InviteMembe
 
 export function InviteMembers(props: Props) {
   const { finishOnboarding, workspace } = props;
+  const { t } = useTranslation();
 
   const [isInvitationDisabled, setIsInvitationDisabled] = useState(true);
 
@@ -284,6 +288,7 @@ export function InviteMembers(props: Props) {
     name: "emails",
   });
 
+  const [invitationResult, setInvitationResult] = useState<InvitationResult>();
   const nextStep = async () => {
     await finishOnboarding();
   };
@@ -301,19 +306,20 @@ export function InviteMembers(props: Props) {
           role: email.role,
         })),
       })
-      .then(async () => {
+      .then((result) => {
+        setInvitationResult(result);
         setToast({
           type: TOAST_TYPE.SUCCESS,
-          title: "Success!",
-          message: "Invitations sent successfully.",
+          title: t("workspace_settings.settings.members.invitation_flow.created"),
+          message: invitationStatusMessage(result, t),
         });
-        await nextStep();
+        return undefined;
       })
       .catch((err) => {
         setToast({
           type: TOAST_TYPE.ERROR,
-          title: "Error!",
-          message: err?.error,
+          title: t("workspace_settings.settings.members.invitation_flow.create_failed"),
+          message: invitationErrorMessage(err, t),
         });
       });
   };
@@ -336,6 +342,16 @@ export function InviteMembers(props: Props) {
       );
     }
   }, [fields, append]);
+
+  if (invitationResult)
+    return (
+      <div className="space-y-4 p-6">
+        <InvitationResultPanel result={invitationResult} />
+        <Button onClick={() => void nextStep()}>
+          {t("workspace_settings.settings.members.invitation_flow.continue")}
+        </Button>
+      </div>
+    );
 
   return (
     <div className="flex h-full w-full">
