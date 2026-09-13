@@ -10,7 +10,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { observer } from "mobx-react";
 import { useParams } from "next/navigation";
-import { FormProvider, useForm } from "react-hook-form";
+import { Controller, FormProvider, useForm } from "react-hook-form";
 // editor
 import { ETabIndices, DEFAULT_WORK_ITEM_FORM_VALUES } from "@plane/constants";
 import type { EditorRefApi } from "@plane/editor";
@@ -36,7 +36,9 @@ import {
   IssueProjectSelect,
   IssueTitleInput,
 } from "@/components/issues/issue-modal/components";
-// helpers
+import { StateAssigneeFields } from "@/components/issues/state-assignee-fields";
+import { getIssueWorkflowFormData } from "@/helpers/issue-state-assignees";
+import { useUser } from "@/hooks/store/user";
 // hooks
 import { useIssueModal } from "@/hooks/context/use-issue-modal";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
@@ -129,7 +131,9 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
     issue: { getIssueById },
   } = useIssueDetail();
   const { fetchCycles } = useProjectIssueProperties();
-  const { getStateById } = useProjectState();
+  const { getStateById, getProjectStates } = useProjectState();
+  const { data: currentUser } = useUser();
+  const creatorId = data?.id ? data.created_by : currentUser?.id;
 
   // form info
   const methods = useForm<TIssue>({
@@ -154,7 +158,9 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
     watch: watch,
   });
 
-  const isDisabled = isSubmitting || isApplyingTemplate;
+  const workflowStates = projectId ? getProjectStates(projectId) : undefined;
+  const isWorkflowLoading = !!projectId && (!workflowStates || (!data?.id && !creatorId));
+  const isDisabled = isSubmitting || isApplyingTemplate || isWorkflowLoading;
 
   const { getIndex } = getTabIndex(ETabIndices.ISSUE_FORM, isMobile);
 
@@ -229,10 +235,12 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
     )
       return;
 
+    if (isWorkflowLoading) return;
+    const workflowData = getIssueWorkflowFormData(formData, workflowStates ?? [], creatorId);
     const submitData = !data?.id
-      ? formData
+      ? workflowData
       : {
-          ...getChangedIssuefields(formData, dirtyFields as { [key: string]: boolean | undefined }),
+          ...getChangedIssuefields(workflowData, dirtyFields as { [key: string]: boolean | undefined }),
           project_id: getValues<"project_id">("project_id"),
           id: data.id,
           description_html: formData.description_html ?? "<p></p>",
@@ -268,7 +276,7 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
   };
 
   const handleMoveToProjects = async () => {
-    if (!data?.id || !data?.project_id || !data) return;
+    if (!data?.id || !data?.project_id || !data || isWorkflowLoading) return;
     setIsMoving(true);
     try {
       await handleCreateUpdatePropertyValues({
@@ -279,10 +287,11 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
         isDraft: true,
       });
 
-      await moveIssue(workspaceSlug.toString(), data.id, {
-        ...data,
-        ...getValues(),
-      } as TWorkspaceDraftIssue);
+      await moveIssue(
+        workspaceSlug.toString(),
+        data.id,
+        getIssueWorkflowFormData({ ...data, ...getValues() }, workflowStates ?? [], creatorId) as TWorkspaceDraftIssue
+      );
     } catch {
       setToast({
         type: TOAST_TYPE.ERROR,
@@ -300,7 +309,7 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
   const handleFormChange = () => {
     if (!onChange) return;
 
-    if (isDirty && condition) onChange(watch());
+    if (isDirty && condition) onChange(getIssueWorkflowFormData(watch(), workflowStates ?? [], creatorId));
     else onChange(null);
   };
 
@@ -328,7 +337,7 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
   useEffect(() => {
     if (!onChange) return;
 
-    if (isDirty && condition) onChange(watch());
+    if (isDirty && condition) onChange(getIssueWorkflowFormData(watch(), workflowStates ?? [], creatorId));
     else onChange(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDirty]);
@@ -390,11 +399,7 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
               </div>
             </div>
             <div
-              className={cn(
-                "space-y-3 bg-surface-1 pb-4",
-                activeAdditionalPropertiesLength > 4 &&
-                  "vertical-scrollbar scrollbar-sm max-h-[45vh] overflow-hidden overflow-y-auto"
-              )}
+              className={cn("vertical-scrollbar scrollbar-sm max-h-[45vh] space-y-3 overflow-y-auto bg-surface-1 pb-4")}
             >
               <div className="px-5">
                 <IssueDescriptionEditor
@@ -418,6 +423,34 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
                   onClose={onClose}
                 />
               </div>
+              {projectId && (
+                <section className="border-t border-subtle px-5 pt-3">
+                  <h6 className="text-body-xs-medium">{t("workflows.state_assignees.title")}</h6>
+                  <p className="mt-1 text-body-xs-regular text-secondary">
+                    {t("workflows.state_assignees.description")}
+                  </p>
+                  <Controller
+                    control={control}
+                    name="state_assignees"
+                    render={({ field: { value, onChange } }) => (
+                      <StateAssigneeFields
+                        key={projectId}
+                        columns={2}
+                        workspaceSlug={workspaceSlug?.toString()}
+                        projectId={projectId}
+                        stateId={watch("state_id")}
+                        creatorId={creatorId}
+                        value={value}
+                        onChange={(assignments) => {
+                          onChange(assignments);
+                          handleFormChange();
+                        }}
+                        disabled={isDisabled}
+                      />
+                    )}
+                  />
+                </section>
+              )}
             </div>
             <div
               className={cn(

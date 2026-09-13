@@ -43,10 +43,10 @@ test("an explicit empty current assignment overrides stale flat assignees", () =
   assert.deepEqual(permissions("creator", { issue: { ...unassigned, assignee_ids: [] } }), assignmentsOnly);
 });
 
-test("an omitted current state entry or map falls back to flat assignees", () => {
+test("an omitted current state entry defaults to the creator, never flat assignees", () => {
   for (const state_assignees of [undefined, {}, { doing: ["next"] }]) {
-    assert.deepEqual(permissions("current", { issue: { ...issue, state_assignees } }), transitionOnly);
-    assert.deepEqual(permissions("creator", { issue: { ...issue, state_assignees } }), assignmentsOnly);
+    assert.deepEqual(permissions("current", { issue: { ...issue, state_assignees } }), denied);
+    assert.deepEqual(permissions("creator", { issue: { ...issue, state_assignees } }), allowed);
   }
 });
 
@@ -68,10 +68,17 @@ test("guests and users without project membership cannot act even when assigned,
 });
 
 test("the unassigned owner can configure assignments but cannot transition", () => {
-  const unassigned = { ...issue, assignee_ids: [], state_assignees: {} };
+  const unassigned = { ...issue, assignee_ids: [], state_assignees: { todo: [] } };
   assert.deepEqual(permissions("creator", { issue: unassigned }), assignmentsOnly);
   assert.deepEqual(permissions("other", { issue: unassigned }), denied);
   assert.deepEqual(permissions("lead", { issue: unassigned }), transitionOnly);
+});
+
+test("fixed stages belong to the creator even if an older configuration says otherwise", () => {
+  for (const stateGroup of ["backlog", "completed", "cancelled"]) {
+    assert.deepEqual(permissions("current", { stateGroup }), denied);
+    assert.deepEqual(permissions("creator", { stateGroup }), allowed);
+  }
 });
 
 test("missing issue or unidentified member never gains permissions", () => {

@@ -183,17 +183,20 @@ def test_owner_can_configure_after_handoff(endpoint, workflow, edit_kind):
     if edit_kind == "plan":
         data = {"state_assignees": {str(workflow.acceptance.id): [str(workflow.other.id)]}}
     elif edit_kind == "current":
-        data = {assignees_key: [str(workflow.other.id)]}
+        assert_denied(serializer_for(endpoint, workflow, workflow.developer, {assignees_key: [str(workflow.other.id)]}))
+        return
     else:
         data = {"state_assignees": {}}
     issue = save(serializer_for(endpoint, workflow, workflow.developer, data))
     assert issue.state_id == workflow.acceptance.id
-    expected = workflow.reviewer.id if edit_kind == "reset" else workflow.other.id
+    expected = workflow.developer.id if edit_kind == "reset" else workflow.other.id
     assert set(IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)) == {expected}
     if edit_kind == "reset":
-        assert issue.state_assignees == {}
-    # Editing assignments never grants the creator an implicit state-transition bypass.
-    assert_denied(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.development.id)}))
+        assert issue.state_assignees[str(workflow.acceptance.id)] == [str(workflow.developer.id)]
+        save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.development.id)}))
+    else:
+        # Editing other stages does not grant the creator a transition bypass.
+        assert_denied(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.development.id)}))
 
 
 @pytest.mark.parametrize("edit_kind", ["plan", "current"])
@@ -216,11 +219,15 @@ def test_stale_creator_cannot_reconfigure_assignments(endpoint, workflow):
 
 
 @pytest.mark.parametrize("configured", [True, False])
-def test_missing_destination_preserves_but_explicit_empty_clears(endpoint, workflow, configured):
+def test_missing_destination_defaults_to_creator_but_explicit_empty_clears(endpoint, workflow, configured):
     workflow.issue.state_assignees = {str(workflow.acceptance.id): []} if configured else {}
     workflow.issue.save()
+    IssueAssignee.objects.filter(issue=workflow.issue).delete()
+    IssueAssignee.objects.create(issue=workflow.issue, project=workflow.project, assignee=workflow.other)
     _, state_key, _ = endpoint
+    assert_denied(serializer_for(endpoint, workflow, workflow.other, {state_key: str(workflow.acceptance.id)}))
     issue = save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.acceptance.id)}))
+    assert issue.state_assignees[str(workflow.acceptance.id)] == ([] if configured else [str(workflow.developer.id)])
     assert set(IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)) == (
         set() if configured else {workflow.developer.id}
     )
@@ -280,7 +287,7 @@ def test_invalid_assignment_plan_rejected(endpoint, workflow, invalid_kind):
 
 
 def test_creator_can_bootstrap_but_cannot_combine_with_transition(endpoint, workflow):
-    workflow.issue.state_assignees = {}
+    workflow.issue.state_assignees = {str(workflow.development.id): []}
     workflow.issue.save()
     IssueAssignee.objects.filter(issue=workflow.issue).delete()
     _, state_key, assignees_key = endpoint
@@ -335,12 +342,33 @@ def test_current_plan_edit_updates_actual_assignees(endpoint, workflow):
     }
 
 
-def test_current_assignment_edit_updates_configured_state(endpoint, workflow):
+@pytest.mark.parametrize("actor_name", ["developer", "admin"])
+def test_current_assignment_edit_is_rejected_even_for_owner_and_admin(endpoint, workflow, actor_name):
     _, _, assignees_key = endpoint
-    issue = save(serializer_for(endpoint, workflow, workflow.developer, {assignees_key: [str(workflow.reviewer.id)]}))
-    assert issue.state_assignees[str(workflow.development.id)] == [str(workflow.reviewer.id)]
+    original_plan = dict(workflow.issue.state_assignees)
+    assert_denied(
+        serializer_for(endpoint, workflow, getattr(workflow, actor_name), {assignees_key: [str(workflow.reviewer.id)]})
+    )
+    workflow.issue.refresh_from_db()
+    assert workflow.issue.state_assignees == original_plan
+    assert set(IssueAssignee.objects.filter(issue=workflow.issue).values_list("assignee_id", flat=True)) == {
+        workflow.developer.id
+    }
+
+
+@pytest.mark.parametrize("same_state_field", [True, False])
+def test_title_edit_does_not_validate_or_rewrite_stale_assignment(endpoint, workflow, same_state_field):
+    ProjectMember.objects.filter(project=workflow.project, member=workflow.developer).update(is_active=False)
+    original_plan = dict(workflow.issue.state_assignees)
+    _, state_key, _ = endpoint
+    data = {"name": "Renamed despite stale assignment"}
+    if same_state_field:
+        data[state_key] = str(workflow.development.pk)
+    issue = save(serializer_for(endpoint, workflow, workflow.admin, data))
+    assert issue.name == data["name"]
+    assert issue.state_assignees == original_plan
     assert set(IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)) == {
-        workflow.reviewer.id
+        workflow.developer.pk
     }
 
 
@@ -353,6 +381,149 @@ def test_inactive_destination_member_rejected_at_transition(endpoint, workflow):
     assert workflow.issue.state_id == workflow.development.id
     assert set(IssueAssignee.objects.filter(issue=workflow.issue).values_list("assignee_id", flat=True)) == {
         workflow.developer.id
+    }
+
+
+@pytest.mark.parametrize("group", ["backlog", "completed", "cancelled"])
+def test_admin_can_repair_plan_with_stale_creator_in_fixed_stage(endpoint, workflow, group):
+    fixed = State.objects.create(project=workflow.project, name=group, group=group)
+    ProjectMember.objects.filter(project=workflow.project, member=workflow.developer).update(is_active=False)
+    payload = {
+        "state_assignees": {
+            str(fixed.pk): [str(workflow.developer.pk)],
+            str(workflow.development.pk): [str(workflow.other.pk)],
+            str(workflow.acceptance.pk): [str(workflow.reviewer.pk)],
+        }
+    }
+    issue = save(serializer_for(endpoint, workflow, workflow.admin, payload))
+    assert issue.state_assignees[str(fixed.pk)] == []
+    assert issue.state_assignees[str(workflow.development.pk)] == [str(workflow.other.pk)]
+    assert set(IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)) == {workflow.other.pk}
+
+
+@pytest.mark.parametrize("group", ["backlog", "completed", "cancelled"])
+@pytest.mark.parametrize("operation", ["create-plan", "create-direct", "update"])
+def test_fixed_stage_rejects_custom_assignment(endpoint, workflow, group, operation):
+    fixed = State.objects.create(project=workflow.project, name=group, group=group)
+    serializer_class, state_key, assignee_key = endpoint
+    data = {"state_assignees": {str(fixed.pk): [str(workflow.other.pk)]}}
+    if operation == "update":
+        serializer = serializer_for(endpoint, workflow, workflow.admin, data)
+    else:
+        if operation == "create-direct":
+            data = {assignee_key: [str(workflow.other.pk)]}
+        data.update({"name": "Fixed-stage override", state_key: str(fixed.pk)})
+        serializer = serializer_class(
+            data=data,
+            context={
+                "request": SimpleNamespace(user=workflow.developer),
+                "project_id": workflow.project.pk,
+                "workspace_id": workflow.project.workspace_id,
+                "default_assignee_id": None,
+            },
+        )
+    with pytest.raises(ValidationError):
+        save(serializer)
+    assert not Issue.objects.filter(project=workflow.project, name="Fixed-stage override").exists()
+    workflow.issue.refresh_from_db()
+    assert str(fixed.pk) not in workflow.issue.state_assignees
+
+
+@pytest.mark.parametrize("group", ["backlog", "completed", "cancelled"])
+def test_fixed_stage_handoff_normalizes_historic_custom_assignment(endpoint, workflow, group):
+    fixed = State.objects.create(project=workflow.project, name=group, group=group)
+    workflow.issue.state_assignees[str(fixed.pk)] = [str(workflow.other.pk)]
+    workflow.issue.save()
+    _, state_key, _ = endpoint
+    issue = save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(fixed.pk)}))
+    assert issue.state_assignees[str(fixed.pk)] == [str(workflow.developer.pk)]
+    assert set(IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)) == {
+        workflow.developer.pk
+    }
+    assert_denied(serializer_for(endpoint, workflow, workflow.other, {state_key: str(workflow.development.pk)}))
+
+
+@pytest.mark.parametrize("mode", ["default", "stages", "direct", "empty", "conflict"])
+def test_creation_materializes_every_stage(endpoint, workflow, mode):
+    State.objects.create(project=workflow.project, name="Triage", group="triage")
+    fixed_states = [
+        State.objects.create(project=workflow.project, name=group, group=group)
+        for group in ("backlog", "completed", "cancelled")
+    ]
+    serializer_class, state_key, assignee_key = endpoint
+    data = {"name": "Explicit stages", state_key: str(workflow.development.pk)}
+    initial = [str(workflow.developer.pk)]
+    future = initial
+    if mode == "stages":
+        initial, future = [str(workflow.other.pk)], [str(workflow.reviewer.pk)]
+        data["state_assignees"] = {
+            str(workflow.development.pk): initial,
+            str(workflow.acceptance.pk): future,
+        }
+    elif mode in ("direct", "empty", "conflict"):
+        initial = [] if mode == "empty" else [str(workflow.other.pk)]
+        data[assignee_key] = initial
+        if mode == "conflict":
+            data["state_assignees"] = {str(workflow.development.pk): []}
+    serializer = serializer_class(
+        data=data,
+        context={
+            "request": SimpleNamespace(user=workflow.developer),
+            "project_id": workflow.project.pk,
+            "workspace_id": workflow.project.workspace_id,
+            "default_assignee_id": workflow.admin.pk,
+        },
+    )
+    if mode == "conflict":
+        with pytest.raises(ValidationError):
+            save(serializer)
+        assert not Issue.objects.filter(project=workflow.project, name=data["name"]).exists()
+        return
+    issue = save(serializer)
+    issue.refresh_from_db()
+    assert issue.state_assignees == {
+        str(workflow.development.pk): initial,
+        str(workflow.acceptance.pk): future,
+        **{str(state.pk): [str(workflow.developer.pk)] for state in fixed_states},
+    }
+    assert (
+        sorted(str(pk) for pk in IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True))
+        == initial
+    )
+
+
+@pytest.mark.parametrize("invalid_creator", ["inactive", "guest", "removed", "disabled", "null"])
+def test_missing_stage_with_invalid_creator_is_explicitly_unassigned(endpoint, workflow, invalid_creator):
+    workflow.issue.state_assignees = {str(workflow.development.pk): [str(workflow.other.pk)]}
+    if invalid_creator == "null":
+        Issue.objects.filter(pk=workflow.issue.pk).update(created_by_id=None)
+        workflow.issue.created_by_id = None
+    elif invalid_creator == "disabled":
+        User.objects.filter(pk=workflow.developer.pk).update(is_active=False)
+    elif invalid_creator == "removed":
+        ProjectMember.objects.filter(project=workflow.project, member=workflow.developer).delete()
+    else:
+        ProjectMember.objects.filter(project=workflow.project, member=workflow.developer).update(
+            **({"is_active": False} if invalid_creator == "inactive" else {"role": 5})
+        )
+    workflow.issue.save(disable_auto_set_user=True)
+    _, state_key, _ = endpoint
+    issue = save(serializer_for(endpoint, workflow, workflow.admin, {state_key: str(workflow.acceptance.pk)}))
+    assert issue.state_assignees[str(workflow.acceptance.pk)] == []
+    assert not IssueAssignee.objects.filter(issue=issue).exists()
+
+
+def test_new_stage_defaults_to_creator_and_deleted_stage_is_pruned(endpoint, workflow):
+    from django.utils import timezone
+
+    new_state = State.objects.create(project=workflow.project, name="New review", group="started")
+    State.all_state_objects.filter(pk=workflow.acceptance.pk).update(deleted_at=timezone.now())
+    _, state_key, _ = endpoint
+    issue = save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(new_state.pk)}))
+    assert issue.state_assignees[str(new_state.pk)] == [str(workflow.developer.pk)]
+    assert str(workflow.acceptance.pk) not in issue.state_assignees
+    assert set(IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)) == {
+        workflow.developer.pk
     }
 
 
@@ -438,7 +609,8 @@ def test_intake_acceptance_checks_current_responsibility_and_hands_off(endpoint,
     }
 
 
-def test_automatic_close_synchronizes_destination_assignees(workflow, monkeypatch):
+@pytest.mark.parametrize("configured", [True, False])
+def test_automatic_close_synchronizes_destination_assignees(workflow, monkeypatch, configured):
     from datetime import timedelta
     from django.utils import timezone
     from plane.bgtasks import issue_automation_task
@@ -447,13 +619,18 @@ def test_automatic_close_synchronizes_destination_assignees(workflow, monkeypatc
     workflow.project.close_in = 1
     workflow.project.default_state = workflow.acceptance
     workflow.project.save()
+    if not configured:
+        workflow.issue.state_assignees = {str(workflow.development.pk): [str(workflow.other.pk)]}
+        workflow.issue.save()
+        IssueAssignee.objects.filter(issue=workflow.issue).delete()
+        IssueAssignee.objects.create(issue=workflow.issue, project=workflow.project, assignee=workflow.other)
     Issue.objects.filter(pk=workflow.issue.pk).update(updated_at=timezone.now() - timedelta(days=90))
     issue_automation_task.close_old_issues()
     workflow.issue.refresh_from_db()
     assert workflow.issue.state_id == workflow.acceptance.id
-    assert set(IssueAssignee.objects.filter(issue=workflow.issue).values_list("assignee_id", flat=True)) == {
-        workflow.reviewer.id
-    }
+    expected = workflow.reviewer.id if configured else workflow.developer.id
+    assert set(IssueAssignee.objects.filter(issue=workflow.issue).values_list("assignee_id", flat=True)) == {expected}
+    assert workflow.issue.state_assignees[str(workflow.acceptance.pk)] == [str(expected)]
 
 
 def test_api_creation_activity_tracks_effective_assignees(workflow, monkeypatch):

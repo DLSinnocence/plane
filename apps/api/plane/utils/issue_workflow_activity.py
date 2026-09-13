@@ -10,7 +10,7 @@ from plane.db.models import IssueAssignee
 
 
 def issue_activity_payload(data, issue, assignee_field="assignee_ids", *, previous_state_id=None):
-    """Add persisted assignments only for explicit workflow plans or configured handoffs.
+    """Add persisted assignments for workflow plans and every state handoff.
 
     Call after saving the issue and pass its previous state for updates. A creation
     enters its initial state from None. Unrelated submitted fields are preserved.
@@ -18,8 +18,9 @@ def issue_activity_payload(data, issue, assignee_field="assignee_ids", *, previo
     payload = json.loads(data) if isinstance(data, str) else dict(data)
     destination = str(issue.state_id)
     changing_state = str(previous_state_id) != destination
-    configured_destination = destination in (issue.state_assignees or {})
-    if "state_assignees" in payload or (changing_state and configured_destination):
+    if "state_assignees" in payload:
+        payload["state_assignees"] = issue.state_assignees
+    if "state_assignees" in payload or changing_state:
         # Emit one alias: the task processes both assignment keys independently.
         payload.pop("assignee_ids" if assignee_field == "assignees" else "assignees", None)
         payload[assignee_field] = list(

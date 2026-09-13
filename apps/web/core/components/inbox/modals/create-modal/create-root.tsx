@@ -48,7 +48,6 @@ export const defaultIssueData: Partial<TIssue> = {
   priority: "none",
   state_id: "",
   label_ids: [],
-  assignee_ids: [],
   start_date: renderFormattedPayloadDate(new Date()),
   target_date: "",
 };
@@ -136,7 +135,6 @@ export const InboxIssueCreateRoot = observer(function InboxIssueCreateRoot(props
       priority: formData.priority || "none",
       state_id: formData.state_id || "",
       label_ids: formData.label_ids || [],
-      assignee_ids: formData.assignee_ids || [],
       target_date: formData.target_date || null,
     };
     setFormSubmitting(true);

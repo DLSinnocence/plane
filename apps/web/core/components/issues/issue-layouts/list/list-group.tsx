@@ -151,7 +151,7 @@ export const ListGroup = observer(function ListGroup(props: Props) {
     const defaultState = projectState.projectStates?.find((state) => state.default);
     let preloadedData: object = { state_id: defaultState?.id };
 
-    if (groupByKey === null) {
+    if (groupByKey === null || groupByKey === "assignees") {
       preloadedData = { ...preloadedData };
     } else {
       if (groupByKey === "state") {
@@ -160,8 +160,6 @@ export const ListGroup = observer(function ListGroup(props: Props) {
         preloadedData = { ...preloadedData, priority: value };
       } else if (groupByKey === "labels" && value != "None") {
         preloadedData = { ...preloadedData, label_ids: [value] };
-      } else if (groupByKey === "assignees" && value != "None") {
-        preloadedData = { ...preloadedData, assignee_ids: [value] };
       } else if (groupByKey === "cycle" && value != "None") {
         preloadedData = { ...preloadedData, cycle_id: value };
       } else if (groupByKey === "module" && value != "None") {

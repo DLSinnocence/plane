@@ -245,12 +245,16 @@ def test_owner_can_manage_an_already_assigned_work_item(workflow_endpoint, workf
     else:
         payload = {"state_assignees": {}}
     response = endpoint.client.patch(endpoint.url, payload, format="json")
+    if assignment_source == "actual-assignees":
+        assert response.status_code == status.HTTP_403_FORBIDDEN, response.data
+        assert_workflow_unchanged(workflow_issue)
+        return
     assert response.status_code == status.HTTP_200_OK, response.data
     assert response.json()[endpoint.state_field] == str(workflow_issue.development.pk)
-    expected_assignees = [str(workflow_issue.current_owner.pk)] if assignment_source == "reset" else [owner_id]
-    assert response.json()[endpoint.assignee_field] == expected_assignees
+    assert response.json()[endpoint.assignee_field] == [owner_id]
     if assignment_source == "reset":
-        assert response.json()["state_assignees"] == {}
+        assert response.json()["state_assignees"][str(workflow_issue.development.pk)] == [owner_id]
+        assert response.json()["state_assignees"][str(workflow_issue.acceptance.pk)] == [owner_id]
 
 
 @pytest.mark.parametrize("administrator", ["project", "workspace"])
@@ -267,8 +271,37 @@ def test_non_owner_administrator_can_manage_assignments(workflow_endpoint, workf
     response = endpoint.client.patch(
         endpoint.url, {endpoint.assignee_field: [str(workflow_issue.actor.pk)]}, format="json"
     )
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.data
+    assert_workflow_unchanged(workflow_issue)
+    response = endpoint.client.patch(
+        endpoint.url,
+        {"state_assignees": {str(workflow_issue.development.pk): [str(workflow_issue.actor.pk)]}},
+        format="json",
+    )
     assert response.status_code == status.HTTP_200_OK, response.data
     assert response.json()[endpoint.assignee_field] == [str(workflow_issue.actor.pk)]
+
+
+@pytest.mark.parametrize("current_configured", [True, False])
+def test_missing_target_defaults_to_creator_without_inheriting_actual_assignees(
+    workflow_endpoint, workflow_issue, current_configured
+):
+    endpoint = workflow_endpoint
+    issue = workflow_issue.issue
+    issue.state_assignees = (
+        {str(workflow_issue.development.pk): [str(workflow_issue.current_owner.pk)]} if current_configured else {}
+    )
+    issue.save(created_by_id=workflow_issue.actor.pk)
+    endpoint.client.force_authenticate(user=workflow_issue.current_owner)
+    payload = {endpoint.state_field: str(workflow_issue.acceptance.pk)}
+    response = endpoint.client.patch(endpoint.url, payload, format="json")
+    if not current_configured:
+        assert response.status_code == status.HTTP_403_FORBIDDEN, response.data
+        endpoint.client.force_authenticate(user=workflow_issue.actor)
+        response = endpoint.client.patch(endpoint.url, payload, format="json")
+    assert response.status_code == status.HTTP_200_OK, response.data
+    assert response.json()[endpoint.assignee_field] == [str(workflow_issue.actor.pk)]
+    assert response.json()["state_assignees"][str(workflow_issue.acceptance.pk)] == [str(workflow_issue.actor.pk)]
 
 
 def test_project_lead_does_not_gain_assignment_configuration_permissions(workflow_endpoint, workflow_issue):

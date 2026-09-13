@@ -14,6 +14,7 @@ import {
   useParams as useRouteParams,
 } from "react-router";
 import { authFixtureEnabled, invitationAuthState } from "./invitation-auth-state";
+import { workflowStates } from "./stage-data";
 
 export const users = {
   developer: { id: "developer", display_name: "Developer", first_name: "Dev", last_name: "", avatar_url: "" },
@@ -27,8 +28,16 @@ export const useUserSettings = () => ({
   data: invitationAuthState.settings,
   fetchCurrentUserSettings: invitationAuthState.fetchCurrentUserSettings,
 });
+export const useProjectState = () => ({
+  getProjectStates: () => workflowStates,
+  fetchProjectStates: async () => workflowStates,
+});
 export const useMember = () => ({
   getUserDetails: (id: string) => users[id as keyof typeof users],
+  project: {
+    getProjectMemberIds: () => Object.keys(users),
+    fetchProjectMembers: async () => [],
+  },
   workspace: {
     isUserSuspended: () => false,
     fetchWorkspaceMembers: async () => [],

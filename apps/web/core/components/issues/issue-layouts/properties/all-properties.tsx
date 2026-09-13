@@ -78,7 +78,7 @@ export const IssueProperties = observer(function IssueProperties(props: IIssuePr
   // router
   const router = useAppRouter();
   const { workspaceSlug, projectId } = useParams();
-  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug?.toString() ?? "");
+  const { canTransition } = useIssueWorkflow(issue, workspaceSlug?.toString() ?? "");
 
   // derived values
   const stateDetails = getStateById(issue.state_id);
@@ -116,10 +116,6 @@ export const IssueProperties = observer(function IssueProperties(props: IIssuePr
 
   const handleLabel = async (ids: string[]) => {
     if (updateIssue) await updateIssue(issue.project_id, issue.id, { label_ids: ids });
-  };
-
-  const handleAssignee = async (ids: string[]) => {
-    if (updateIssue) await updateIssue(issue.project_id, issue.id, { assignee_ids: ids });
   };
 
   const handleModule = useCallback(
@@ -325,8 +321,8 @@ export const IssueProperties = observer(function IssueProperties(props: IIssuePr
           <MemberDropdown
             projectId={issue?.project_id}
             value={issue?.assignee_ids}
-            onChange={handleAssignee}
-            disabled={isReadOnly || !canManageAssignments}
+            onChange={() => {}}
+            disabled
             multiple
             buttonVariant={issue.assignee_ids?.length > 0 ? "transparent-without-text" : "border-without-text"}
             buttonClassName={issue.assignee_ids?.length > 0 ? "hover:bg-transparent px-0" : ""}

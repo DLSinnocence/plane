@@ -83,9 +83,6 @@ export const DraftIssueProperties = observer(function DraftIssueProperties(props
   const handleLabel = (ids: string[]) =>
     issue?.project_id && updateIssue && updateIssue(issue.project_id, issue.id, { label_ids: ids });
 
-  const handleAssignee = (ids: string[]) =>
-    issue?.project_id && updateIssue && updateIssue(issue.project_id, issue.id, { assignee_ids: ids });
-
   const handleModule = useCallback(
     (moduleIds: string[] | null) => {
       if (!issue || !issue.module_ids || !moduleIds) return;
@@ -217,7 +214,8 @@ export const DraftIssueProperties = observer(function DraftIssueProperties(props
         <MemberDropdown
           projectId={issue?.project_id}
           value={issue?.assignee_ids}
-          onChange={handleAssignee}
+          onChange={() => {}}
+          disabled
           multiple
           buttonVariant={issue.assignee_ids?.length > 0 ? "transparent-without-text" : "border-without-text"}
           buttonClassName={issue.assignee_ids?.length > 0 ? "hover:bg-transparent px-0" : ""}

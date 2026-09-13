@@ -1,14 +1,14 @@
 {
   "workflows": {
     "state_assignees": {
-      "title": "Owners by state",
-      "description": "Entering a state assigns its owners automatically. States without an override keep the current owners.",
+      "title": "Owners by stage",
+      "description": "Each stage defaults to the creator. Choose owners for the working stages; backlog, completed, and cancelled stages stay with the creator. Current assignees change automatically with the stage.",
       "permission_hint": "Only the current state's owners or project managers can change the state.",
-      "configuration_permission_hint": "Only the work item's owner (creator) or an administrator can change assignees.",
-      "inherited": "Keep current owners",
+      "configuration_permission_hint": "Only the work item's creator or an administrator can change stage owners.",
+      "creator": "Creator",
       "unassigned": "Unassigned",
-      "reset": "Reset override",
-      "reset_label": "{state}: keep current owners",
+      "reset": "Set to creator",
+      "reset_label": "{state}: assign to creator",
       "current": "Current",
       "loading": "Loading states…",
       "load_error": "Unable to load states. Please try again.",

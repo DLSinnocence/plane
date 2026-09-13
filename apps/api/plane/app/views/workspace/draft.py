@@ -10,7 +10,6 @@ from functools import partial
 from django.db import transaction
 from django.utils import timezone
 from django.core import serializers
-from django.core.serializers.json import DjangoJSONEncoder
 from django.contrib.postgres.aggregates import ArrayAgg
 from django.contrib.postgres.fields import ArrayField
 from django.db.models import Q, UUIDField, Value, Subquery, OuterRef
@@ -133,6 +132,7 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
                     "id",
                     "name",
                     "state_id",
+                    "state_assignees",
                     "sort_order",
                     "completed_at",
                     "estimate_point",
@@ -166,9 +166,9 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
     )
     @transaction.atomic
     def partial_update(self, request, slug, pk):
-        issue = DraftIssue.objects.select_for_update().filter(
-            pk=pk, workspace__slug=slug, created_by=request.user
-        ).first()
+        issue = (
+            DraftIssue.objects.select_for_update().filter(pk=pk, workspace__slug=slug, created_by=request.user).first()
+        )
 
         if not issue:
             return Response({"error": "Issue not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -189,6 +189,9 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
         if serializer.is_valid():
             serializer.save()
 
+            if {"state_id", "state_assignees", "project_id"}.intersection(request.data):
+                issue = self.get_queryset().get(pk=issue.pk)
+                return Response(DraftIssueDetailSerializer(issue).data, status=status.HTTP_200_OK)
             return Response(status=status.HTTP_204_NO_CONTENT)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -225,8 +228,11 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        issue_data = request.data.copy()
+        if "state_assignees" not in issue_data:
+            issue_data["state_assignees"] = draft_issue.state_assignees
         serializer = IssueCreateSerializer(
-            data=request.data,
+            data=issue_data,
             context={
                 "request": request,
                 "project_id": draft_issue.project_id,

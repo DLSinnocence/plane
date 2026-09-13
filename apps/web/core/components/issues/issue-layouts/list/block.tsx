@@ -107,13 +107,12 @@ export const IssueBlock = observer(function IssueBlock(props: IssueBlockProps) {
   const issue = issuesMap[issueId];
   const subIssuesCount = issue?.sub_issues_count ?? 0;
   const canEditIssueProperties = canEditProperties(issue?.project_id ?? undefined);
-  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug ?? "");
+  const { canTransition } = useIssueWorkflow(issue, workspaceSlug ?? "");
   const storeType = useIssueStoreType();
   const { issuesFilter } = useIssues(storeType);
   const displayFilters = issuesFilter?.issueFilters?.displayFilters;
   const groupings = new Set([displayFilters?.group_by, displayFilters?.sub_group_by]);
-  const canDragWorkflow =
-    (!groupings.has("state") || canTransition) && (!groupings.has("assignees") || canManageAssignments);
+  const canDragWorkflow = (!groupings.has("state") || canTransition) && !groupings.has("assignees");
   const isDraggingAllowed = canDrag && canEditIssueProperties && canDragWorkflow;
 
   const { isMobile } = usePlatformOS();

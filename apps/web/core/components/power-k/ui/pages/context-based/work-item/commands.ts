@@ -12,14 +12,11 @@ import {
   DeleteOutline,
   LabelsOutline,
   LinkOutline,
-  MembersOutline,
   ModuleOutline,
   StateOutline,
   SubscribeOutline,
   TextOutline,
   UnsubscribeOutline,
-  UserMinusOutline,
-  UserPlusOutline,
 } from "@makeplane/propel/icons";
 // plane imports
 import { EUserPermissionsLevel } from "@plane/constants";
@@ -42,7 +39,6 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
   const { workspaceSlug, workItem: entityIdentifier } = useParams();
   // store
   const {
-    data: currentUser,
     permission: { allowPermissions },
   } = useUser();
   const { toggleDeleteIssueModal } = useCommandPalette();
@@ -67,7 +63,6 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
   const entityDetails = entityId ? getIssueById(entityId) : null;
   const isEpic = !!entityDetails?.is_epic;
   const projectDetails = entityDetails?.project_id ? getProjectById(entityDetails?.project_id) : undefined;
-  const isCurrentUserAssigned = !!entityDetails?.assignee_ids?.includes(currentUser?.id ?? "");
   const isEstimateEnabled = entityDetails?.project_id
     ? areEstimateEnabledByProjectId(entityDetails?.project_id)
     : false;
@@ -99,19 +94,6 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
       });
     },
     [entityDetails, isEpic, updateEntity, workspaceSlug]
-  );
-
-  const handleUpdateAssignee = useCallback(
-    (assigneeId: string) => {
-      if (!entityDetails) return;
-
-      const updatedAssignees = [...(entityDetails.assignee_ids ?? [])];
-      if (updatedAssignees.includes(assigneeId)) updatedAssignees.splice(updatedAssignees.indexOf(assigneeId), 1);
-      else updatedAssignees.push(assigneeId);
-
-      handleUpdateEntity({ assignee_ids: updatedAssignees });
-    },
-    [entityDetails, handleUpdateEntity]
   );
 
   const handleSubscription = useCallback(async () => {
@@ -234,41 +216,6 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
         });
       },
       shortcut: "p",
-      isEnabled: () => isEditingAllowed,
-      isVisible: () => isEditingAllowed,
-      closeOnSelect: true,
-    },
-    {
-      id: "change_work_item_assignees",
-      i18n_title: "power_k.contextual_actions.work_item.change_assignees",
-      icon: MembersOutline,
-      group: "contextual",
-      contextType: "work-item",
-      type: "change-page",
-      page: "update-work-item-assignee",
-      onSelect: (data) => {
-        const assigneeId = data as string;
-        handleUpdateAssignee(assigneeId);
-      },
-      shortcut: "a",
-      isEnabled: () => isEditingAllowed,
-      isVisible: () => isEditingAllowed,
-      closeOnSelect: false,
-    },
-    {
-      id: "assign_work_item_to_me",
-      i18n_title: isCurrentUserAssigned
-        ? "power_k.contextual_actions.work_item.unassign_from_me"
-        : "power_k.contextual_actions.work_item.assign_to_me",
-      icon: isCurrentUserAssigned ? UserMinusOutline : UserPlusOutline,
-      group: "contextual",
-      contextType: "work-item",
-      type: "action",
-      action: () => {
-        if (!currentUser) return;
-        handleUpdateAssignee(currentUser.id);
-      },
-      shortcut: "i",
       isEnabled: () => isEditingAllowed,
       isVisible: () => isEditingAllowed,
       closeOnSelect: true,

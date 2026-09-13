@@ -296,6 +296,7 @@ export class WorkspaceDraftIssues implements IWorkspaceDraftIssues {
         });
       });
       const response = await workspaceDraftService.updateIssue(workspaceSlug, issueId, payload);
+      if (response?.id) this.addIssue([response]);
       this.loader = undefined;
       return response;
     } catch (error) {

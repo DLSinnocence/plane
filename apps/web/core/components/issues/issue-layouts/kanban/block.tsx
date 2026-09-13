@@ -181,13 +181,12 @@ export const KanbanIssueBlock = observer(function KanbanIssueBlock(props: IssueB
 
   const canEditIssueProperties = canEditProperties(issue?.project_id ?? undefined);
 
-  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug ?? "");
+  const { canTransition } = useIssueWorkflow(issue, workspaceSlug ?? "");
   const storeType = useIssueStoreType();
   const { issuesFilter } = useIssues(storeType);
   const displayFilters = issuesFilter?.issueFilters?.displayFilters;
   const groupings = new Set([displayFilters?.group_by, displayFilters?.sub_group_by]);
-  const canDragWorkflow =
-    (!groupings.has("state") || canTransition) && (!groupings.has("assignees") || canManageAssignments);
+  const canDragWorkflow = (!groupings.has("state") || canTransition) && !groupings.has("assignees");
   const isDragAllowed = canDragIssuesInCurrentGrouping && !issue?.tempId && canEditIssueProperties && canDragWorkflow;
   const projectIdentifier = getProjectIdentifierById(issue?.project_id);
 
@@ -260,11 +259,13 @@ export const KanbanIssueBlock = observer(function KanbanIssueBlock(props: IssueB
             setToast({
               type: TOAST_TYPE.WARNING,
               title: "Cannot move work item",
-              message: !canDragWorkflow
-                ? "Only the current assignee, project lead, or an admin can move this work item between workflow groups"
-                : !canEditIssueProperties
-                  ? "You are not allowed to move this work item"
-                  : "Drag and drop is disabled for the current grouping",
+              message: groupings.has("assignees")
+                ? "Current assignees are determined by stage configuration and workflow transitions"
+                : !canDragWorkflow
+                  ? "Only the current assignee, project lead, or an admin can move this work item between workflow groups"
+                  : !canEditIssueProperties
+                    ? "You are not allowed to move this work item"
+                    : "Drag and drop is disabled for the current grouping",
             });
           }
         }}

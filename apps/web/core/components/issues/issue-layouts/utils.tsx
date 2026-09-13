@@ -323,7 +323,7 @@ const getAssigneeColumns = ({ isWorkspaceLevel, projectId }: TGetColumns): IGrou
           size="xs"
         />
       ),
-      payload: { assignee_ids: [memberId] },
+      payload: {},
     });
   });
   if (includeNone) {
@@ -560,6 +560,8 @@ export const handleGroupDragDrop = async (
   subGroupBy: TIssueGroupByOptions | undefined,
   shouldAddIssueAtTop = false
 ) => {
+  // Current assignees are derived from stage configuration and workflow transitions.
+  if (groupBy === "assignees" || subGroupBy === "assignees") return;
   if (!source.id || (subGroupBy && (!source.subGroupId || !destination.subGroupId))) return;
 
   let updatedIssue: Partial<TIssue> = {};

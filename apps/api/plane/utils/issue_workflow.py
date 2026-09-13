@@ -11,6 +11,56 @@ from rest_framework.exceptions import PermissionDenied
 from plane.db.models import Issue, IssueAssignee, ProjectMember, State, WorkspaceMember
 
 
+FIXED_ASSIGNEE_STATE_GROUPS = frozenset({"backlog", "completed", "cancelled"})
+
+
+def workflow_default_assignees(issue):
+    """A missing stage belongs to the creator only while they retain member access."""
+    if (
+        issue.created_by_id
+        and ProjectMember.objects.filter(
+            project_id=issue.project_id,
+            member_id=issue.created_by_id,
+            is_active=True,
+            role__gte=15,
+            member__is_active=True,
+        ).exists()
+    ):
+        return [str(issue.created_by_id)]
+    return []
+
+
+def workflow_state_manager(issue=None, *, allow_triage=False):
+    state = getattr(issue, "state", None)
+    if allow_triage or getattr(state, "is_triage", False) or getattr(state, "group", None) == "triage":
+        return State.all_state_objects
+    return State.objects
+
+
+def complete_workflow_plan(issue, plan, *, validate_fixed=False, allow_triage=False):
+    """Materialize live stages; planning and terminal stages always belong to the creator."""
+    default = workflow_default_assignees(issue)
+    result = {}
+    for state_id, group in (
+        workflow_state_manager(issue, allow_triage=allow_triage)
+        .filter(
+            project_id=issue.project_id,
+            deleted_at__isnull=True,
+        )
+        .values_list("pk", "group")
+    ):
+        key = str(state_id)
+        members = list(plan.get(key, default))
+        if group in FIXED_ASSIGNEE_STATE_GROUPS:
+            if validate_fixed and set(members) != set(default):
+                raise serializers.ValidationError(
+                    {"state_assignees": "Planning, completed, and cancelled stages must be assigned to the creator."}
+                )
+            members = list(default)
+        result[key] = members
+    return result
+
+
 class IssueWorkflowSerializerMixin:
     """Authorize persisted responsibility and save each handoff under the issue lock."""
 
@@ -66,19 +116,31 @@ class IssueWorkflowSerializerMixin:
                 key = str(UUID(state_id))
                 if key in normalized or any(not isinstance(member, str) for member in members):
                     raise ValueError
-                normalized[key] = self._validate_workflow_members(members)
+                normalized[key] = [str(UUID(member)) for member in members]
         except (ValueError, TypeError, AttributeError):
             raise serializers.ValidationError("State and user IDs must be UUIDs, with a list for every state.")
+        manager = workflow_state_manager(self.instance, allow_triage=self.context.get("allow_triage_state", False))
         valid_states = {
-            str(pk)
-            for pk in State.all_state_objects.filter(
+            str(pk): group
+            for pk, group in manager.filter(
                 project_id=self._workflow_project_id(),
                 deleted_at__isnull=True,
                 pk__in=normalized,
-            ).values_list("pk", flat=True)
+            ).values_list("pk", "group")
         }
-        if set(normalized) - valid_states:
+        if set(normalized) - valid_states.keys():
             raise serializers.ValidationError("Every state must belong to this project.")
+        default = workflow_default_assignees(self.instance) if self.instance is not None else None
+        for key, members in normalized.items():
+            # Full-map clients retain creator IDs for fixed stages. A former
+            # creator is represented as unassigned, never as an invalid assignee.
+            if (
+                self.instance is not None
+                and valid_states[key] in FIXED_ASSIGNEE_STATE_GROUPS
+                and set(members) == {str(self.instance.created_by_id)}
+            ):
+                members = default
+            normalized[key] = self._validate_workflow_members(members)
         return normalized
 
     def _validate_workflow_save(self, data, issue=None):
@@ -95,7 +157,7 @@ class IssueWorkflowSerializerMixin:
                         data.pop(alias)
         if "state" in data and data["state"] is not None:
             state_id = getattr(data["state"], "pk", data["state"])
-            manager = State.all_state_objects if self.context.get("allow_triage_state") else State.objects
+            manager = workflow_state_manager(issue, allow_triage=self.context.get("allow_triage_state", False))
             try:
                 state = manager.filter(
                     project_id=self._workflow_project_id(),
@@ -113,6 +175,8 @@ class IssueWorkflowSerializerMixin:
             data[self.workflow_assignee_field] = self._validate_workflow_members(data[self.workflow_assignee_field])
 
     def _authorize_workflow(self, issue, data):
+        if self.workflow_assignee_field in data:
+            raise PermissionDenied("Current assignees are managed through the state's workflow assignment.")
         next_state = data.get("state", issue.state)
         if next_state is None:
             next_state = (
@@ -152,8 +216,11 @@ class IssueWorkflowSerializerMixin:
             membership is not None and membership.role >= 15 and issue.project.project_lead_id == actor_id
         )
         key = str(issue.state_id)
-        actual = [str(pk) for pk in IssueAssignee.objects.filter(issue=issue).values_list("assignee_id", flat=True)]
-        current = issue.state_assignees[key] if key in issue.state_assignees else actual
+        saved_plan = issue.state_assignees or {}
+        if getattr(issue.state, "group", None) in FIXED_ASSIGNEE_STATE_GROUPS:
+            current = workflow_default_assignees(issue)
+        else:
+            current = saved_plan[key] if key in saved_plan else workflow_default_assignees(issue)
         responsible = membership is not None and membership.role >= 15 and str(actor_id) in (current or [])
         if not (transition_manager or responsible):
             raise PermissionDenied(
@@ -186,15 +253,18 @@ class IssueWorkflowSerializerMixin:
         direct = validated_data.get(self.workflow_assignee_field)
         issue = self.create_workflow_issue(validated_data)
         key = str(issue.state_id)
-        if key in issue.state_assignees:
-            members = issue.state_assignees[key]
-            if direct is not None and set(direct) != set(members):
+        plan = dict(issue.state_assignees or {})
+        if direct is not None:
+            if key in plan and set(direct) != set(plan[key]):
                 raise serializers.ValidationError(
                     {self.workflow_assignee_field: "Assignees conflict with the state's configured assignment."}
                 )
-            self._replace_workflow_assignees(issue, members)
-        elif direct is not None:
-            self._replace_workflow_assignees(issue, direct)
+            plan[key] = direct
+        issue.state_assignees = complete_workflow_plan(
+            issue, plan, validate_fixed=True, allow_triage=self.context.get("allow_triage_state", False)
+        )
+        issue.save(update_fields=["state_assignees"], disable_auto_set_user=True)
+        self._replace_workflow_assignees(issue, issue.state_assignees.get(key, []))
         return issue
 
     @transaction.atomic
@@ -203,22 +273,19 @@ class IssueWorkflowSerializerMixin:
         self.instance = issue
         self._validate_workflow_save(validated_data, issue)
         self._authorize_workflow(issue, validated_data)
-        plan = dict(validated_data.get("state_assignees", issue.state_assignees))
         next_state = validated_data.get("state", issue.state)
+        if "state_assignees" not in validated_data and getattr(next_state, "pk", None) == issue.state_id:
+            return self.update_workflow_issue(issue, validated_data)
+        plan = dict(validated_data.get("state_assignees", issue.state_assignees) or {})
         key = str(getattr(next_state, "pk", None))
-        changing_state = getattr(next_state, "pk", None) != issue.state_id
-        direct = validated_data.get(self.workflow_assignee_field)
-        if key in plan:
-            if direct is not None:
-                if (changing_state or "state_assignees" in validated_data) and set(direct) != set(plan[key]):
-                    raise serializers.ValidationError(
-                        {self.workflow_assignee_field: "Assignees conflict with the state's configured assignment."}
-                    )
-                if not changing_state:
-                    plan[key] = direct
-                    validated_data["state_assignees"] = plan
-            if changing_state or "state_assignees" in validated_data:
-                validated_data[self.workflow_assignee_field] = self._validate_workflow_members(plan[key])
+        plan = complete_workflow_plan(
+            issue,
+            plan,
+            validate_fixed="state_assignees" in validated_data,
+            allow_triage=self.context.get("allow_triage_state", False),
+        )
+        validated_data["state_assignees"] = plan
+        validated_data[self.workflow_assignee_field] = self._validate_workflow_members(plan.get(key, []))
         return self.update_workflow_issue(issue, validated_data)
 
 

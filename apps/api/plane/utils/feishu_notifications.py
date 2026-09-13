@@ -14,6 +14,7 @@ from django.db import transaction
 
 from plane.utils.feishu import configured_app_url
 from plane.utils.feishu_card_people import NAME_SLOTS_KEY, member_parts, render_parts
+from plane.utils.issue_workflow import workflow_default_assignees
 from plane.utils.phone import normalize_phone_number
 
 from plane.db.models import (
@@ -170,10 +171,12 @@ def plan_change_lines(before, after, issue):
             state = State.all_state_objects.filter(project_id=issue.project_id, pk=UUID(state_id)).first()
         except (ValueError, TypeError):
             state = None
-        old_ids, new_ids = user_ids(before.get(state_id)), user_ids(after.get(state_id))
+        default = workflow_default_assignees(issue) if state_id not in before or state_id not in after else []
+        old_ids = user_ids(before.get(state_id, default))
+        new_ids = user_ids(after.get(state_id, default))
         extra_recipients.update(old_ids | new_ids)
-        old_label = member_parts(old_ids) if state_id in before else ["沿用当前负责人"]
-        new_label = member_parts(new_ids) if state_id in after else ["沿用当前负责人"]
+        old_label = member_parts(old_ids)
+        new_label = member_parts(new_ids)
         lines.append([f"{plain_text(state.name if state else '已移除状态', 100)}：", *old_label, " → ", *new_label])
     return lines, extra_recipients
 

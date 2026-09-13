@@ -65,7 +65,7 @@ export const IssueDetailsSidebar = observer(function IssueDetailsSidebar(props: 
   const { getUserDetails } = useMember();
   const { getStateById } = useProjectState();
   const issue = getIssueById(issueId);
-  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug);
+  const { canTransition } = useIssueWorkflow(issue, workspaceSlug);
   if (!issue) return <></>;
 
   const createdByDetails = getUserDetails(issue.created_by);
@@ -104,8 +104,8 @@ export const IssueDetailsSidebar = observer(function IssueDetailsSidebar(props: 
             <SidebarPropertyListItem icon={MembersOutline} label={t("common.assignees")}>
               <MemberDropdown
                 value={issue?.assignee_ids ?? undefined}
-                onChange={(val) => issueOperations.update(workspaceSlug, projectId, issueId, { assignee_ids: val })}
-                disabled={!isEditable || !canManageAssignments}
+                onChange={() => {}}
+                disabled
                 projectId={projectId?.toString() ?? ""}
                 placeholder={t("issue.add.assignee")}
                 multiple

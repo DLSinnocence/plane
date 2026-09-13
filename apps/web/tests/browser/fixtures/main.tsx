@@ -18,6 +18,7 @@ import { users } from "./mocks";
 import { IntegrationRouteFixture } from "./integration-route";
 import { InvitationResultFixture } from "./invitation-result";
 import { authFixtureEnabled } from "./invitation-auth-state";
+import { StageAssigneesFixture } from "./stage-assignees";
 
 function App() {
   const [memberIds, setMemberIds] = useState<string[]>([]);
@@ -103,7 +104,9 @@ function App() {
   );
 }
 createRoot(document.getElementById("root")!).render(
-  new URLSearchParams(window.location.search).has("invitation-result") ? (
+  new URLSearchParams(window.location.search).has("stage-assignees") ? (
+    <StageAssigneesFixture />
+  ) : new URLSearchParams(window.location.search).has("invitation-result") ? (
     <InvitationResultFixture />
   ) : authFixtureEnabled() ||
     window.location.pathname.startsWith("/workspace-invitations") ||

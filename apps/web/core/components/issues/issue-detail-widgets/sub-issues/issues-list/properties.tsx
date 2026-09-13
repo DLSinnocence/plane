@@ -49,7 +49,7 @@ export const SubIssuesListItemProperties = observer(function SubIssuesListItemPr
   const { workspaceSlug, parentIssueId, issueId, canEdit, updateSubIssue, displayProperties, issue } = props;
   const { t } = useTranslation();
   const { getStateById } = useProjectState();
-  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug);
+  const { canTransition } = useIssueWorkflow(issue, workspaceSlug);
 
   const handleStartDate = (date: Date | null) => {
     if (issue.project_id) {
@@ -211,13 +211,8 @@ export const SubIssuesListItemProperties = observer(function SubIssuesListItemPr
           <MemberDropdown
             value={issue.assignee_ids}
             projectId={issue.project_id ?? undefined}
-            onChange={(val) =>
-              issue.project_id &&
-              updateSubIssue(workspaceSlug, issue.project_id, parentIssueId, issueId, {
-                assignee_ids: val,
-              })
-            }
-            disabled={!canEdit || !canManageAssignments}
+            onChange={() => {}}
+            disabled
             multiple
             buttonVariant={(issue?.assignee_ids || []).length > 0 ? "transparent-without-text" : "border-without-text"}
             buttonClassName={(issue?.assignee_ids || []).length > 0 ? "hover:bg-transparent px-0" : ""}

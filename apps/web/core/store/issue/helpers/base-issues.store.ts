@@ -530,8 +530,9 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     id?: string,
     shouldUpdateList = true
   ) {
-    // perform an API call
-    const response = await this.issueService.createIssue(workspaceSlug, projectId, data);
+    // Optimistic issues carry an empty assignee list; creation must use workflow defaults.
+    const { assignee_ids: _assigneeIds, ...payload } = data;
+    const response = await this.issueService.createIssue(workspaceSlug, projectId, payload);
 
     // add Issue to Store
     this.addIssue(response, shouldUpdateList);
@@ -732,6 +733,9 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
    * @param {TBulkOperationsPayload} data
    */
   bulkUpdateProperties = async (workspaceSlug: string, projectId: string, data: TBulkOperationsPayload) => {
+    if (Object.prototype.hasOwnProperty.call(data.properties, "assignee_ids")) {
+      throw new Error("Current assignees are determined by stage configuration and workflow transitions");
+    }
     const issueIds = data.issue_ids;
     // make request to update issue properties
     await this.issueService.bulkOperations(workspaceSlug, projectId, data);

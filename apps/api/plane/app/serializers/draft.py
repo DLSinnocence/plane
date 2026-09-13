@@ -3,6 +3,7 @@
 # See the LICENSE file for details.
 
 # Django imports
+from django.db import transaction
 from django.utils import timezone
 
 # Third Party imports
@@ -10,8 +11,9 @@ from rest_framework import serializers
 
 # Module imports
 from .base import BaseSerializer
+from .issue import IssueCreateSerializer
+from plane.utils.issue_workflow import complete_workflow_plan, workflow_default_assignees
 from plane.db.models import (
-    User,
     Issue,
     Label,
     State,
@@ -20,14 +22,12 @@ from plane.db.models import (
     DraftIssueLabel,
     DraftIssueCycle,
     DraftIssueModule,
-    ProjectMember,
     EstimatePoint,
 )
 from plane.utils.content_validator import (
     validate_html_content,
     validate_binary_data,
 )
-from plane.app.permissions import ROLE
 
 
 class DraftIssueCreateSerializer(BaseSerializer):
@@ -43,17 +43,56 @@ class DraftIssueCreateSerializer(BaseSerializer):
         write_only=True,
         required=False,
     )
-    assignee_ids = serializers.ListField(
-        child=serializers.PrimaryKeyRelatedField(queryset=User.objects.all()),
-        write_only=True,
-        required=False,
-    )
+    assignee_ids = serializers.SerializerMethodField()
+
+    def get_assignee_ids(self, instance):
+        return [
+            str(pk)
+            for pk in DraftIssueAssignee.objects.filter(draft_issue=instance).values_list("assignee_id", flat=True)
+        ]
+
+    def to_internal_value(self, data):
+        for field in ("assignee_ids", "assignees"):
+            if field in data:
+                raise serializers.ValidationError({field: "Configure assignees through state_assignees."})
+        return super().to_internal_value(data)
+
+    def validate_state_assignees(self, value):
+        return IssueCreateSerializer(context=self.context).validate_state_assignees(value)
+
+    def _save_workflow(self, issue, *, validate_fixed):
+        issue.state_assignees = (
+            complete_workflow_plan(issue, issue.state_assignees or {}, validate_fixed=validate_fixed)
+            if issue.project_id
+            else {}
+        )
+        issue.save(update_fields=["state_assignees"], disable_auto_set_user=True)
+        members = issue.state_assignees.get(str(issue.state_id), workflow_default_assignees(issue))
+        DraftIssueAssignee.objects.filter(draft_issue=issue).delete()
+        DraftIssueAssignee.objects.bulk_create(
+            [
+                DraftIssueAssignee(
+                    draft_issue=issue,
+                    assignee_id=member,
+                    workspace_id=issue.workspace_id,
+                    project_id=issue.project_id,
+                    created_by_id=issue.created_by_id,
+                    updated_by_id=issue.updated_by_id,
+                )
+                for member in members
+            ]
+        )
+        if hasattr(issue, "_prefetched_objects_cache"):
+            issue._prefetched_objects_cache.pop("assignees", None)
+        return issue
 
     class Meta:
         model = DraftIssue
         fields = "__all__"
         read_only_fields = [
             "workspace",
+            "project",
+            "assignees",
             "created_by",
             "updated_by",
             "created_at",
@@ -62,8 +101,6 @@ class DraftIssueCreateSerializer(BaseSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        assignee_ids = self.initial_data.get("assignee_ids")
-        data["assignee_ids"] = assignee_ids if assignee_ids else []
         label_ids = self.initial_data.get("label_ids")
         data["label_ids"] = label_ids if label_ids else []
         return data
@@ -89,15 +126,6 @@ class DraftIssueCreateSerializer(BaseSerializer):
             is_valid, error_msg = validate_binary_data(attrs["description_binary"])
             if not is_valid:
                 raise serializers.ValidationError({"description_binary": "Invalid binary data"})
-
-        # Validate assignees are from project
-        if attrs.get("assignee_ids", []):
-            attrs["assignee_ids"] = ProjectMember.objects.filter(
-                project_id=self.context["project_id"],
-                role__gte=ROLE.MEMBER.value,
-                is_active=True,
-                member_id__in=attrs["assignee_ids"],
-            ).values_list("member_id", flat=True)
 
         # Validate labels are from project
         if attrs.get("label_ids"):
@@ -139,8 +167,9 @@ class DraftIssueCreateSerializer(BaseSerializer):
 
         return attrs
 
+    @transaction.atomic
     def create(self, validated_data):
-        assignees = validated_data.pop("assignee_ids", None)
+        validate_fixed = "state_assignees" in validated_data
         labels = validated_data.pop("label_ids", None)
         modules = validated_data.pop("module_ids", None)
         cycle_id = self.initial_data.get("cycle_id", None)
@@ -155,22 +184,6 @@ class DraftIssueCreateSerializer(BaseSerializer):
         # Issue Audit Users
         created_by_id = issue.created_by_id
         updated_by_id = issue.updated_by_id
-
-        if assignees is not None and len(assignees):
-            DraftIssueAssignee.objects.bulk_create(
-                [
-                    DraftIssueAssignee(
-                        assignee_id=assignee_id,
-                        draft_issue=issue,
-                        workspace_id=workspace_id,
-                        project_id=project_id,
-                        created_by_id=created_by_id,
-                        updated_by_id=updated_by_id,
-                    )
-                    for assignee_id in assignees
-                ],
-                batch_size=10,
-            )
 
         if labels is not None and len(labels):
             DraftIssueLabel.objects.bulk_create(
@@ -214,37 +227,25 @@ class DraftIssueCreateSerializer(BaseSerializer):
                 batch_size=10,
             )
 
-        return issue
+        return self._save_workflow(issue, validate_fixed=validate_fixed)
 
+    @transaction.atomic
     def update(self, instance, validated_data):
-        assignees = validated_data.pop("assignee_ids", None)
+        validate_fixed = "state_assignees" in validated_data
+        project_id = self.context.get("project_id", instance.project_id)
+        if str(project_id) != str(instance.project_id):
+            validated_data["project_id"] = project_id
+            validated_data.setdefault("state", None)
+            validated_data.setdefault("state_assignees", {})
         labels = validated_data.pop("label_ids", None)
-        cycle_id = self.context.get("cycle_id", None)
+        cycle_id = self.context.get("cycle_id", "not_provided")
         modules = self.initial_data.get("module_ids", None)
 
         # Related models
         workspace_id = instance.workspace_id
-        project_id = instance.project_id
 
         created_by_id = instance.created_by_id
         updated_by_id = instance.updated_by_id
-
-        if assignees is not None:
-            DraftIssueAssignee.objects.filter(draft_issue=instance).delete()
-            DraftIssueAssignee.objects.bulk_create(
-                [
-                    DraftIssueAssignee(
-                        assignee_id=assignee_id,
-                        draft_issue=instance,
-                        workspace_id=workspace_id,
-                        project_id=project_id,
-                        created_by_id=created_by_id,
-                        updated_by_id=updated_by_id,
-                    )
-                    for assignee_id in assignees
-                ],
-                batch_size=10,
-            )
 
         if labels is not None:
             DraftIssueLabel.objects.filter(draft_issue=instance).delete()
@@ -294,7 +295,8 @@ class DraftIssueCreateSerializer(BaseSerializer):
 
         # Time updation occurs even when other related models are updated
         instance.updated_at = timezone.now()
-        return super().update(instance, validated_data)
+        instance = super().update(instance, validated_data)
+        return self._save_workflow(instance, validate_fixed=validate_fixed)
 
 
 class DraftIssueSerializer(BaseSerializer):
@@ -312,6 +314,7 @@ class DraftIssueSerializer(BaseSerializer):
             "id",
             "name",
             "state_id",
+            "state_assignees",
             "sort_order",
             "completed_at",
             "estimate_point",

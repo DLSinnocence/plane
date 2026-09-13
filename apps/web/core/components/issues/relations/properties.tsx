@@ -35,7 +35,7 @@ export const RelationIssueProperty = observer(function RelationIssueProperty(pro
 
   // derived value
   const issue = getIssueById(issueId);
-  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug);
+  const { canTransition } = useIssueWorkflow(issue, workspaceSlug);
 
   // if issue is not found, return empty
   if (!issue) return <></>;
@@ -51,12 +51,6 @@ export const RelationIssueProperty = observer(function RelationIssueProperty(pro
     issue.project_id &&
     issueOperations.update(workspaceSlug, issue.project_id, issueId, {
       priority: val,
-    });
-
-  const handleAssigneeChange = (val: string[]) =>
-    issue.project_id &&
-    issueOperations.update(workspaceSlug, issue.project_id, issueId, {
-      assignee_ids: val,
     });
 
   return (
@@ -85,8 +79,8 @@ export const RelationIssueProperty = observer(function RelationIssueProperty(pro
         <MemberDropdown
           value={issue.assignee_ids}
           projectId={issue.project_id ?? undefined}
-          onChange={handleAssigneeChange}
-          disabled={disabled || !canManageAssignments}
+          onChange={() => {}}
+          disabled
           multiple
           buttonVariant={(issue?.assignee_ids || []).length > 0 ? "transparent-without-text" : "border-without-text"}
           buttonClassName={(issue?.assignee_ids || []).length > 0 ? "hover:bg-transparent px-0" : ""}

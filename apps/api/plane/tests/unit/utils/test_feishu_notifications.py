@@ -134,6 +134,22 @@ def test_removing_last_assignee_still_notifies_previous_owner(feishu_events):
     assert "未分配" in contents(messages[0])
 
 
+@pytest.mark.parametrize("creator_active", [True, False])
+def test_missing_plan_entry_renders_creator_or_unassigned(feishu_events, creator_active):
+    from plane.utils.feishu_notifications import plan_change_lines
+
+    f = feishu_events
+    ProjectMember.objects.filter(project=f.project, member=f.actor).update(is_active=creator_active)
+    lines, recipients = plan_change_lines({}, {str(f.acceptance.pk): [str(f.reviewer.pk)]}, f.issue)
+    assert "沿用当前负责人" not in json.dumps(lines, ensure_ascii=False)
+    if creator_active:
+        assert {"user_id": str(f.actor.pk)} in lines[0]
+        assert str(f.actor.pk) in recipients
+    else:
+        assert "未分配" in json.dumps(lines, ensure_ascii=False)
+        assert str(f.actor.pk) not in recipients
+
+
 def test_changed_future_state_assignees_are_also_notified(feishu_events):
     f = feishu_events
     messages = queue(

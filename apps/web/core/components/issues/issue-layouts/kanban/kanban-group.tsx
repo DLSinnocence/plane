@@ -205,7 +205,7 @@ export const KanbanGroup = observer(function KanbanGroup(props: IKanbanGroup) {
     const defaultState = projectState.projectStates?.find((state) => state.default);
     let preloadedData: object = { state_id: defaultState?.id };
 
-    if (groupByKey) {
+    if (groupByKey && groupByKey !== "assignees") {
       if (groupByKey === "state") {
         preloadedData = { ...preloadedData, state_id: groupValue };
       } else if (groupByKey === "priority") {
@@ -216,8 +216,6 @@ export const KanbanGroup = observer(function KanbanGroup(props: IKanbanGroup) {
         preloadedData = { ...preloadedData, module_ids: [groupValue] };
       } else if (groupByKey === "labels" && groupValue != "None") {
         preloadedData = { ...preloadedData, label_ids: [groupValue] };
-      } else if (groupByKey === "assignees" && groupValue != "None") {
-        preloadedData = { ...preloadedData, assignee_ids: [groupValue] };
       } else if (groupByKey === "created_by") {
         preloadedData = { ...preloadedData };
       } else {
@@ -225,7 +223,7 @@ export const KanbanGroup = observer(function KanbanGroup(props: IKanbanGroup) {
       }
     }
 
-    if (subGroupByKey) {
+    if (subGroupByKey && subGroupByKey !== "assignees") {
       if (subGroupByKey === "state") {
         preloadedData = { ...preloadedData, state_id: subGroupValue };
       } else if (subGroupByKey === "priority") {
@@ -236,8 +234,6 @@ export const KanbanGroup = observer(function KanbanGroup(props: IKanbanGroup) {
         preloadedData = { ...preloadedData, module_ids: [subGroupValue] };
       } else if (subGroupByKey === "labels" && subGroupValue != "None") {
         preloadedData = { ...preloadedData, label_ids: [subGroupValue] };
-      } else if (subGroupByKey === "assignees" && subGroupValue != "None") {
-        preloadedData = { ...preloadedData, assignee_ids: [subGroupValue] };
       } else if (subGroupByKey === "created_by") {
         preloadedData = { ...preloadedData };
       } else {

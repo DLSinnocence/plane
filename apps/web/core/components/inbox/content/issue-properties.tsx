@@ -95,10 +95,8 @@ export const InboxIssueContentProperties = observer(function InboxIssueContentPr
               </div>
               <MemberDropdown
                 value={issue?.assignee_ids ?? []}
-                onChange={(val) =>
-                  issue?.id && issueOperations.update(workspaceSlug, projectId, issue?.id, { assignee_ids: val })
-                }
-                disabled={!isEditable}
+                onChange={() => {}}
+                disabled
                 projectId={projectId?.toString() ?? ""}
                 placeholder="Add assignees"
                 multiple

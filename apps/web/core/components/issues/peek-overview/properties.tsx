@@ -64,7 +64,7 @@ export const PeekOverviewProperties = observer(function PeekOverviewProperties(p
   const { getUserDetails } = useMember();
   // derived values
   const issue = getIssueById(issueId);
-  const { canTransition, canManageAssignments } = useIssueWorkflow(issue, workspaceSlug);
+  const { canTransition } = useIssueWorkflow(issue, workspaceSlug);
   if (!issue) return <></>;
   const createdByDetails = getUserDetails(issue?.created_by);
   const projectDetails = getProjectById(issue.project_id);
@@ -99,8 +99,8 @@ export const PeekOverviewProperties = observer(function PeekOverviewProperties(p
         <SidebarPropertyListItem icon={MembersOutline} label={t("common.assignees")}>
           <MemberDropdown
             value={issue?.assignee_ids ?? undefined}
-            onChange={(val) => issueOperations.update(workspaceSlug, projectId, issueId, { assignee_ids: val })}
-            disabled={disabled || !canManageAssignments}
+            onChange={() => {}}
+            disabled
             projectId={projectId}
             placeholder={t("issue.add.assignee")}
             multiple

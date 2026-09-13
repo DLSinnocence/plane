@@ -76,12 +76,13 @@ export const DraftIssueLayout = observer(function DraftIssueLayout(props: DraftI
   };
 
   const handleCreateDraftIssue = async () => {
-    if (!changesMade || !workspaceSlug || !projectId) return;
+    const draftProjectId = changesMade?.project_id ?? projectId;
+    if (!changesMade || !workspaceSlug || !draftProjectId) return;
 
     const payload = {
       ...changesMade,
       name: changesMade?.name && changesMade?.name?.trim() !== "" ? changesMade.name?.trim() : "Untitled",
-      project_id: projectId,
+      project_id: draftProjectId,
     };
 
     const response = await createIssue(workspaceSlug.toString(), payload)
@@ -108,7 +109,7 @@ export const DraftIssueLayout = observer(function DraftIssueLayout(props: DraftI
       handleCreateUpdatePropertyValues({
         issueId: response.id,
         issueTypeId: response.type_id,
-        projectId,
+        projectId: draftProjectId,
         workspaceSlug: workspaceSlug?.toString(),
         isDraft: true,
       });

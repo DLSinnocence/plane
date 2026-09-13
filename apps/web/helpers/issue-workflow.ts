@@ -12,16 +12,18 @@ type TIssueWorkflowContext = {
   userId: string | undefined;
   role: EUserPermissions | undefined;
   leadId: string | undefined;
+  stateGroup?: string;
 };
 
 /** UI affordances only; the API checks responsibility against the persisted issue. */
-export const getIssueWorkflowPermissions = ({ issue, userId, role, leadId }: TIssueWorkflowContext) => {
+export const getIssueWorkflowPermissions = ({ issue, userId, role, leadId, stateGroup }: TIssueWorkflowContext) => {
   const isMember = role === EUserPermissions.MEMBER || role === EUserPermissions.ADMIN;
   const isManager = isMember && (role === EUserPermissions.ADMIN || (!!userId && leadId === userId));
-  // An explicit empty state assignment is authoritative; only an omitted entry
-  // falls back to the current assignee list.
+  // Missing stages default to the creator; explicit empty selections remain unassigned.
+  const fixedStage = stateGroup !== undefined && ["backlog", "completed", "cancelled"].includes(stateGroup);
   const assignees =
-    (issue?.state_id ? issue.state_assignees?.[issue.state_id] : undefined) ?? issue?.assignee_ids ?? [];
+    (!fixedStage && issue?.state_id ? issue.state_assignees?.[issue.state_id] : undefined) ??
+    (issue?.created_by ? [issue.created_by] : []);
   const isResponsible = !!userId && assignees.includes(userId);
   const isOwner = !!userId && issue?.created_by === userId;
 

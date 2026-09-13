@@ -35,6 +35,7 @@ class DraftIssue(WorkspaceBaseModel):
         blank=True,
         related_name="state_draft_issue",
     )
+    state_assignees = models.JSONField(default=dict, blank=True)
     estimate_point = models.ForeignKey(
         "db.EstimatePoint",
         on_delete=models.SET_NULL,
