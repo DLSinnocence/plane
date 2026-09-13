@@ -10,7 +10,8 @@ import { useParams } from "next/navigation";
 import { ChatOutline, HistoryOutline } from "@makeplane/propel/icons";
 // plane imports
 import type { IUserActivityResponse } from "@plane/types";
-import { calculateTimeAgo, getFileURL } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { getFileURL } from "@plane/utils";
 // components
 import { ActivityIcon, ActivityMessage, IssueLink } from "@/components/core/activity";
 import { RichTextEditor } from "@/components/editor/rich-text";
@@ -24,6 +25,7 @@ type Props = {
 };
 
 export const ActivityList = observer(function ActivityList(props: Props) {
+  const { calculateTimeAgo } = useRelativeTime();
   const { activity } = props;
   // params
   const { workspaceSlug } = useParams();

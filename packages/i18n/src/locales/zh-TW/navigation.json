@@ -6,6 +6,37 @@
       }
     }
   },
+  "navigation": {
+    "customize": {
+      "description": "選取的項目將持續顯示在側邊欄中，其他項目仍可透過「更多」選單存取。這些設定僅對你生效，不會影響工作區中的其他人。",
+      "accordion_description": "功能標籤將巢狀顯示在專案下方，可展開或收合。",
+      "tabbed_description": "功能標籤將以橫向分頁的形式顯示在專案內。",
+      "minimum_project_count": "最小值為 1"
+    },
+    "app_rail": {
+      "icon_only": "僅圖示",
+      "icon_with_name": "圖示與名稱",
+      "dock": "固定應用程式列",
+      "undock": "取消固定應用程式列"
+    },
+    "project": {
+      "card": {
+        "created_on": "建立於 {date}",
+        "members_count": "成員：{count}",
+        "no_members": "無成員",
+        "no_members_yet": "尚無成員",
+        "joined": "已加入"
+      },
+      "archived_work_item_count": "此專案中有 {count} 個已封存工作項目",
+      "work_item_count": "此專案中有 {count} 個工作項目",
+      "module_work_item_count": "此模組中有 {count} 個工作項目",
+      "cycle_work_item_count": "此週期中有 {count} 個工作項目",
+      "clear_default": "取消預設",
+      "set_as_default": "設為預設",
+      "hide_in_more_menu": "收合至更多選單",
+      "show": "顯示"
+    }
+  },
   "sidebar": {
     "stickies": "便利貼",
     "your_work": "你的工作",

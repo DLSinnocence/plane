@@ -7,7 +7,8 @@
 import { DeleteOutline, EditOutline, NewTabOutline } from "@makeplane/propel/icons";
 import { TOAST_TYPE, setToast } from "@plane/propel/toast";
 import { Tooltip } from "@makeplane/propel/components/tooltip";
-import { getIconForLink, copyTextToClipboard, calculateTimeAgo } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { getIconForLink, copyTextToClipboard } from "@plane/utils";
 // hooks
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import { useMember } from "@/hooks/store/use-member";
@@ -22,6 +23,7 @@ export type TIssueLinkDetail = {
 };
 
 export function IssueLinkDetail(props: TIssueLinkDetail) {
+  const { calculateTimeAgo } = useRelativeTime();
   // props
   const { linkId, linkOperations, isNotAllowed } = props;
   // hooks

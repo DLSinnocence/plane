@@ -8,7 +8,8 @@ import type { ReactNode } from "react";
 import { HierarchyOutline } from "@makeplane/propel/icons";
 // plane imports
 import { Tooltip } from "@makeplane/propel/components/tooltip";
-import { renderFormattedTime, renderFormattedDate, calculateTimeAgo } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { renderFormattedTime, renderFormattedDate } from "@plane/utils";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import { usePlatformOS } from "@/hooks/use-platform-os";
 // local imports
@@ -24,6 +25,7 @@ type TIssueActivityBlockComponent = {
 };
 
 export function IssueActivityBlockComponent(props: TIssueActivityBlockComponent) {
+  const { calculateTimeAgo } = useRelativeTime();
   const { icon, activityId, ends, children, customUserName } = props;
   // hooks
   const {

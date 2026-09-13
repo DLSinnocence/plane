@@ -69,7 +69,7 @@ export const IssuesHeader = observer(function IssuesHeader() {
             <Breadcrumbs.Item
               component={
                 <BreadcrumbLink
-                  label="Work Items"
+                  label={t("sidebar.work_items")}
                   href={`/${workspaceSlug}/projects/${projectId}/issues/`}
                   icon={<WorkItemsOutline className="h-4 w-4 text-tertiary" />}
                   isLast
@@ -80,7 +80,7 @@ export const IssuesHeader = observer(function IssuesHeader() {
           </Breadcrumbs>
           {issuesCount && issuesCount > 0 ? (
             <Tooltip
-              label={`There are ${issuesCount} ${issuesCount > 1 ? "work items" : "work item"} in this project`}
+              label={t("navigation.project.work_item_count", { count: issuesCount })}
               layout="stacked"
               side="bottom"
               disabled={isMobile}

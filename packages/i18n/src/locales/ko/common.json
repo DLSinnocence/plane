@@ -328,6 +328,11 @@
   "morning": "아침",
   "afternoon": "오후",
   "evening": "저녁",
+  "greetings": {
+    "morning": "좋은 아침이에요, {name}님",
+    "afternoon": "좋은 오후예요, {name}님",
+    "evening": "좋은 저녁이에요, {name}님"
+  },
   "show_all": "모두 보기",
   "show_less": "간략히 보기",
   "no_data_yet": "아직 데이터 없음",

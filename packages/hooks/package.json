@@ -23,6 +23,8 @@
     "clean": "rm -rf .turbo && rm -rf .next && rm -rf node_modules && rm -rf dist"
   },
   "dependencies": {
+    "@plane/i18n": "workspace:*",
+    "@plane/utils": "workspace:*",
     "react": "catalog:"
   },
   "devDependencies": {

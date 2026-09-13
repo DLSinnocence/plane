@@ -11,7 +11,8 @@ import { Tooltip } from "@makeplane/propel/components/tooltip";
 import type { TWorkspaceBaseActivity } from "@plane/types";
 // ui
 // helpers
-import { renderFormattedTime, renderFormattedDate, calculateTimeAgo } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { renderFormattedTime, renderFormattedDate } from "@plane/utils";
 // hooks
 import { usePlatformOS } from "@/hooks/use-platform-os";
 // local components
@@ -26,6 +27,7 @@ type TActivityBlockComponent = {
 };
 
 export function ActivityBlockComponent(props: TActivityBlockComponent) {
+  const { calculateTimeAgo } = useRelativeTime();
   const { icon: Icon, activity, ends, children, customUserName } = props;
   // hooks
   const { isMobile } = usePlatformOS();

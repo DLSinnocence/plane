@@ -12,7 +12,8 @@ import { useTranslation } from "@plane/i18n";
 import { Avatar } from "@plane/propel/avatar";
 import { EmptyStateCompact } from "@plane/propel/empty-state";
 import { Loader, Card } from "@plane/ui";
-import { calculateTimeAgo, getFileURL } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { getFileURL } from "@plane/utils";
 // components
 import { ActivityMessage, IssueLink } from "@/components/core/activity";
 // constants
@@ -26,6 +27,7 @@ import { UserService } from "@/services/user.service";
 const userService = new UserService();
 
 export const ProfileActivity = observer(function ProfileActivity() {
+  const { calculateTimeAgo } = useRelativeTime();
   const { workspaceSlug, userId } = useParams();
   // store hooks
   const { data: currentUser } = useUser();

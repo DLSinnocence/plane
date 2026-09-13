@@ -328,6 +328,11 @@
   "morning": "morning",
   "afternoon": "afternoon",
   "evening": "evening",
+  "greetings": {
+    "morning": "Good morning, {name}",
+    "afternoon": "Good afternoon, {name}",
+    "evening": "Good evening, {name}"
+  },
   "show_all": "Show all",
   "show_less": "Show less",
   "no_data_yet": "No Data yet",

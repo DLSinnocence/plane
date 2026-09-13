@@ -5,6 +5,7 @@
  */
 
 import { observer } from "mobx-react";
+import { useTranslation } from "@plane/i18n";
 // plane types
 import { PriorityIcon, StateGroupIcon } from "@plane/propel/icons";
 import { WorkItemsOutline } from "@makeplane/propel/icons";
@@ -12,7 +13,8 @@ import { Tooltip } from "@makeplane/propel/components/tooltip";
 import type { TActivityEntityData, TIssueEntityData } from "@plane/types";
 import { EIssueServiceType } from "@plane/types";
 // plane ui
-import { calculateTimeAgo, generateWorkItemLink } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { generateWorkItemLink } from "@plane/utils";
 // components
 import { ListItem } from "@/components/core/list";
 import { MemberDropdown } from "@/components/dropdowns/member/dropdown";
@@ -28,6 +30,8 @@ type BlockProps = {
   workspaceSlug: string;
 };
 export const RecentIssue = observer(function RecentIssue(props: BlockProps) {
+  const { calculateTimeAgo } = useRelativeTime();
+  const { t } = useTranslation();
   const { activity, ref, workspaceSlug } = props;
   // hooks
   const { getStateById } = useProjectState();
@@ -99,7 +103,7 @@ export const RecentIssue = observer(function RecentIssue(props: BlockProps) {
       }
       quickActionElement={
         <div className="flex gap-4">
-          <Tooltip label={`State: ${state?.name ?? "State"}`} layout="stacked">
+          <Tooltip label={`${t("state")}: ${state?.name ?? t("state")}`} layout="stacked">
             <div>
               <StateGroupIcon
                 stateGroup={state?.group ?? "backlog"}
@@ -109,7 +113,7 @@ export const RecentIssue = observer(function RecentIssue(props: BlockProps) {
               />
             </div>
           </Tooltip>
-          <Tooltip label={`Priority: ${issueDetails?.priority ?? "Priority"}`}>
+          <Tooltip label={`${t("priority")}: ${t(issueDetails?.priority ?? "none")}`}>
             <div>
               <PriorityIcon priority={issueDetails?.priority} withContainer size={12} />
             </div>
@@ -125,7 +129,7 @@ export const RecentIssue = observer(function RecentIssue(props: BlockProps) {
                 buttonVariant={issueDetails?.assignees?.length > 0 ? "transparent-without-text" : "border-without-text"}
                 buttonClassName={issueDetails?.assignees?.length > 0 ? "hover:bg-transparent px-0" : ""}
                 showTooltip={issueDetails?.assignees?.length === 0}
-                placeholder="Assignees"
+                placeholder={t("assignees")}
                 optionsClassName="z-10"
                 tooltipContent=""
               />

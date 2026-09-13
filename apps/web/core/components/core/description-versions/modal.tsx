@@ -16,7 +16,8 @@ import { setToast, TOAST_TYPE } from "@plane/propel/toast";
 import { Tooltip } from "@makeplane/propel/components/tooltip";
 import type { TDescriptionVersion } from "@plane/types";
 import { EModalPosition, EModalWidth, Loader, ModalCore } from "@plane/ui";
-import { calculateTimeAgo, cn, getFileURL } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { cn, getFileURL } from "@plane/utils";
 // components
 import { RichTextEditor } from "@/components/editor/rich-text";
 // hooks
@@ -39,6 +40,7 @@ type Props = {
 };
 
 export const DescriptionVersionsModal = observer(function DescriptionVersionsModal(props: Props) {
+  const { calculateTimeAgo } = useRelativeTime();
   const {
     activeVersionDescription,
     activeVersionDetails,

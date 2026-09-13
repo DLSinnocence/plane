@@ -4,6 +4,7 @@
  * See the LICENSE file for details.
  */
 
+import { useTranslation } from "@plane/i18n";
 import { observer } from "mobx-react";
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
@@ -19,22 +20,23 @@ const ARCHIVES_TAB_LIST: {
 }[] = [
   {
     key: "issues",
-    label: "Work items",
+    label: "sidebar.work_items",
     shouldRender: () => true,
   },
   {
     key: "cycles",
-    label: "Cycles",
+    label: "sidebar.cycles",
     shouldRender: (projectDetails) => projectDetails.cycle_view,
   },
   {
     key: "modules",
-    label: "Modules",
+    label: "sidebar.modules",
     shouldRender: (projectDetails) => projectDetails.module_view,
   },
 ];
 
 export const ArchiveTabsList = observer(function ArchiveTabsList() {
+  const { t } = useTranslation();
   // router
   const { workspaceSlug, projectId } = useParams();
   const pathname = usePathname();
@@ -59,7 +61,7 @@ export const ArchiveTabsList = observer(function ArchiveTabsList() {
                     : "border-transparent text-tertiary hover:border-subtle hover:text-placeholder"
                 }`}
               >
-                {tab.label}
+                {t(tab.label)}
               </span>
             </Link>
           )

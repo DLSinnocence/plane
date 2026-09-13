@@ -5,7 +5,53 @@
  */
 
 import { differenceInDays, format, formatDistanceToNow, isAfter, isEqual, isValid, parseISO } from "date-fns";
+import type { Locale } from "date-fns";
+import {
+  cs,
+  de,
+  enUS,
+  es,
+  fr,
+  id,
+  it,
+  ja,
+  ka,
+  ko,
+  pl,
+  ptBR,
+  ro,
+  ru,
+  sk,
+  tr,
+  uk,
+  vi,
+  zhCN,
+  zhTW,
+} from "date-fns/locale";
 import { isNumber } from "lodash-es";
+
+const relativeTimeLocales: Record<string, Locale> = {
+  en: enUS,
+  fr,
+  es,
+  ja,
+  "zh-CN": zhCN,
+  "zh-TW": zhTW,
+  ru,
+  it,
+  cs,
+  sk,
+  de,
+  ua: uk,
+  pl,
+  ko,
+  "pt-BR": ptBR,
+  id,
+  ro,
+  "vi-VN": vi,
+  "tr-TR": tr,
+  "ka-ge": ka,
+};
 
 // Format Date Helpers
 /**
@@ -168,52 +214,39 @@ export const findHowManyDaysLeft = (
  * @param {string | Date} time
  * @example calculateTimeAgo("2023-01-01") // 1 year ago
  */
-export const calculateTimeAgo = (time: string | number | Date | null): string => {
-  if (!time) return "";
-  // Parse the time to check if it is valid
-  const parsedTime = typeof time === "string" || typeof time === "number" ? parseISO(String(time)) : time;
-  // return if undefined
-  if (!parsedTime) return ""; // Return empty string for invalid dates
-  // Format the time in the form of amount of time passed since the event happened
-  const distance = formatDistanceToNow(parsedTime, { addSuffix: true });
-  return distance;
+export const calculateTimeAgo = (time: string | number | Date | null, locale: string = "en"): string => {
+  if (time === null || time === "") return "";
+  const parsedTime = typeof time === "string" ? parseISO(time) : new Date(time);
+  if (!isValid(parsedTime)) return "";
+  return formatDistanceToNow(parsedTime, {
+    addSuffix: true,
+    locale: Object.hasOwn(relativeTimeLocales, locale) ? relativeTimeLocales[locale] : enUS,
+  });
 };
 
-export function calculateTimeAgoShort(date: string | number | Date | null): string {
-  if (!date) {
-    return "";
-  }
-
+/** Compact relative time, including a localized past/future suffix. */
+export function calculateTimeAgoShort(date: string | number | Date | null, locale: string = "en"): string {
+  if (date === null || date === "") return "";
   const parsedDate = typeof date === "string" ? parseISO(date) : new Date(date);
-  const now = new Date();
-  const diffInSeconds = (now.getTime() - parsedDate.getTime()) / 1000;
+  if (!isValid(parsedDate)) return "";
 
-  if (diffInSeconds < 60) {
-    return `${Math.floor(diffInSeconds)}s`;
-  }
-
-  const diffInMinutes = diffInSeconds / 60;
-  if (diffInMinutes < 60) {
-    return `${Math.floor(diffInMinutes)}m`;
-  }
-
-  const diffInHours = diffInMinutes / 60;
-  if (diffInHours < 24) {
-    return `${Math.floor(diffInHours)}h`;
-  }
-
-  const diffInDays = diffInHours / 24;
-  if (diffInDays < 30) {
-    return `${Math.floor(diffInDays)}d`;
-  }
-
-  const diffInMonths = diffInDays / 30;
-  if (diffInMonths < 12) {
-    return `${Math.floor(diffInMonths)}mo`;
-  }
-
-  const diffInYears = diffInMonths / 12;
-  return `${Math.floor(diffInYears)}y`;
+  const seconds = (parsedDate.getTime() - Date.now()) / 1000;
+  const magnitude = Math.abs(seconds);
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["year", 360 * 86400],
+    ["month", 30 * 86400],
+    ["day", 86400],
+    ["hour", 3600],
+    ["minute", 60],
+    ["second", 1],
+  ];
+  const [unit, divisor] = units.find(([, size]) => magnitude >= size) ?? units[units.length - 1];
+  // Plane's Ukrainian language identifier predates the standard BCP 47 code.
+  const language = locale === "ua" ? "uk" : Object.hasOwn(relativeTimeLocales, locale) ? locale : "en";
+  return new Intl.RelativeTimeFormat(language, { style: "narrow", numeric: "always" }).format(
+    Math.trunc(seconds / divisor),
+    unit
+  );
 }
 
 // Date Validation Helpers

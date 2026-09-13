@@ -6,7 +6,8 @@
 
 import React from "react";
 // plane utils
-import { calculateTimeAgo, cn, getIconForLink } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { cn, getIconForLink } from "@plane/utils";
 // plane ui
 import type { TContextMenuItem } from "../dropdowns/context-menu/root";
 import { CustomMenu } from "../dropdowns/custom-menu";
@@ -20,6 +21,7 @@ export type TLinkItemBlockProps = {
 };
 
 export function LinkItemBlock(props: TLinkItemBlockProps) {
+  const { calculateTimeAgo } = useRelativeTime();
   // props
   const { title, url, createdAt, menuItems, onClick } = props;
   // icons

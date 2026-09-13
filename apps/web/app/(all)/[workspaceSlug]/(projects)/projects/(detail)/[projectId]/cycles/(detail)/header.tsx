@@ -140,7 +140,7 @@ export const CycleIssuesHeader = observer(function CycleIssuesHeader() {
               <Breadcrumbs.Item
                 component={
                   <BreadcrumbLink
-                    label="Cycles"
+                    label={t("sidebar.cycles")}
                     href={`/${workspaceSlug}/projects/${projectId}/cycles/`}
                     icon={<CyclesOutline className="h-4 w-4 text-tertiary" />}
                   />
@@ -168,7 +168,7 @@ export const CycleIssuesHeader = observer(function CycleIssuesHeader() {
             </Breadcrumbs>
             {workItemsCount && workItemsCount > 0 ? (
               <Tooltip
-                label={`There are ${workItemsCount} ${workItemsCount > 1 ? "work items" : "work item"} in this cycle`}
+                label={t("navigation.project.cycle_work_item_count", { count: workItemsCount })}
                 layout="stacked"
                 side="bottom"
                 disabled={isMobile}
@@ -231,7 +231,7 @@ export const CycleIssuesHeader = observer(function CycleIssuesHeader() {
             {canUserCreateIssue && (
               <>
                 <Button onClick={() => setAnalyticsModal(true)} variant="secondary" size="lg">
-                  <span className="hidden @4xl:flex">Analytics</span>
+                  <span className="hidden @4xl:flex">{t("analytics")}</span>
                   <span className="@4xl:hidden">
                     <BarOutline className="size-3.5" />
                   </span>

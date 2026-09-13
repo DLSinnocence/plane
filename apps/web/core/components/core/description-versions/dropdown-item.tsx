@@ -10,7 +10,8 @@ import { Avatar } from "@makeplane/propel/components/avatar";
 import { useTranslation } from "@plane/i18n";
 import type { TDescriptionVersion } from "@plane/types";
 import { CustomMenu } from "@plane/ui";
-import { calculateTimeAgo, getFileURL } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { getFileURL } from "@plane/utils";
 // hooks
 import { useMember } from "@/hooks/store/use-member";
 
@@ -20,6 +21,7 @@ type Props = {
 };
 
 export const DescriptionVersionsDropdownItem = observer(function DescriptionVersionsDropdownItem(props: Props) {
+  const { calculateTimeAgo } = useRelativeTime();
   const { onClick, version } = props;
   // store hooks
   const { getUserDetails } = useMember();

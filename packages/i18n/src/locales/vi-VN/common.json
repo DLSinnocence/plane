@@ -328,6 +328,11 @@
   "morning": "Buổi sáng",
   "afternoon": "Buổi chiều",
   "evening": "Buổi tối",
+  "greetings": {
+    "morning": "Chào buổi sáng, {name}",
+    "afternoon": "Chào buổi chiều, {name}",
+    "evening": "Chào buổi tối, {name}"
+  },
   "show_all": "Hiển thị tất cả",
   "show_less": "Hiển thị ít hơn",
   "no_data_yet": "Chưa có dữ liệu",

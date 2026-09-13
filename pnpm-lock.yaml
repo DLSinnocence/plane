@@ -1477,6 +1477,12 @@ importers:
 
   packages/hooks:
     dependencies:
+      '@plane/i18n':
+        specifier: workspace:*
+        version: link:../i18n
+      '@plane/utils':
+        specifier: workspace:*
+        version: link:../utils
       react:
         specifier: 19.2.8
         version: 19.2.8

@@ -4,6 +4,7 @@
  * See the LICENSE file for details.
  */
 
+import { useTranslation } from "@plane/i18n";
 import { observer } from "mobx-react";
 import { useParams } from "next/navigation";
 import { ArchiveOutline, CyclesOutline, ModuleOutline, WorkItemsOutline } from "@makeplane/propel/icons";
@@ -33,23 +34,24 @@ const PROJECT_ARCHIVES_BREADCRUMB_LIST: {
   };
 } = {
   issues: {
-    label: "Work items",
+    label: "sidebar.work_items",
     href: "/issues",
     icon: WorkItemsOutline,
   },
   cycles: {
-    label: "Cycles",
+    label: "sidebar.cycles",
     href: "/cycles",
     icon: CyclesOutline,
   },
   modules: {
-    label: "Modules",
+    label: "sidebar.modules",
     href: "/modules",
     icon: ModuleOutline,
   },
 };
 
 export const ProjectArchivesHeader = observer(function ProjectArchivesHeader(props: TProps) {
+  const { t } = useTranslation();
   const { activeTab } = props;
   // router
   const router = useAppRouter();
@@ -77,7 +79,7 @@ export const ProjectArchivesHeader = observer(function ProjectArchivesHeader(pro
               component={
                 <BreadcrumbLink
                   href={`/${workspaceSlug}/projects/${projectId}/archives/issues`}
-                  label="Archives"
+                  label={t("archives")}
                   icon={<ArchiveOutline className="h-4 w-4 text-tertiary" />}
                 />
               }
@@ -86,7 +88,7 @@ export const ProjectArchivesHeader = observer(function ProjectArchivesHeader(pro
               <Breadcrumbs.Item
                 component={
                   <BreadcrumbLink
-                    label={activeTabBreadcrumbDetail.label}
+                    label={t(activeTabBreadcrumbDetail.label)}
                     icon={<activeTabBreadcrumbDetail.icon className="h-4 w-4 text-tertiary" />}
                   />
                 }
@@ -95,7 +97,7 @@ export const ProjectArchivesHeader = observer(function ProjectArchivesHeader(pro
           </Breadcrumbs>
           {activeTab === "issues" && issueCount && issueCount > 0 ? (
             <Tooltip
-              label={`There are ${issueCount} ${issueCount > 1 ? "work items" : "work item"} in project's archived`}
+              label={t("navigation.project.archived_work_item_count", { count: issueCount })}
               layout="stacked"
               side="bottom"
               disabled={isMobile}

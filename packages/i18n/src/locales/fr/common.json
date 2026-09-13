@@ -328,6 +328,11 @@
   "morning": "matin",
   "afternoon": "après-midi",
   "evening": "soir",
+  "greetings": {
+    "morning": "Bonjour, {name}",
+    "afternoon": "Bon après-midi, {name}",
+    "evening": "Bonsoir, {name}"
+  },
   "show_all": "Tout afficher",
   "show_less": "Afficher moins",
   "no_data_yet": "Pas encore de données",

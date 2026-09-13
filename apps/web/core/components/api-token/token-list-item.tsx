@@ -9,7 +9,8 @@ import { CloseCircleOutline } from "@makeplane/propel/icons";
 // plane imports
 import { Tooltip } from "@makeplane/propel/components/tooltip";
 import type { IApiToken } from "@plane/types";
-import { renderFormattedDate, calculateTimeAgo, renderFormattedTime } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { renderFormattedDate, renderFormattedTime } from "@plane/utils";
 // components
 import { DeleteApiTokenModal } from "@/components/api-token/delete-token-modal";
 // hooks
@@ -20,6 +21,7 @@ type Props = {
 };
 
 export function ApiTokenListItem(props: Props) {
+  const { calculateTimeAgo } = useRelativeTime();
   const { token } = props;
   // states
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);

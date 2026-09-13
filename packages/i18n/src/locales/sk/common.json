@@ -328,6 +328,11 @@
   "morning": "ráno",
   "afternoon": "popoludnie",
   "evening": "večer",
+  "greetings": {
+    "morning": "Dobré ráno, {name}",
+    "afternoon": "Dobré popoludnie, {name}",
+    "evening": "Dobrý večer, {name}"
+  },
   "show_all": "Zobraziť všetko",
   "show_less": "Zobraziť menej",
   "no_data_yet": "Zatiaľ žiadne dáta",

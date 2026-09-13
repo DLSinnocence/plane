@@ -5,10 +5,11 @@
  */
 
 import { useRouter } from "next/navigation";
+import { useTranslation } from "@plane/i18n";
 // plane types
 import { Logo } from "@plane/propel/emoji-icon-picker";
 import type { TActivityEntityData, TProjectEntityData } from "@plane/types";
-import { calculateTimeAgo } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
 // components
 import { ListItem } from "@/components/core/list";
 import { MemberDropdown } from "@/components/dropdowns/member/dropdown";
@@ -20,6 +21,8 @@ type BlockProps = {
   workspaceSlug: string;
 };
 export function RecentProject(props: BlockProps) {
+  const { calculateTimeAgo } = useRelativeTime();
+  const { t } = useTranslation();
   const { activity, ref, workspaceSlug } = props;
   // router
   const router = useRouter();
@@ -63,7 +66,7 @@ export function RecentProject(props: BlockProps) {
                 }
                 buttonClassName={projectDetails?.project_members?.length > 0 ? "hover:bg-transparent px-0" : ""}
                 showTooltip={projectDetails?.project_members?.length === 0}
-                placeholder="Assignees"
+                placeholder={t("common.members")}
                 optionsClassName="z-10"
                 tooltipContent=""
               />

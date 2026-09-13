@@ -6,6 +6,37 @@
       }
     }
   },
+  "navigation": {
+    "customize": {
+      "description": "选中的项目将始终显示在侧边栏中，其他项目仍可通过“更多”菜单访问。这些设置仅对你生效，不会影响工作区中的其他人。",
+      "accordion_description": "功能标签将嵌套显示在项目下方，可展开或收起。",
+      "tabbed_description": "功能标签将以横向标签页的形式显示在项目内。",
+      "minimum_project_count": "最小值为 1"
+    },
+    "app_rail": {
+      "icon_only": "仅图标",
+      "icon_with_name": "图标和名称",
+      "dock": "固定应用栏",
+      "undock": "取消固定应用栏"
+    },
+    "project": {
+      "card": {
+        "created_on": "创建于 {date}",
+        "members_count": "成员：{count}",
+        "no_members": "无成员",
+        "no_members_yet": "暂无成员",
+        "joined": "已加入"
+      },
+      "archived_work_item_count": "此项目中有 {count} 个已归档工作项",
+      "work_item_count": "此项目中有 {count} 个工作项",
+      "module_work_item_count": "此模块中有 {count} 个工作项",
+      "cycle_work_item_count": "此周期中有 {count} 个工作项",
+      "clear_default": "取消默认",
+      "set_as_default": "设为默认",
+      "hide_in_more_menu": "收起到更多菜单",
+      "show": "显示"
+    }
+  },
   "sidebar": {
     "stickies": "便签",
     "your_work": "我的工作",

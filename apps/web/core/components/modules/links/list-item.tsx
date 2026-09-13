@@ -12,7 +12,8 @@ import { TOAST_TYPE, setToast } from "@plane/propel/toast";
 import { Tooltip } from "@makeplane/propel/components/tooltip";
 import type { ILinkDetails } from "@plane/types";
 // plane ui
-import { getIconForLink, copyTextToClipboard, calculateTimeAgo } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { getIconForLink, copyTextToClipboard } from "@plane/utils";
 // helpers
 //
 // hooks
@@ -27,6 +28,7 @@ type Props = {
 };
 
 export const ModulesLinksListItem = observer(function ModulesLinksListItem(props: Props) {
+  const { calculateTimeAgo } = useRelativeTime();
   const { handleDeleteLink, handleEditLink, isEditingAllowed, link } = props;
   // store hooks
   const { getUserDetails } = useMember();

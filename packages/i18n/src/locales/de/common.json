@@ -328,6 +328,11 @@
   "morning": "Morgen",
   "afternoon": "Nachmittag",
   "evening": "Abend",
+  "greetings": {
+    "morning": "Guten Morgen, {name}",
+    "afternoon": "Guten Tag, {name}",
+    "evening": "Guten Abend, {name}"
+  },
   "show_all": "Alle anzeigen",
   "show_less": "Weniger anzeigen",
   "no_data_yet": "Noch keine Daten",

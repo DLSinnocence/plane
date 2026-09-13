@@ -6,6 +6,37 @@
       }
     }
   },
+  "navigation": {
+    "customize": {
+      "description": "Selected items will always stay visible in your sidebar. You can still find the others anytime from the More menu. These changes are personal to you and won’t affect anyone else on your workspace.",
+      "accordion_description": "Feature tabs will appear as nested items under a project and act as an accordion.",
+      "tabbed_description": "Feature tabs will appear as horizontal tabs inside a project.",
+      "minimum_project_count": "Minimum value is 1"
+    },
+    "app_rail": {
+      "icon_only": "Icon only",
+      "icon_with_name": "Icon with name",
+      "dock": "Dock App Rail",
+      "undock": "Undock App Rail"
+    },
+    "project": {
+      "card": {
+        "created_on": "Created on {date}",
+        "members_count": "Members: {count}",
+        "no_members": "No members",
+        "no_members_yet": "No members yet",
+        "joined": "Joined"
+      },
+      "archived_work_item_count": "There {count, plural, one {is # archived work item} other {are # archived work items}} in this project",
+      "work_item_count": "There {count, plural, one {is # work item} other {are # work items}} in this project",
+      "module_work_item_count": "There {count, plural, one {is # work item} other {are # work items}} in this module",
+      "cycle_work_item_count": "There {count, plural, one {is # work item} other {are # work items}} in this cycle",
+      "clear_default": "Clear default",
+      "set_as_default": "Set as default",
+      "hide_in_more_menu": "Hide in more menu",
+      "show": "Show"
+    }
+  },
   "sidebar": {
     "stickies": "Stickies",
     "your_work": "Your work",

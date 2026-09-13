@@ -14,7 +14,8 @@ import type { TIssueServiceType } from "@plane/types";
 import { EIssueServiceType } from "@plane/types";
 // ui
 import { CustomMenu } from "@plane/ui";
-import { calculateTimeAgo, copyTextToClipboard } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { copyTextToClipboard } from "@plane/utils";
 // helpers
 // hooks
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
@@ -29,6 +30,7 @@ type TIssueLinkItem = {
 };
 
 export const IssueLinkItem = observer(function IssueLinkItem(props: TIssueLinkItem) {
+  const { calculateTimeAgo } = useRelativeTime();
   // props
   const { linkId, linkOperations, isNotAllowed, issueServiceType = EIssueServiceType.ISSUES } = props;
   // hooks

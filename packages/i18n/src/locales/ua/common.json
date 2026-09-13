@@ -328,6 +328,11 @@
   "morning": "ранку",
   "afternoon": "дня",
   "evening": "вечора",
+  "greetings": {
+    "morning": "Доброго ранку, {name}",
+    "afternoon": "Добрий день, {name}",
+    "evening": "Добрий вечір, {name}"
+  },
   "show_all": "Показати все",
   "show_less": "Показати менше",
   "no_data_yet": "Поки що немає даних",

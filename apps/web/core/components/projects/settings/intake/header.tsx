@@ -50,7 +50,7 @@ export const ProjectInboxHeader = observer(function ProjectInboxHeader() {
             <Breadcrumbs.Item
               component={
                 <BreadcrumbLink
-                  label="Intake"
+                  label={t("sidebar.intake")}
                   href={`/${workspaceSlug}/projects/${projectId}/intake/`}
                   icon={<IntakeOutline className="h-4 w-4 text-tertiary" />}
                   isLast

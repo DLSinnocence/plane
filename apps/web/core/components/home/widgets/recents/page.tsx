@@ -10,7 +10,8 @@ import { Logo } from "@plane/propel/emoji-icon-picker";
 import { PagesOutline } from "@makeplane/propel/icons";
 // plane import
 import type { TActivityEntityData, TPageEntityData } from "@plane/types";
-import { calculateTimeAgo, getFileURL, getPageName } from "@plane/utils";
+import { useRelativeTime } from "@plane/hooks";
+import { getFileURL, getPageName } from "@plane/utils";
 import { ListItem } from "@/components/core/list";
 // hooks
 import { useMember } from "@/hooks/store/use-member";
@@ -22,6 +23,7 @@ type BlockProps = {
 };
 
 export function RecentPage(props: BlockProps) {
+  const { calculateTimeAgo } = useRelativeTime();
   const { activity, ref, workspaceSlug } = props;
   // router
   const router = useRouter();

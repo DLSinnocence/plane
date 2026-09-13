@@ -328,6 +328,11 @@
   "morning": "sabah",
   "afternoon": "öğleden sonra",
   "evening": "akşam",
+  "greetings": {
+    "morning": "Günaydın, {name}",
+    "afternoon": "İyi günler, {name}",
+    "evening": "İyi akşamlar, {name}"
+  },
   "show_all": "Tümünü göster",
   "show_less": "Daha az göster",
   "no_data_yet": "Henüz veri yok",

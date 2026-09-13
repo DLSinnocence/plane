@@ -328,6 +328,11 @@
   "morning": "დილა",
   "afternoon": "შუადღე",
   "evening": "საღამო",
+  "greetings": {
+    "morning": "დილა მშვიდობისა, {name}",
+    "afternoon": "შუადღე მშვიდობისა, {name}",
+    "evening": "საღამო მშვიდობისა, {name}"
+  },
   "show_all": "ყველას ჩვენება",
   "show_less": "ნაკლების ჩვენება",
   "no_data_yet": "ჯერ მონაცემები არ არის",

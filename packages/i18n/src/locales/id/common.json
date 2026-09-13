@@ -328,6 +328,11 @@
   "morning": "pagi",
   "afternoon": "siang",
   "evening": "malam",
+  "greetings": {
+    "morning": "Selamat pagi, {name}",
+    "afternoon": "Selamat siang, {name}",
+    "evening": "Selamat malam, {name}"
+  },
   "show_all": "Tampilkan semua",
   "show_less": "Tampilkan lebih sedikit",
   "no_data_yet": "Belum ada data",
