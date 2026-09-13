@@ -96,11 +96,22 @@ class MeowAliveOAuthProvider(OauthAdapter):
             }
         )
 
+    def get_display_name(self):
+        # Casdoor exposes its display name as the OIDC UserInfo `name` claim.
+        name = (self.profile or {}).get("name")
+        return name.strip() if isinstance(name, str) else ""
+
     def save_user_data(self, user):
+        display_name = self.get_display_name()
+        if display_name:
+            user.display_name = display_name
+            # Store the complete name without appending a separate family name.
+            user.first_name = display_name
+            user.last_name = ""
+
         # The configured SSO issuer is trusted when phone verification is absent.
         # Explicit verification must be boolean true; malformed flags fail closed.
-        # Clear unavailable numbers on every login to avoid stale recipients,
-        # independently of the optional name/avatar profile synchronization.
+        # Clear unavailable numbers on every login to avoid stale recipients.
         profile = self.profile or {}
         if any(key in profile and profile[key] is not True for key in ("phone_number_verified", "phoneVerified")):
             user.mobile_number = ""
@@ -111,15 +122,17 @@ class MeowAliveOAuthProvider(OauthAdapter):
         return super().save_user_data(user)
 
     def set_user_data(self):
+        display_name = self.get_display_name()
+        # Avatars are managed locally; do not map the SSO picture claim.
         super().set_user_data(
             {
                 "email": self.profile["email"],
                 "user": {
                     "provider_id": self.profile["sub"],
                     "email": self.profile["email"],
-                    "first_name": self.profile.get("given_name") or self.profile.get("name") or "",
-                    "last_name": self.profile.get("family_name") or "",
-                    "avatar": self.profile.get("picture"),
+                    "display_name": display_name,
+                    "first_name": display_name,
+                    "last_name": "",
                     "is_password_autoset": True,
                 },
             }
