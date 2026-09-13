@@ -9,6 +9,13 @@ import { observer } from "mobx-react";
 import type { FileRejection } from "react-dropzone";
 import { useDropzone } from "react-dropzone";
 import { AddOutline } from "@makeplane/propel/icons";
+import { useTranslation } from "@plane/i18n";
+import {
+  getAttachmentRejectionKey,
+  getAttachmentRejectionDetails,
+  getAttachmentUploadErrorKey,
+  getAttachmentUploadErrorDetails,
+} from "@/helpers/attachment-upload";
 // plane imports
 import { TOAST_TYPE, setToast } from "@plane/propel/toast";
 import type { TIssueServiceType } from "@plane/types";
@@ -30,6 +37,7 @@ type Props = {
 
 export const IssueAttachmentActionButton = observer(function IssueAttachmentActionButton(props: Props) {
   const { workspaceSlug, projectId, issueId, customButton, disabled = false, issueServiceType } = props;
+  const { t } = useTranslation();
   // state
   const [isLoading, setIsLoading] = useState(false);
   // store hooks
@@ -59,11 +67,13 @@ export const IssueAttachmentActionButton = observer(function IssueAttachmentActi
         setIsLoading(true);
         attachmentOperations
           .create(currentFile)
-          .catch(() => {
+          .catch((error) => {
             setToast({
               type: TOAST_TYPE.ERROR,
-              title: "Error!",
-              message: "File could not be attached. Try uploading again.",
+              title: t("toast.error"),
+              message: [t(getAttachmentUploadErrorKey(error)), getAttachmentUploadErrorDetails(error)]
+                .filter(Boolean)
+                .join("\n"),
             });
           })
           .finally(() => {
@@ -76,15 +86,21 @@ export const IssueAttachmentActionButton = observer(function IssueAttachmentActi
 
       setToast({
         type: TOAST_TYPE.ERROR,
-        title: "Error!",
-        message:
-          totalAttachedFiles > 1
-            ? "Only one file can be uploaded at a time."
-            : `File must be of ${maxFileSize / 1024 / 1024}MB or less in size.`,
+        title: t("toast.error"),
+        message: [
+          t(getAttachmentRejectionKey(rejectedFiles, maxFileSize, totalAttachedFiles), {
+            size: maxFileSize / 1024 / 1024,
+          }),
+          t("attachment.selection_details", {
+            size: rejectedFiles[0]?.file.size ?? 0,
+            limit: maxFileSize,
+            reason: getAttachmentRejectionDetails(rejectedFiles),
+          }),
+        ].join("\n"),
       });
       return;
     },
-    [attachmentOperations, maxFileSize, workspaceSlug, handleFetchPropertyActivities, setLastWidgetAction]
+    [attachmentOperations, maxFileSize, workspaceSlug, handleFetchPropertyActivities, setLastWidgetAction, t]
   );
 
   const { getRootProps, getInputProps } = useDropzone({
@@ -96,6 +112,7 @@ export const IssueAttachmentActionButton = observer(function IssueAttachmentActi
 
   return (
     <div
+      role="presentation"
       onClick={(e) => {
         // TODO: Remove extra div and move event propagation to button
         e.stopPropagation();

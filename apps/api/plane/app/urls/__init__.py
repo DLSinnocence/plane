@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
+from .attachment import urlpatterns as attachment_urls
 from .analytic import urlpatterns as analytic_urls
 from .api import urlpatterns as api_urls
 from .asset import urlpatterns as asset_urls
@@ -26,6 +27,7 @@ from .feishu import urlpatterns as feishu_urls
 from .exporter import urlpatterns as exporter_urls
 
 urlpatterns = [
+    *attachment_urls,
     *analytic_urls,
     *asset_urls,
     *cycle_urls,

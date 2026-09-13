@@ -17,6 +17,12 @@ import { EIssueServiceType } from "@plane/types";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 // plane web hooks
 import { useFileSize } from "@/hooks/use-file-size";
+import {
+  getAttachmentRejectionKey,
+  getAttachmentRejectionDetails,
+  getAttachmentUploadErrorKey,
+  getAttachmentUploadErrorDetails,
+} from "@/helpers/attachment-upload";
 // types
 import type { TAttachmentHelpers } from "../issue-detail-widgets/attachments/helper";
 // components
@@ -48,7 +54,7 @@ export const IssueAttachmentItemList = observer(function IssueAttachmentItemList
   const [isUploading, setIsUploading] = useState(false);
   // store hooks
   const {
-    attachment: { getAttachmentsByIssueId },
+    attachment: { getAttachmentsByIssueId, getAttachmentSlotsByIssueId },
     attachmentDeleteModalId,
     toggleDeleteAttachmentModal,
     fetchActivities,
@@ -59,7 +65,12 @@ export const IssueAttachmentItemList = observer(function IssueAttachmentItemList
   // file size
   const { maxFileSize } = useFileSize();
   // derived values
-  const issueAttachments = getAttachmentsByIssueId(issueId);
+  const slotAttachmentIds = new Set(
+    issueServiceType === EIssueServiceType.ISSUES
+      ? getAttachmentSlotsByIssueId(issueId)?.flatMap((slot) => (slot.attachment ? [slot.attachment.id] : []))
+      : []
+  );
+  const issueAttachments = getAttachmentsByIssueId(issueId)?.filter((id) => !slotAttachmentIds.has(id));
 
   // handlers
   const handleFetchPropertyActivities = useCallback(() => {
@@ -76,11 +87,13 @@ export const IssueAttachmentItemList = observer(function IssueAttachmentItemList
 
         setIsUploading(true);
         createAttachment(currentFile)
-          .catch(() => {
+          .catch((error) => {
             setToast({
               type: TOAST_TYPE.ERROR,
               title: t("toast.error"),
-              message: t("attachment.error"),
+              message: [t(getAttachmentUploadErrorKey(error)), getAttachmentUploadErrorDetails(error)]
+                .filter(Boolean)
+                .join("\n"),
             });
           })
           .finally(() => {
@@ -93,14 +106,20 @@ export const IssueAttachmentItemList = observer(function IssueAttachmentItemList
       setToast({
         type: TOAST_TYPE.ERROR,
         title: t("toast.error"),
-        message:
-          totalAttachedFiles > 1
-            ? t("attachment.only_one_file_allowed")
-            : t("attachment.file_size_limit", { size: maxFileSize / 1024 / 1024 }),
+        message: [
+          t(getAttachmentRejectionKey(rejectedFiles, maxFileSize, totalAttachedFiles), {
+            size: maxFileSize / 1024 / 1024,
+          }),
+          t("attachment.selection_details", {
+            size: rejectedFiles[0]?.file.size ?? 0,
+            limit: maxFileSize,
+            reason: getAttachmentRejectionDetails(rejectedFiles),
+          }),
+        ].join("\n"),
       });
       return;
     },
-    [createAttachment, maxFileSize, workspaceSlug, handleFetchPropertyActivities]
+    [createAttachment, maxFileSize, workspaceSlug, handleFetchPropertyActivities, t]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -112,8 +131,8 @@ export const IssueAttachmentItemList = observer(function IssueAttachmentItemList
 
   return (
     <>
-      {uploadStatus?.map((uploadStatus) => (
-        <IssueAttachmentsUploadItem key={uploadStatus.id} uploadStatus={uploadStatus} />
+      {uploadStatus?.map((status) => (
+        <IssueAttachmentsUploadItem key={status.id} uploadStatus={status} />
       ))}
       {issueAttachments && (
         <>

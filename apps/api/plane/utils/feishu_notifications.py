@@ -354,7 +354,7 @@ def queue_activity_notifications(
         old = (
             user_ids(first_value(before, ("assignee_ids", "assignees"))) if type == "issue.activity.updated" else set()
         )
-        recipients = actual | old | extra_recipients
+        recipients = (actual | old | extra_recipients) - user_ids([actor_id])
         # Internal work-item details and comments must not be sent to guests or former members.
         eligible = ProjectMember.objects.filter(
             project_id=issue.project_id, is_active=True, role__gte=15, member__is_active=True, member_id__in=recipients

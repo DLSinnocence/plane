@@ -5,7 +5,7 @@
  */
 
 // plane imports
-import { MAX_FILE_SIZE } from "@plane/constants";
+import { MAX_ATTACHMENT_SIZE } from "@plane/constants";
 // hooks
 import { useInstance } from "@/hooks/store/use-instance";
 
@@ -18,6 +18,6 @@ export const useFileSize = (): TReturnProps => {
   const { config } = useInstance();
 
   return {
-    maxFileSize: config?.file_size_limit ?? MAX_FILE_SIZE,
+    maxFileSize: config?.file_size_limit ?? MAX_ATTACHMENT_SIZE,
   };
 };

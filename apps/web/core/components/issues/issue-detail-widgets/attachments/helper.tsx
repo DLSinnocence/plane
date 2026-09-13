@@ -5,6 +5,8 @@
  */
 
 import { useMemo } from "react";
+import { useTranslation } from "@plane/i18n";
+import { getAttachmentUploadErrorKey, getAttachmentUploadErrorDetails } from "@/helpers/attachment-upload";
 import { setPromiseToast, TOAST_TYPE, setToast } from "@plane/propel/toast";
 import type { TIssueServiceType } from "@plane/types";
 import { EIssueServiceType } from "@plane/types";
@@ -14,7 +16,7 @@ import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import type { TAttachmentUploadStatus } from "@/store/issue/issue-details/attachment.store";
 
 export type TAttachmentOperations = {
-  create: (file: File) => Promise<void>;
+  create: (file: File, slotId?: string) => Promise<void>;
   remove: (attachmentId: string) => Promise<void>;
 };
 
@@ -33,15 +35,16 @@ export const useAttachmentOperations = (
   issueId: string,
   issueServiceType: TIssueServiceType = EIssueServiceType.ISSUES
 ): TAttachmentHelpers => {
+  const { t } = useTranslation();
   const {
     attachment: { createAttachment, removeAttachment, getAttachmentsUploadStatusByIssueId },
   } = useIssueDetail(issueServiceType);
 
   const attachmentOperations: TAttachmentOperations = useMemo(
     () => ({
-      create: async (file) => {
+      create: async (file, slotId) => {
         if (!workspaceSlug || !projectId || !issueId) throw new Error("Missing required fields");
-        const attachmentUploadPromise = createAttachment(workspaceSlug, projectId, issueId, file);
+        const attachmentUploadPromise = createAttachment(workspaceSlug, projectId, issueId, file, slotId);
         setPromiseToast(attachmentUploadPromise, {
           loading: "Uploading attachment...",
           success: {
@@ -49,8 +52,11 @@ export const useAttachmentOperations = (
             message: () => "The attachment has been successfully uploaded",
           },
           error: {
-            title: "Attachment not uploaded",
-            message: () => "The attachment could not be uploaded",
+            title: t("toast.error"),
+            message: (error: unknown) =>
+              [t(getAttachmentUploadErrorKey(error)), getAttachmentUploadErrorDetails(error)]
+                .filter(Boolean)
+                .join("\n"),
           },
         });
 
@@ -74,7 +80,7 @@ export const useAttachmentOperations = (
         }
       },
     }),
-    [workspaceSlug, projectId, issueId, createAttachment, removeAttachment]
+    [workspaceSlug, projectId, issueId, createAttachment, removeAttachment, t]
   );
   const attachmentsUploadStatus = getAttachmentsUploadStatusByIssueId(issueId);
 

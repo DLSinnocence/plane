@@ -14,10 +14,26 @@ export type TIssueAttachment = {
   };
   asset_url: string;
   issue_id: string;
+  attachment_slot_id?: string | null;
   // required
   updated_at: string;
   updated_by: string;
   created_by: string;
+};
+
+export type TAttachmentTemplate = {
+  id: string;
+  name: string;
+  slots: string[];
+  created_by: string | null;
+  updated_at: string;
+};
+
+export type TIssueAttachmentSlot = {
+  id: string;
+  name: string;
+  sort_order: number;
+  attachment: TIssueAttachment | null;
 };
 
 export type TIssueAttachmentUploadResponse = TFileSignedURLResponse & {

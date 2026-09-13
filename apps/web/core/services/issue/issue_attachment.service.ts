@@ -33,11 +33,7 @@ export class IssueAttachmentService extends APIService {
   ): Promise<void> {
     return this.patch(
       `/api/assets/v2/workspaces/${workspaceSlug}/projects/${projectId}/${this.serviceType}/${issueId}/attachments/${attachmentId}/`
-    )
-      .then((response) => response?.data)
-      .catch((error) => {
-        throw error?.response?.data;
-      });
+    ).then((response) => response?.data);
   }
 
   async uploadIssueAttachment(
@@ -45,37 +41,30 @@ export class IssueAttachmentService extends APIService {
     projectId: string,
     issueId: string,
     file: File,
-    uploadProgressHandler?: AxiosRequestConfig["onUploadProgress"]
+    uploadProgressHandler?: AxiosRequestConfig["onUploadProgress"],
+    slotId?: string
   ): Promise<TIssueAttachment> {
     const fileMetaData = await getFileMetaDataForUpload(file);
     return this.post(
       `/api/assets/v2/workspaces/${workspaceSlug}/projects/${projectId}/${this.serviceType}/${issueId}/attachments/`,
-      fileMetaData
-    )
-      .then(async (response) => {
-        const signedURLResponse: TIssueAttachmentUploadResponse = response?.data;
-        const fileUploadPayload = generateFileUploadPayload(signedURLResponse, file);
-        await this.fileUploadService.uploadFile(
-          signedURLResponse.upload_data.url,
-          fileUploadPayload,
-          uploadProgressHandler
-        );
-        await this.updateIssueAttachmentUploadStatus(workspaceSlug, projectId, issueId, signedURLResponse.asset_id);
-        return signedURLResponse.attachment;
-      })
-      .catch((error) => {
-        throw error?.response?.data;
-      });
+      slotId ? { ...fileMetaData, slot_id: slotId } : fileMetaData
+    ).then(async (response) => {
+      const signedURLResponse: TIssueAttachmentUploadResponse = response?.data;
+      const fileUploadPayload = generateFileUploadPayload(signedURLResponse, file);
+      await this.fileUploadService.uploadFile(
+        signedURLResponse.upload_data.url,
+        fileUploadPayload,
+        uploadProgressHandler
+      );
+      await this.updateIssueAttachmentUploadStatus(workspaceSlug, projectId, issueId, signedURLResponse.asset_id);
+      return signedURLResponse.attachment;
+    });
   }
 
   async getIssueAttachments(workspaceSlug: string, projectId: string, issueId: string): Promise<TIssueAttachment[]> {
     return this.get(
       `/api/assets/v2/workspaces/${workspaceSlug}/projects/${projectId}/${this.serviceType}/${issueId}/attachments/`
-    )
-      .then((response) => response?.data)
-      .catch((error) => {
-        throw error?.response?.data;
-      });
+    ).then((response) => response?.data);
   }
 
   async deleteIssueAttachment(
@@ -86,10 +75,6 @@ export class IssueAttachmentService extends APIService {
   ): Promise<TIssueAttachment> {
     return this.delete(
       `/api/assets/v2/workspaces/${workspaceSlug}/projects/${projectId}/${this.serviceType}/${issueId}/attachments/${assetId}/`
-    )
-      .then((response) => response?.data)
-      .catch((error) => {
-        throw error?.response?.data;
-      });
+    ).then((response) => response?.data);
   }
 }

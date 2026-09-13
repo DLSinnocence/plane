@@ -627,6 +627,8 @@ class IssueLinkLiteSerializer(BaseSerializer):
 
 
 class IssueAttachmentSerializer(BaseSerializer):
+    attachment_slot = serializers.PrimaryKeyRelatedField(read_only=True)
+    attachment_slot_id = serializers.UUIDField(read_only=True, allow_null=True)
     asset_url = serializers.CharField(read_only=True)
 
     class Meta:

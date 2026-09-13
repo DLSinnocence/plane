@@ -2219,6 +2219,8 @@ class IssueAttachmentDetailAPIEndpoint(BaseAPIView):
             )
 
         issue_attachment = FileAsset.objects.get(pk=pk, workspace__slug=slug, project_id=project_id)
+        if issue_attachment.attachment_slot_id:
+            return Response({"error": "Complete slot uploads through the app issue attachment endpoint."}, status=400)
         serializer = IssueAttachmentSerializer(issue_attachment)
 
         # Send this activity only if the attachment is not uploaded before

@@ -140,6 +140,9 @@ class IssueLinkSerializer(BaseSerializer):
 
 
 class IssueAttachmentSerializer(BaseSerializer):
+    attachment_slot = serializers.PrimaryKeyRelatedField(read_only=True)
+    attachment_slot_id = serializers.UUIDField(read_only=True, allow_null=True)
+
     class Meta:
         model = FileAsset
         fields = "__all__"

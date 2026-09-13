@@ -77,7 +77,11 @@ inside Compose. You do not need to configure them separately.
   port 80. Host ports 80 and 443 remain available for the reverse proxy.
 - `APP_RELEASE`: Image version. Releases set this to their version; source defaults
   to `preview`.
-- `FILE_SIZE_LIMIT`: Maximum upload size in bytes, default 5242880.
+- `FILE_SIZE_LIMIT`: Maximum size of each uploaded file in bytes, default
+  `1073741824` (1GB / 1024MB). Existing deployments that explicitly set the old
+  `5242880` limit must update this value in `.env` and recreate the Plane container
+  with `docker compose up -d --force-recreate plane`. Updated proxy images allow
+  multipart form overhead; storage still enforces the signed per-file limit.
 - `GUNICORN_WORKERS`: API worker count, default 1.
 
 For direct HTTP on port 8080, set `DOMAIN_NAME=192.168.1.10`,

@@ -89,7 +89,7 @@ test("environment template has blank required credentials and source deployment 
     SITE_ADDRESS: ":80",
     LISTEN_HTTP_PORT: "8080",
     MINIO_ENDPOINT_SSL: "0",
-    FILE_SIZE_LIMIT: "5242880",
+    FILE_SIZE_LIMIT: "1073741824",
     GUNICORN_WORKERS: "1",
   };
   for (const [key, value] of Object.entries(defaults)) assert.equal(values[key], value, key);

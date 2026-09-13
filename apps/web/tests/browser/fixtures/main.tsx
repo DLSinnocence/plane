@@ -20,6 +20,7 @@ import { InvitationResultFixture } from "./invitation-result";
 import { authFixtureEnabled } from "./invitation-auth-state";
 import { GiteaSettings } from "@/components/integration/gitea-settings";
 import { IssueGitCommits } from "@/components/issues/issue-detail/git-commits";
+import { AttachmentSlotsFixture } from "./attachment-slots";
 import { StageAssigneesFixture } from "./stage-assignees";
 import { GitCommitsMenuFixture } from "./git-commits-menu";
 
@@ -125,6 +126,8 @@ createRoot(document.getElementById("root")!).render(
     <GitCommitsMenuFixture />
   ) : new URLSearchParams(window.location.search).has("git-commits") ? (
     <IssueGitCommits workspaceSlug="workspace" projectId="project" issueId="issue" />
+  ) : new URLSearchParams(window.location.search).has("attachment-slots") ? (
+    <AttachmentSlotsFixture />
   ) : new URLSearchParams(window.location.search).has("stage-assignees") ? (
     <StageAssigneesFixture />
   ) : new URLSearchParams(window.location.search).has("invitation-result") ? (
