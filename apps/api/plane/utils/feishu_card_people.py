@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
-"""Resolve structured card name slots from Feishu without using SSO display names."""
+"""Resolve structured card name slots from Plane display names."""
 
 from copy import deepcopy
 from datetime import timedelta
@@ -11,12 +11,9 @@ from uuid import UUID
 from django.utils import timezone
 
 from plane.db.models import FeishuMessage, User, WorkspaceMember
-from plane.utils.feishu import FeishuError
-from plane.utils.phone import normalize_phone_number
 
 NAME_SLOTS_KEY = "_plane_name_slots"
-MAX_PEOPLE_PER_CARD = 20
-UNAVAILABLE_NAME = "成员（飞书昵称不可用）"
+UNAVAILABLE_NAME = "成员"
 
 
 def member_parts(ids):
@@ -37,8 +34,8 @@ def render_parts(parts, names=None):
     )
 
 
-def hydrate_card_names(message, integration, client, claim, lease_seconds):
-    """Freeze Feishu nicknames before the first send, retaining identical content on retries."""
+def hydrate_card_names(message, integration, claim, lease_seconds):
+    """Freeze Plane display names before the first send, retaining identical content on retries."""
     if NAME_SLOTS_KEY not in message.card:
         return True
     card = deepcopy(message.card)
@@ -57,40 +54,16 @@ def hydrate_card_names(message, integration, client, claim, lease_seconds):
                 continue
             if user_id not in ids:
                 ids.append(user_id)
-    ids = ids[:MAX_PEOPLE_PER_CARD]
     active_members = WorkspaceMember.objects.filter(
         workspace_id=integration.workspace_id,
         member_id__in=ids,
         is_active=True,
     ).values_list("member_id", flat=True)
-    phones = {
-        str(pk): normalize_phone_number(phone)
-        for pk, phone in User.objects.filter(pk__in=active_members, is_active=True).values_list("pk", "mobile_number")
+    names = {
+        str(pk): " ".join(name.split())[:100]
+        for pk, name in User.objects.filter(pk__in=active_members, is_active=True).values_list("pk", "display_name")
+        if name and name.strip()
     }
-    names = {}
-    for user_id in ids:
-        mobile = phones.get(user_id)
-        if not mobile:
-            continue
-        # Name enrichment can involve multiple people. Renew the existing claim
-        # before each bounded provider lookup so another worker cannot take it.
-        if not FeishuMessage.objects.filter(pk=message.pk, status="sending", claim_token=claim).update(
-            lease_expires_at=timezone.now() + timedelta(seconds=lease_seconds), updated_at=timezone.now()
-        ):
-            return False
-        try:
-            open_id = (
-                message.recipient_open_id if user_id == str(message.receiver_id) else client.resolve_mobile(mobile)
-            )
-            name = client.get_display_name(open_id)
-            if isinstance(name, str) and name.strip():
-                names[user_id] = " ".join(name.split())[:100]
-        except FeishuError as exc:
-            if exc.retryable:
-                raise
-            # Missing contact permissions/identity must not hide the work-item
-            # alert, and must never silently revert to a MeowAlive nickname.
-            continue
     for slot in slots:
         if not isinstance(slot, dict):
             continue

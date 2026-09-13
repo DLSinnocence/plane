@@ -125,6 +125,37 @@ def test_reassignment_notifies_union_with_deduplication(feishu_events):
     assert len(messages) == 2
 
 
+@pytest.mark.parametrize("source", ["actual", "previous", "state_previous", "state_new", "state_default"])
+@pytest.mark.parametrize("actor_as_uuid", [False, True])
+def test_actor_is_excluded_from_every_recipient_source(feishu_events, source, actor_as_uuid):
+    f = feishu_events
+    before, after = {"name": "old"}, {"name": "new"}
+    expected = {f.developer.pk}
+    if source == "actual":
+        IssueAssignee.objects.create(issue=f.issue, project=f.project, assignee=f.actor)
+    elif source == "previous":
+        before["assignee_ids"] = [str(f.actor.pk)]
+        after["assignee_ids"] = [str(f.developer.pk)]
+    else:
+        state_id = str(f.acceptance.pk)
+        previous = f.actor if source == "state_previous" else f.reviewer
+        current = f.actor if source == "state_new" else f.reviewer
+        before["state_assignees"] = {} if source == "state_default" else {state_id: [str(previous.pk)]}
+        after["state_assignees"] = {state_id: [str(current.pk)]}
+        expected.add(f.reviewer.pk)
+    messages = queue_activity_notifications(
+        event_key=str(uuid4()),
+        type="issue.activity.updated",
+        issue_id=str(f.issue.pk),
+        project_id=str(f.project.pk),
+        actor_id=f.actor.pk if actor_as_uuid else str(f.actor.pk),
+        current_instance=before,
+        requested_data=after,
+    )
+    assert {message.receiver_id for message in messages} == expected
+    assert set(FeishuMessage.objects.values_list("receiver_id", flat=True)) == expected
+
+
 def test_removing_last_assignee_still_notifies_previous_owner(feishu_events):
     f = feishu_events
     IssueAssignee.objects.filter(issue=f.issue).delete()
@@ -278,23 +309,27 @@ def test_rollback_discards_outbox_and_dispatch(feishu_events, django_capture_on_
     f.dispatched.assert_not_called()
 
 
-def test_activity_publication_captures_even_when_in_app_notification_disabled(feishu_events):
+@pytest.mark.parametrize("actor", ["other", "self", "system", "system_null"])
+def test_activity_publication_captures_even_when_in_app_notification_disabled(feishu_events, actor):
     f = feishu_events
-    issue_activity.apply_async(
-        kwargs={
-            "type": "issue.activity.updated",
-            "issue_id": str(f.issue.pk),
-            "project_id": str(f.project.pk),
-            "actor_id": str(f.developer.pk),
-            "requested_data": json.dumps({"name": "new"}),
-            "current_instance": json.dumps({"name": "old"}),
-            "epoch": 0,
-            "notification": False,
-        },
-        task_id="stable-event",
-    )
-    assert FeishuMessage.objects.get().receiver_id == f.developer.pk
-    assert FeishuMessage.objects.get().event_key == f"stable-event:{f.issue.pk}"
+    IssueAssignee.objects.create(issue=f.issue, project=f.project, assignee=f.reviewer)
+    event = {
+        "type": "issue.activity.updated",
+        "issue_id": str(f.issue.pk),
+        "project_id": str(f.project.pk),
+        "requested_data": json.dumps({"name": "new"}),
+        "current_instance": json.dumps({"name": "old"}),
+        "epoch": 0,
+        "notification": False,
+    }
+    if actor != "system":
+        event["actor_id"] = None if actor == "system_null" else str(f.developer.pk if actor == "self" else f.actor.pk)
+    issue_activity.apply_async(kwargs=event, task_id="stable-event")
+    expected = {f.reviewer.pk} if actor == "self" else {f.developer.pk, f.reviewer.pk}
+    assert set(FeishuMessage.objects.values_list("receiver_id", flat=True)) == expected
+    assert set(FeishuMessage.objects.values_list("event_key", flat=True)) == {f"stable-event:{f.issue.pk}"}
+    if actor.startswith("system"):
+        assert all("系统" in contents(message) for message in FeishuMessage.objects.all())
     f.published.assert_called_once()
 
 
@@ -308,33 +343,52 @@ def test_capture_failure_does_not_block_existing_activity(feishu_events, monkeyp
 
 
 @pytest.mark.parametrize("api", ["app", "external"])
+@pytest.mark.parametrize("actor_source", ["neither", "previous", "new"])
 def test_http_state_handoff_notifies_previous_and_new_assignees(
-    feishu_events, api, request, django_capture_on_commit_callbacks
+    feishu_events, api, actor_source, request, django_capture_on_commit_callbacks
 ):
     f = feishu_events
+    if actor_source == "previous":
+        IssueAssignee.objects.create(issue=f.issue, project=f.project, assignee=f.actor)
+    elif actor_source == "new":
+        f.issue.state_assignees[str(f.acceptance.pk)].append(str(f.actor.pk))
+        f.issue.save(update_fields=["state_assignees"])
     client = request.getfixturevalue("session_client" if api == "app" else "api_key_client")
     prefix, state_key = ("/api", "state_id") if api == "app" else ("/api/v1", "state")
     url = f"{prefix}/workspaces/{f.workspace.slug}/projects/{f.project.pk}/issues/{f.issue.pk}/"
     with django_capture_on_commit_callbacks(execute=True):
         response = client.patch(url, {state_key: str(f.acceptance.pk)}, format="json")
     assert response.status_code == status.HTTP_200_OK, response.data
+    f.issue.refresh_from_db()
+    assert f.issue.state_id == f.acceptance.pk
+    expected_assignees = {f.reviewer.pk, f.actor.pk} if actor_source == "new" else {f.reviewer.pk}
+    assert set(IssueAssignee.objects.filter(issue=f.issue).values_list("assignee_id", flat=True)) == expected_assignees
     assert set(FeishuMessage.objects.values_list("receiver_id", flat=True)) == {f.developer.pk, f.reviewer.pk}
     assert all("开发完成/待验收" in contents(message) for message in FeishuMessage.objects.all())
     assert f.dispatched.call_count == 2
 
 
-def test_http_comment_notifies_assignee_even_when_they_are_the_actor(
-    feishu_events, session_client, django_capture_on_commit_callbacks
+@pytest.mark.parametrize("other_assignee", [False, True])
+def test_http_comment_excludes_actor_and_notifies_other_assignees(
+    feishu_events, session_client, django_capture_on_commit_callbacks, other_assignee
 ):
     f = feishu_events
+    if other_assignee:
+        IssueAssignee.objects.create(issue=f.issue, project=f.project, assignee=f.reviewer)
     session_client.force_authenticate(user=f.developer)
     url = f"/api/workspaces/{f.workspace.slug}/projects/{f.project.pk}/issues/{f.issue.pk}/comments/"
     with django_capture_on_commit_callbacks(execute=True):
         response = session_client.post(url, {"comment_html": "<p>已修复，请验收</p>"}, format="json")
     assert response.status_code == status.HTTP_201_CREATED, response.data
-    message = FeishuMessage.objects.get()
-    assert message.receiver_id == f.developer.pk
-    assert "已修复，请验收" in contents(message)
+    assert not FeishuMessage.objects.filter(receiver=f.developer).exists()
+    if other_assignee:
+        message = FeishuMessage.objects.get()
+        assert message.receiver_id == f.reviewer.pk
+        assert "已修复，请验收" in contents(message)
+        f.dispatched.assert_called_once_with(str(message.pk))
+    else:
+        assert FeishuMessage.objects.count() == 0
+        f.dispatched.assert_not_called()
 
 
 def test_http_forbidden_assignment_does_not_send_cards(

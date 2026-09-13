@@ -184,9 +184,9 @@ def deliver_feishu_message(self, message_id):
         client = FeishuClient(integration.app_id, decrypt_secret(integration.app_secret))
         if not resolve_recipient(message, client, claim):
             return
-        if not hydrate_card_names(message, integration, client, claim, LEASE_SECONDS):
+        if not hydrate_card_names(message, integration, claim, LEASE_SECONDS):
             return
-        # Contact/name resolution may take time; recheck phone, roles and app configuration.
+        # Recipient resolution may take time; recheck phone, roles and app configuration.
         integration = FeishuIntegration.objects.select_related("workspace").filter(pk=message.integration_id).first()
         reason = recipient_error(message, integration) if integration else "integration_disabled"
         if reason:

@@ -100,7 +100,7 @@ def test_update_title_and_recipient_relevance_are_explicit(notification_people):
         assert f.actor.mobile_number not in raw
 
 
-def test_delivered_actor_and_assignee_names_come_from_feishu(notification_people):
+def test_delivered_actor_and_assignee_names_come_from_plane(notification_people):
     f = notification_people
     messages = handoff(f)
     for message in messages:
@@ -109,50 +109,85 @@ def test_delivered_actor_and_assignee_names_come_from_feishu(notification_people
         assert message.status == "sent"
         assert NAME_SLOTS_KEY not in message.card
         text = json.dumps(message.card, ensure_ascii=False)
-        assert all(name in text for name in ("飞书操作人", "飞书原负责人", "飞书新负责人"))
-        assert "SSO_" not in text
+        assert all(user.display_name in text for user in (f.actor, f.old, f.new))
+        assert "飞书操作人" not in text and "飞书原负责人" not in text and "飞书新负责人" not in text
     assert f.send.call_count == 2
+    looked_up_mobiles = [call.args[0] for call in f.lookup.call_args_list]
+    assert sorted(looked_up_mobiles) == sorted([f.old.mobile_number, f.new.mobile_number])
+    f.names.assert_not_called()
     for call in f.send.call_args_list:
         assert NAME_SLOTS_KEY not in call.args[1]
 
 
-def test_unavailable_feishu_name_never_falls_back_to_sso(notification_people):
+@pytest.mark.parametrize("missing_name", ["blank", "whitespace", "inactive_user", "inactive_membership"])
+def test_unavailable_display_name_uses_generic_member_label(notification_people, missing_name):
     f = notification_people
-    f.names.side_effect = FeishuError("provider_rejected")
+    if missing_name in {"blank", "whitespace"}:
+        User.objects.filter(pk=f.actor.pk).update(display_name="" if missing_name == "blank" else " \t\n ")
+    elif missing_name == "inactive_user":
+        User.objects.filter(pk=f.actor.pk).update(is_active=False)
+    else:
+        WorkspaceMember.objects.filter(workspace=f.workspace, member=f.actor).update(is_active=False)
     row = handoff(f)[0]
     deliver_feishu_message.run(str(row.pk))
     row.refresh_from_db()
     assert row.status == "sent"
-    text = json.dumps(row.card, ensure_ascii=False)
-    assert UNAVAILABLE_NAME in text and "SSO_" not in text
+    actor_text = row.card["elements"][0]["text"]["content"]
+    assert f"{UNAVAILABLE_NAME}修改了与你有关的工作项" in actor_text
+    assert f.actor.display_name not in actor_text
     assert NAME_SLOTS_KEY not in row.card
+    f.names.assert_not_called()
 
 
-def test_nickname_content_is_frozen_before_retry(notification_people):
+def test_display_name_content_is_frozen_before_retry(notification_people):
     f = notification_people
     f.send.side_effect = [FeishuError("network_error", retryable=True), None]
     row = handoff(f)[0]
     deliver_feishu_message.run(str(row.pk))
-    count = f.names.call_count
     row.refresh_from_db()
     assert row.status == "pending" and NAME_SLOTS_KEY not in row.card
     first_card = row.card
-    f.names.side_effect = AssertionError("Names must remain frozen on transport retry")
+    User.objects.filter(pk__in=[f.actor.pk, f.old.pk, f.new.pk]).update(display_name="重试前修改了昵称")
     deliver_feishu_message.run(str(row.pk))
     row.refresh_from_db()
     assert row.status == "sent" and row.card == first_card
-    assert f.names.call_count == count
+    f.names.assert_not_called()
     assert f.send.call_args_list[0].args == f.send.call_args_list[1].args
 
 
-def test_transient_name_lookup_failure_retries_without_sending(notification_people):
+@pytest.mark.parametrize("actor_mobile", ["", "invalid-phone", None])
+def test_actor_display_name_does_not_require_mobile_or_feishu_profile(notification_people, actor_mobile):
     f = notification_people
+    User.objects.filter(pk=f.actor.pk).update(mobile_number=actor_mobile)
     f.names.side_effect = FeishuError("network_error", retryable=True)
     row = handoff(f)[0]
     deliver_feishu_message.run(str(row.pk))
     row.refresh_from_db()
-    assert row.status == "pending" and NAME_SLOTS_KEY in row.card
-    f.send.assert_not_called()
+    assert row.status == "sent"
+    assert f"{f.actor.display_name}修改了与你有关的工作项" in row.card["elements"][0]["text"]["content"]
+    f.lookup.assert_called_once_with(row.recipient_mobile)
+    f.names.assert_not_called()
+    f.send.assert_called_once()
+
+
+def test_state_assignee_changes_use_display_names(notification_people):
+    f = notification_people
+    rows = queue_activity_notifications(
+        event_key=str(uuid4()),
+        type="issue.activity.updated",
+        issue_id=str(f.issue.pk),
+        actor_id=str(f.actor.pk),
+        project_id=str(f.project.pk),
+        current_instance={"state_assignees": {str(f.issue.state_id): [str(f.old.pk)]}},
+        requested_data={"state_assignees": {str(f.issue.state_id): [str(f.new.pk)]}},
+    )
+    assert {row.receiver_id for row in rows} == {f.old.pk, f.new.pk}
+    row = rows[0]
+    deliver_feishu_message.run(str(row.pk))
+    row.refresh_from_db()
+    assert row.status == "sent"
+    assert row.card["elements"][1]["text"]["content"] == f"开发中：{f.old.display_name} → {f.new.display_name}"
+    f.names.assert_not_called()
 
 
 def test_comment_card_relevance_and_free_text_are_preserved(notification_people):
@@ -170,6 +205,6 @@ def test_comment_card_relevance_and_free_text_are_preserved(notification_people)
     row = rows[0]
     deliver_feishu_message.run(str(row.pk))
     row.refresh_from_db()
-    assert "飞书操作人在与你有关的工作项中发表了评论" in row.card["elements"][0]["text"]["content"]
+    assert f"{f.actor.display_name}在与你有关的工作项中发表了评论" in row.card["elements"][0]["text"]["content"]
     assert literal == row.card["elements"][1]["text"]["content"]
     assert row.card["elements"][-1]["actions"][0]["url"].endswith(f"/browse/CARD-{f.issue.sequence_id}/")
