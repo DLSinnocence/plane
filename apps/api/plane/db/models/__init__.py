@@ -78,6 +78,7 @@ from .workspace import (
 )
 
 from .feishu import FeishuIntegration, FeishuMessage
+from .gitea import GiteaIntegration, GiteaCommit, GiteaCommitLink
 from .favorite import UserFavorite
 
 from .issue_type import IssueType

@@ -18,7 +18,10 @@ import { users } from "./mocks";
 import { IntegrationRouteFixture } from "./integration-route";
 import { InvitationResultFixture } from "./invitation-result";
 import { authFixtureEnabled } from "./invitation-auth-state";
+import { GiteaSettings } from "@/components/integration/gitea-settings";
+import { IssueGitCommits } from "@/components/issues/issue-detail/git-commits";
 import { StageAssigneesFixture } from "./stage-assignees";
+import { GitCommitsMenuFixture } from "./git-commits-menu";
 
 function App() {
   const [memberIds, setMemberIds] = useState<string[]>([]);
@@ -103,8 +106,26 @@ function App() {
     </main>
   );
 }
+function GiteaSettingsFixture() {
+  const [workspaceSlug, setWorkspaceSlug] = useState("workspace");
+  return (
+    <>
+      <button onClick={() => setWorkspaceSlug((value) => (value === "workspace" ? "other" : "workspace"))}>
+        Switch workspace
+      </button>
+      <GiteaSettings workspaceSlug={workspaceSlug} />
+    </>
+  );
+}
+
 createRoot(document.getElementById("root")!).render(
-  new URLSearchParams(window.location.search).has("stage-assignees") ? (
+  new URLSearchParams(window.location.search).has("gitea-settings") ? (
+    <GiteaSettingsFixture />
+  ) : new URLSearchParams(window.location.search).has("git-commits-menu") ? (
+    <GitCommitsMenuFixture />
+  ) : new URLSearchParams(window.location.search).has("git-commits") ? (
+    <IssueGitCommits workspaceSlug="workspace" projectId="project" issueId="issue" />
+  ) : new URLSearchParams(window.location.search).has("stage-assignees") ? (
     <StageAssigneesFixture />
   ) : new URLSearchParams(window.location.search).has("invitation-result") ? (
     <InvitationResultFixture />

@@ -32,6 +32,8 @@ class RequestLoggerMiddleware:
         """
         Determines whether a route should be logged based on the request and status code.
         """
+        if "/integrations/gitea/" in request.path:
+            return False
         # Don't log health checks
         if request.path == "/" and request.method == "GET":
             return False
@@ -87,6 +89,10 @@ class APITokenLogMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        # Gitea setup and hook downloads carry workspace credentials; omit both
+        # request and response, even for malformed input or a supplied API key.
+        if "/integrations/gitea/" in request.path_info:
+            return self.get_response(request)
         request_body = request.body
         response = self.get_response(request)
         self.process_request(request, response, request_body)
@@ -129,6 +135,8 @@ class APITokenLogMiddleware:
         return str(redacted)
 
     def process_request(self, request, response, request_body):
+        if "/integrations/gitea/" in request.path_info:
+            return None
         api_key_header = "X-Api-Key"
         api_key = request.headers.get(api_key_header)
 

@@ -28,7 +28,15 @@ export const useUserSettings = () => ({
   data: invitationAuthState.settings,
   fetchCurrentUserSettings: invitationAuthState.fetchCurrentUserSettings,
 });
+export const useIssues = () => ({ issuesFilter: { issueFilters: { displayFilters: { layout: "list" } } } });
+export const useProject = () => ({
+  getProjectIdentifierById: () => "DEMO",
+  fetchProjects: async () => [{ id: "project", name: "Demo", identifier: "DEMO" }],
+  workspaceProjectIds: ["project"],
+  getProjectById: (id: string) => (id === "project" ? { id: "project", name: "Demo", identifier: "DEMO" } : undefined),
+});
 export const useProjectState = () => ({
+  getStateById: (id: string) => workflowStates.find((state) => state.id === id),
   getProjectStates: () => workflowStates,
   fetchProjectStates: async () => workflowStates,
 });
@@ -74,7 +82,13 @@ export const useAppRouter = () => {
 };
 export const useUserPermissions = () => ({
   allowPermissions: (roles: number[]) =>
-    roles.includes(new URLSearchParams(window.location.search).get("role") === "member" ? 15 : 20),
+    roles.includes(
+      new URLSearchParams(window.location.search).get("role") === "viewer"
+        ? 5
+        : new URLSearchParams(window.location.search).get("role") === "member"
+          ? 15
+          : 20
+    ),
 });
 export default function Link({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   const inRouter = useInRouterContext();

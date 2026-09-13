@@ -27,6 +27,20 @@ async function mockFeishuReads(page: Page) {
       json: pathname.endsWith("/feishu/") ? { id: null, app_id: "", enabled: false, has_app_secret: false } : [],
     });
   });
+  await page.route("**/api/workspaces/workspace/integrations/gitea/**", async (route) => {
+    expect(route.request().method()).toBe("GET");
+    requests.push(route.request().url());
+    await route.fulfill({
+      json: {
+        enabled: false,
+        has_secret: false,
+        validation_url: "",
+        commits_url: "",
+        lookup_url: "",
+        issue_url_template: "",
+      },
+    });
+  });
   return requests;
 }
 

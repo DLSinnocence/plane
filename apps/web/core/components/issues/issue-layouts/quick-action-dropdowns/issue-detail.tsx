@@ -4,16 +4,19 @@
  * See the LICENSE file for details.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { omit } from "lodash-es";
 import { observer } from "mobx-react";
 import { useParams } from "next/navigation";
-import { MoreHorizontalOutline } from "@makeplane/propel/icons";
+import { LinkOutline, MoreHorizontalOutline } from "@makeplane/propel/icons";
+import { useTranslation } from "@plane/i18n";
 // plane imports
 import { ARCHIVABLE_STATE_GROUPS, EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
 import type { TIssue } from "@plane/types";
 import { EIssuesStoreType } from "@plane/types";
 import { ContextMenu, CustomMenu } from "@plane/ui";
+import type { TContextMenuItem } from "@plane/ui";
+import { IssueGitCommitsModal } from "@/components/issues/issue-detail/git-commits-modal";
 import { cn } from "@plane/utils";
 // hooks
 import { useIssues } from "@/hooks/store/use-issues";
@@ -58,6 +61,10 @@ export const WorkItemDetailQuickActions = observer(function WorkItemDetailQuickA
   } = props;
   // router
   const { workspaceSlug } = useParams();
+  const { t } = useTranslation();
+  const gitCommitsIdentity = JSON.stringify([workspaceSlug?.toString(), issue.project_id, issue.id]);
+  const [gitCommitsOpenFor, setGitCommitsOpenFor] = useState<string | null>(null);
+  useEffect(() => setGitCommitsOpenFor(null), [gitCommitsIdentity]);
   // states
   const [createUpdateIssueModal, setCreateUpdateIssueModal] = useState(false);
   const [issueToEdit, setIssueToEdit] = useState<TIssue | undefined>(undefined);
@@ -146,10 +153,16 @@ export const WorkItemDetailQuickActions = observer(function WorkItemDetailQuickA
     storeType: EIssuesStoreType.PROJECT,
   };
 
-  //   const MENU_ITEMS = useWorkItemDetailMenuItems(menuItemProps);
   const baseMenuItems = useWorkItemDetailMenuItems(menuItemProps);
+  const gitCommitsMenuItem: TContextMenuItem = {
+    key: "git-commits",
+    title: t("gitea_integration.commits"),
+    icon: LinkOutline,
+    action: () => setGitCommitsOpenFor(gitCommitsIdentity),
+    shouldRender: !!workspaceSlug && !!issue.project_id && !issue.is_draft,
+  };
 
-  const MENU_ITEMS = baseMenuItems
+  const MENU_ITEMS = [gitCommitsMenuItem, ...baseMenuItems]
     // oxlint-disable-next-line oxc/no-map-spread
     .map((item) => {
       // Customize edit action for work item
@@ -191,6 +204,16 @@ export const WorkItemDetailQuickActions = observer(function WorkItemDetailQuickA
   return (
     <>
       {/* Modals */}
+      {workspaceSlug && issue.project_id && !issue.is_draft && (
+        <IssueGitCommitsModal
+          key={gitCommitsIdentity}
+          workspaceSlug={workspaceSlug.toString()}
+          projectId={issue.project_id}
+          issueId={issue.id}
+          isOpen={gitCommitsOpenFor === gitCommitsIdentity}
+          onClose={() => setGitCommitsOpenFor(null)}
+        />
+      )}
       <ArchiveIssueModal
         data={issue}
         isOpen={archiveIssueModal}
@@ -228,7 +251,14 @@ export const WorkItemDetailQuickActions = observer(function WorkItemDetailQuickA
       <CustomMenu
         ellipsis
         placement={placements}
-        customButton={<IconButton size="lg" variant="secondary" icon={MoreHorizontalOutline} />}
+        customButton={
+          <IconButton
+            size="lg"
+            variant="secondary"
+            icon={MoreHorizontalOutline}
+            aria-label={t("power_k.contextual_actions.work_item.title")}
+          />
+        }
         portalElement={portalElement}
         menuItemsClassName="z-[14]"
         maxHeight="lg"

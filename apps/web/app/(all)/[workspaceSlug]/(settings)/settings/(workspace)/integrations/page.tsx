@@ -10,6 +10,7 @@ import { useTranslation } from "@plane/i18n";
 import { NotAuthorizedView } from "@/components/auth-screens/not-authorized-view";
 import { PageHead } from "@/components/core/page-title";
 import { FeishuSettings } from "@/components/integration/feishu-settings";
+import { GiteaSettings } from "@/components/integration/gitea-settings";
 import { useWorkspace } from "@/hooks/store/use-workspace";
 import { useUserPermissions } from "@/hooks/store/user";
 
@@ -29,6 +30,9 @@ function WorkspaceIntegrationsPage() {
         <div className="flex items-start gap-3 border-b border-subtle py-3.5">
           <h3 className="text-18 font-medium">{t("integrations.integrations")}</h3>
         </div>
+        {currentWorkspace?.slug && (
+          <GiteaSettings key={`gitea-${currentWorkspace.slug}`} workspaceSlug={currentWorkspace.slug} />
+        )}
         {currentWorkspace?.slug && <FeishuSettings key={currentWorkspace.slug} workspaceSlug={currentWorkspace.slug} />}
       </section>
     </>

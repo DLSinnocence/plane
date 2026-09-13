@@ -21,6 +21,7 @@ from .views import urlpatterns as view_urls
 from .webhook import urlpatterns as webhook_urls
 from .workspace import urlpatterns as workspace_urls
 from .timezone import urlpatterns as timezone_urls
+from .gitea import urlpatterns as gitea_urls
 from .feishu import urlpatterns as feishu_urls
 from .exporter import urlpatterns as exporter_urls
 
@@ -45,5 +46,6 @@ urlpatterns = [
     *webhook_urls,
     *timezone_urls,
     *feishu_urls,
+    *gitea_urls,
     *exporter_urls,
 ]

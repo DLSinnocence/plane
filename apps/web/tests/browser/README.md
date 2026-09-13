@@ -15,6 +15,12 @@ The suite checks dropdown coordinates, option selection, timezone search/reopeni
 
 Popper's element ref, styles, and placement attributes belong on `Combobox.Options` itself. A single inner child is wrapped by Headless UI's `Frozen` component, which can replace that child's ref and leave Popper uninitialized at `(0, 0)`. These searchable popup controls use `modal={false}` because the search input lives inside the popup; default modal handling otherwise marks its option-list siblings inert. The containing work-item dialog continues to manage its own modality.
 
+## Gitea integration regressions
+
+Run `pnpm --filter web test:browser gitea-settings.spec.ts issue-git-commits.spec.ts integration-route.spec.ts --workers=1`.
+
+The existing Vite fixture mounts the real `GiteaSettings` and `IssueGitCommits` components with their real API service and confirmation modal. Translation keys are deterministic adapters; every Git integration request is intercepted. Settings tests cover workspace enable, explicit dual-hook generation, exact copy/download contents and filenames, four read-only endpoint URLs, reset/hide/rotate/disable secret clearing, discarded in-flight generation, and workspace switching without URL persistence. Generic failures never expose response secrets in DOM or browser storage. Commit tests cover multiple repositories on one work item, caller-supplied safe links, hostname fallback, unsafe URLs as text, metadata and invalid dates, retry, empty results and server-directed pagination including later-page errors. The integration route fixture retains Feishu and admin access checks with the workspace Gitea config contract. Scripts in browser responses are inert synthetic contents; Python/Git generator semantics belong to API tests. No external writes or Gitea connection occur.
+
 ## Invitation authentication regressions
 
 Run the focused suite with `pnpm --filter web test:browser invitation-auth.spec.ts --workers=1`.

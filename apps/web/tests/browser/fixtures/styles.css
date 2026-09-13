@@ -129,3 +129,29 @@ output {
   display: block;
   padding: 20px;
 }
+.pointer-events-none {
+  pointer-events: none;
+}
+.pointer-events-auto {
+  pointer-events: auto;
+}
+.opacity-0 {
+  opacity: 0;
+}
+.opacity-100 {
+  opacity: 1;
+}
+.justify-center {
+  justify-content: center;
+}
+.min-h-full {
+  min-height: 100%;
+}
+@media (min-width: 640px) {
+  .sm\:max-w-2xl {
+    max-width: 672px;
+  }
+  .sm\:items-center {
+    align-items: center;
+  }
+}

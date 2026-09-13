@@ -26,7 +26,12 @@ export default defineConfig({
   ],
   resolve: {
     alias: [
+      { find: /^(?:.*\/)?archive-issue-modal$/, replacement: path("./fixtures/work-item-modals.tsx") },
+      { find: /^(?:.*\/)?delete-issue-modal$/, replacement: path("./fixtures/work-item-modals.tsx") },
+      { find: /^(?:.*\/)?issue-modal\/modal$/, replacement: path("./fixtures/work-item-modals.tsx") },
+      { find: "@/hooks/store/use-issues", replacement: path("./fixtures/mocks.tsx") },
       { find: "@/hooks/store/use-member", replacement: path("./fixtures/mocks.tsx") },
+      { find: "@/hooks/store/use-project", replacement: path("./fixtures/mocks.tsx") },
       { find: "@/hooks/store/use-project-state", replacement: path("./fixtures/mocks.tsx") },
       { find: "@/hooks/store/use-workspace", replacement: path("./fixtures/mocks.tsx") },
       { find: "@/hooks/use-app-router", replacement: path("./fixtures/mocks.tsx") },
