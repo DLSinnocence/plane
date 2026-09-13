@@ -31,9 +31,16 @@ class InstanceEndpoint(BaseAPIView):
             return [InstanceAdminPermission()]
         return [AllowAny()]
 
+    def get(self, request):
+        response = self._get_cached_instance(request)
+        config = response.data.get("config")
+        if isinstance(config, dict):
+            config["file_size_limit"] = settings.FILE_SIZE_LIMIT
+        return response
+
     @cache_response(60 * 60 * 2, user=False)
     @method_decorator(cache_control(private=True, max_age=12))
-    def get(self, request):
+    def _get_cached_instance(self, request):
         instance = Instance.objects.first()
 
         # get the instance
@@ -143,9 +150,6 @@ class InstanceEndpoint(BaseAPIView):
 
         # Open AI settings
         data["has_llm_configured"] = bool(LLM_API_KEY)
-
-        # File size settings
-        data["file_size_limit"] = float(os.environ.get("FILE_SIZE_LIMIT", 5242880))
 
         # is smtp configured
         data["is_smtp_configured"] = bool(EMAIL_HOST)

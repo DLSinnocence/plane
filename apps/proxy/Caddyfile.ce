@@ -1,5 +1,7 @@
 (plane_proxy) {
-	request_body {
+	# S3 POST policies limit file bytes; multipart fields add request overhead.
+	@non_storage not path /{$BUCKET_NAME} /{$BUCKET_NAME}/*
+	request_body @non_storage {
 		max_size {$FILE_SIZE_LIMIT}
 	}
 

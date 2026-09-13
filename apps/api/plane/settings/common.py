@@ -351,7 +351,7 @@ CELERY_IMPORTS = (
     "plane.bgtasks.issue_description_version_sync",
 )
 
-FILE_SIZE_LIMIT = int(os.environ.get("FILE_SIZE_LIMIT", 5242880))
+FILE_SIZE_LIMIT = int(os.environ.get("FILE_SIZE_LIMIT", 1073741824))
 
 # Unsplash Access key
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY")
@@ -365,7 +365,8 @@ ANALYTICS_BASE_API = os.environ.get("ANALYTICS_BASE_API", False)
 # Skip environment variable configuration
 SKIP_ENV_VAR = os.environ.get("SKIP_ENV_VAR", "1") == "1"
 
-DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.environ.get("FILE_SIZE_LIMIT", 5242880))
+# File payloads upload directly to object storage; API requests only carry metadata.
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.environ.get("DATA_UPLOAD_MAX_MEMORY_SIZE", 5242880))
 
 # Cookie Settings
 SESSION_COOKIE_SECURE = secure_origins
