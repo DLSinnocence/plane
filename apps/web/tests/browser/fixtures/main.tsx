@@ -18,6 +18,7 @@ import { users } from "./mocks";
 import { IntegrationRouteFixture } from "./integration-route";
 import { InvitationResultFixture } from "./invitation-result";
 import { authFixtureEnabled } from "./invitation-auth-state";
+import { AttachmentSlotsFixture } from "./attachment-slots";
 import { StageAssigneesFixture } from "./stage-assignees";
 
 function App() {
@@ -104,7 +105,9 @@ function App() {
   );
 }
 createRoot(document.getElementById("root")!).render(
-  new URLSearchParams(window.location.search).has("stage-assignees") ? (
+  new URLSearchParams(window.location.search).has("attachment-slots") ? (
+    <AttachmentSlotsFixture />
+  ) : new URLSearchParams(window.location.search).has("stage-assignees") ? (
     <StageAssigneesFixture />
   ) : new URLSearchParams(window.location.search).has("invitation-result") ? (
     <InvitationResultFixture />

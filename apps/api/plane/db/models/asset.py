@@ -45,6 +45,9 @@ class FileAsset(BaseModel):
         DRAFT_ISSUE_ATTACHMENT = "DRAFT_ISSUE_ATTACHMENT"
         DRAFT_ISSUE_DESCRIPTION = "DRAFT_ISSUE_DESCRIPTION"
 
+    attachment_slot = models.ForeignKey(
+        "db.IssueAttachmentSlot", on_delete=models.SET_NULL, null=True, blank=True, related_name="attachments"
+    )
     attributes = models.JSONField(default=dict)
     asset = models.FileField(upload_to=get_upload_path, max_length=800)
     user = models.ForeignKey("db.User", on_delete=models.CASCADE, null=True, related_name="assets")
@@ -69,6 +72,11 @@ class FileAsset(BaseModel):
         verbose_name_plural = "File Assets"
         db_table = "file_assets"
         ordering = ("-created_at",)
+        constraints = [models.UniqueConstraint(
+            fields=["attachment_slot"],
+            condition=models.Q(is_uploaded=True, is_deleted=False, deleted_at__isnull=True),
+            name="attachment_slot_current_asset_unique",
+        )]
         indexes = [
             models.Index(fields=["entity_type"], name="asset_entity_type_idx"),
             models.Index(fields=["entity_identifier"], name="asset_entity_identifier_idx"),

@@ -74,7 +74,13 @@ export const useAppRouter = () => {
 };
 export const useUserPermissions = () => ({
   allowPermissions: (roles: number[]) =>
-    roles.includes(new URLSearchParams(window.location.search).get("role") === "member" ? 15 : 20),
+    roles.includes(
+      new URLSearchParams(window.location.search).get("role") === "guest"
+        ? 5
+        : new URLSearchParams(window.location.search).get("role") === "member"
+          ? 15
+          : 20
+    ),
 });
 export default function Link({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   const inRouter = useInRouterContext();
@@ -88,7 +94,12 @@ export default function Link({ href, children, ...props }: React.AnchorHTMLAttri
     </a>
   );
 }
-export const useTranslation = () => ({ t: (key: string) => key });
+export const useTranslation = () => ({
+  t: (key: string, values?: Record<string, unknown>) =>
+    key === "attachment.selection_details"
+      ? `${key}: size=${values?.size}; limit=${values?.limit}; reason=${values?.reason}`
+      : key,
+});
 export const StateOption = ({ option }: { option: { value: string; content: React.ReactNode } }) => (
   <Combobox.Option value={option.value}>{option.content}</Combobox.Option>
 );

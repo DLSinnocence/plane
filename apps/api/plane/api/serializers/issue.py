@@ -698,6 +698,9 @@ class IssueAttachmentSerializer(BaseSerializer):
     storage information, and access control for document management.
     """
 
+    attachment_slot = serializers.PrimaryKeyRelatedField(read_only=True)
+    attachment_slot_id = serializers.UUIDField(read_only=True, allow_null=True)
+
     class Meta:
         model = FileAsset
         fields = "__all__"

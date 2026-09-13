@@ -11,6 +11,12 @@ from django.utils import timezone
 from django.core.serializers.json import DjangoJSONEncoder
 from django.conf import settings
 from django.http import HttpResponseRedirect
+from django.db import transaction
+from django.shortcuts import get_object_or_404
+from rest_framework.exceptions import PermissionDenied
+from plane.app.serializers.attachment import AttachmentSlotUploadSerializer
+from plane.app.views.attachment import require_slot_role, scoped_issue
+from plane.db.models import IssueAttachmentSlot, ProjectMember
 
 # Third Party imports
 from rest_framework.response import Response
@@ -97,7 +103,21 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
     model = FileAsset
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
+    @transaction.atomic
     def post(self, request, slug, project_id, issue_id):
+        issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        slot_data = AttachmentSlotUploadSerializer(data=request.data)
+        slot_data.is_valid(raise_exception=True)
+        slot = None
+        if "slot_id" in slot_data.validated_data:
+            require_slot_role(request, slug, project_id, write=True)
+            slot = get_object_or_404(
+                IssueAttachmentSlot.objects.select_for_update(),
+                pk=slot_data.validated_data["slot_id"],
+                workspace_id=issue.workspace_id,
+                project_id=project_id,
+                issue_id=issue_id,
+            )
         name = sanitize_filename(request.data.get("name")) or "unnamed"
         type = request.data.get("type", False)
         size = int(request.data.get("size", settings.FILE_SIZE_LIMIT))
@@ -119,6 +139,7 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
 
         # Create a File Asset
         asset = FileAsset.objects.create(
+            attachment_slot=slot,
             attributes={"name": name, "type": type, "size": size_limit},
             asset=asset_key,
             size=size_limit,
@@ -147,9 +168,15 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
         )
 
     @allow_permission([ROLE.ADMIN], creator=True, model=FileAsset)
+    @transaction.atomic
     def delete(self, request, slug, project_id, issue_id, pk):
-        issue_attachment = FileAsset.objects.get(
-            pk=pk, workspace__slug=slug, project_id=project_id, issue_id=issue_id
+        scoped_issue(slug, project_id, issue_id, lock=True)
+        issue_attachment = get_object_or_404(
+            FileAsset.objects.select_for_update(),
+            pk=pk,
+            workspace__slug=slug,
+            project_id=project_id,
+            issue_id=issue_id,
         )
         issue_attachment.is_deleted = True
         issue_attachment.deleted_at = timezone.now()
@@ -197,38 +224,79 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
             workspace__slug=slug,
             project_id=project_id,
             is_uploaded=True,
+            is_deleted=False,
         )
         # Serialize the attachments
         serializer = IssueAttachmentSerializer(issue_attachments, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
+    @transaction.atomic
     def patch(self, request, slug, project_id, issue_id, pk):
-        issue_attachment = FileAsset.objects.get(
-            pk=pk, workspace__slug=slug, project_id=project_id, issue_id=issue_id
+        scoped_issue(slug, project_id, issue_id, lock=True)
+        issue_attachment = get_object_or_404(
+            FileAsset.objects.select_for_update(),
+            pk=pk,
+            workspace__slug=slug,
+            project_id=project_id,
+            issue_id=issue_id,
+            is_deleted=False,
+            entity_type=FileAsset.EntityTypeContext.ISSUE_ATTACHMENT,
         )
-        serializer = IssueAttachmentSerializer(issue_attachment)
+        if issue_attachment.attachment_slot_id:
+            require_slot_role(request, slug, project_id, write=True)
+            if (
+                issue_attachment.created_by_id != request.user.id
+                and not ProjectMember.objects.filter(
+                    project_id=project_id,
+                    workspace__slug=slug,
+                    member=request.user,
+                    is_active=True,
+                    role=ROLE.ADMIN.value,
+                ).exists()
+            ):
+                raise PermissionDenied("Only the uploader or a project admin can complete this upload.")
+            slot = get_object_or_404(
+                IssueAttachmentSlot.objects.select_for_update(),
+                pk=issue_attachment.attachment_slot_id,
+                workspace__slug=slug,
+                project_id=project_id,
+                issue_id=issue_id,
+            )
+            if not issue_attachment.is_uploaded:
+                FileAsset.objects.filter(
+                    attachment_slot=slot,
+                    is_uploaded=True,
+                    is_deleted=False,
+                ).exclude(pk=pk).update(attachment_slot=None)
 
-        # Send this activity only if the attachment is not uploaded before
-        if not issue_attachment.is_uploaded:
-            issue_activity.delay(
+        # Already completed assets never reattach after replacement. Their FK has
+        # been cleared, and this early return also avoids duplicate activity.
+        if issue_attachment.is_uploaded:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        issue_attachment.is_uploaded = True
+        issue_attachment.save(update_fields=["is_uploaded", "updated_at"], disable_auto_set_user=True)
+        serialized = json.dumps(IssueAttachmentSerializer(issue_attachment).data, cls=DjangoJSONEncoder)
+        # Publication failures are logged by Django after commit and must not
+        # turn an already successful replacement into an HTTP failure.
+        transaction.on_commit(
+            lambda: issue_activity.delay(
                 type="attachment.activity.created",
                 requested_data=None,
-                actor_id=str(self.request.user.id),
-                issue_id=str(self.kwargs.get("issue_id", None)),
-                project_id=str(self.kwargs.get("project_id", None)),
-                current_instance=json.dumps(serializer.data, cls=DjangoJSONEncoder),
+                actor_id=str(request.user.id),
+                issue_id=str(issue_id),
+                project_id=str(project_id),
+                current_instance=serialized,
                 epoch=int(timezone.now().timestamp()),
                 notification=True,
                 origin=base_host(request=request, is_app=True),
-            )
-
-            # Update the attachment — do NOT overwrite created_by; it is set at
-            # creation time and must not be reassigned (GHSA-5mxw-g5mw-3v3w).
-            issue_attachment.is_uploaded = True
-
-        # Get the storage metadata
+            ),
+            robust=True,
+        )
         if not issue_attachment.storage_metadata:
-            get_asset_object_metadata.delay(str(issue_attachment.id))
-        issue_attachment.save()
+            transaction.on_commit(
+                lambda: get_asset_object_metadata.delay(str(issue_attachment.id)),
+                robust=True,
+            )
         return Response(status=status.HTTP_204_NO_CONTENT)

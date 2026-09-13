@@ -620,6 +620,9 @@ class GenericAssetEndpoint(BaseAPIView):
         try:
             asset = FileAsset.objects.get(id=asset_id, workspace__slug=slug, is_deleted=False)
 
+            # Slot completion requires the scoped transactional issue endpoint.
+            if asset.attachment_slot_id:
+                return Response({"error": "Complete slot uploads through the issue attachment endpoint."}, status=400)
             # Update is_uploaded status
             asset.is_uploaded = request.data.get("is_uploaded", asset.is_uploaded)
 

@@ -172,6 +172,9 @@ class UserAssetsV2Endpoint(BaseAPIView):
     def patch(self, request, asset_id):
         # get the asset id
         asset = FileAsset.objects.get(id=asset_id, user_id=request.user.id)
+        # Slot completion must use the issue endpoint's transactional replacement.
+        if asset.attachment_slot_id:
+            return Response({"error": "Complete slot uploads through the issue attachment endpoint."}, status=400)
         # get the storage metadata
         asset.is_uploaded = True
         # get the storage metadata
@@ -424,6 +427,9 @@ class WorkspaceFileAssetEndpoint(BaseAPIView):
                 {"error": "You don't have access to this asset."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        # Slot completion must use the issue endpoint's transactional replacement.
+        if asset.attachment_slot_id:
+            return Response({"error": "Complete slot uploads through the issue attachment endpoint."}, status=400)
         # get the storage metadata
         asset.is_uploaded = True
         # get the storage metadata
@@ -648,6 +654,9 @@ class ProjectAssetEndpoint(BaseAPIView):
     def patch(self, request, slug, project_id, pk):
         # get the asset id
         asset = FileAsset.objects.get(id=pk, workspace__slug=slug, project_id=project_id)
+        # Slot completion must use the issue endpoint's transactional replacement.
+        if asset.attachment_slot_id:
+            return Response({"error": "Complete slot uploads through the issue attachment endpoint."}, status=400)
         # get the storage metadata
         asset.is_uploaded = True
         # get the storage metadata

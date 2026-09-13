@@ -5,12 +5,11 @@
  */
 
 import type { AxiosRequestConfig } from "axios";
-import axios from "axios";
 // services
 import { APIService } from "@/services/api.service";
 
 export class FileUploadService extends APIService {
-  private cancelSource: any;
+  private abortController?: AbortController;
 
   constructor() {
     super("");
@@ -21,26 +20,19 @@ export class FileUploadService extends APIService {
     data: FormData,
     uploadProgressHandler?: AxiosRequestConfig["onUploadProgress"]
   ): Promise<void> {
-    this.cancelSource = axios.CancelToken.source();
+    const controller = new AbortController();
+    this.abortController = controller;
     return this.post(url, data, {
       headers: {
         "Content-Type": "multipart/form-data",
       },
-      cancelToken: this.cancelSource.token,
+      signal: controller.signal,
       withCredentials: false,
       onUploadProgress: uploadProgressHandler,
-    })
-      .then((response) => response?.data)
-      .catch((error) => {
-        if (axios.isCancel(error)) {
-          console.log(error.message);
-        } else {
-          throw error?.response?.data;
-        }
-      });
+    }).then((response) => response?.data);
   }
 
   cancelUpload() {
-    this.cancelSource.cancel("Upload canceled");
+    this.abortController?.abort("Upload canceled");
   }
 }

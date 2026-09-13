@@ -9,6 +9,7 @@ import { observer } from "mobx-react";
 import type { TIssueServiceType } from "@plane/types";
 import { EIssueServiceType } from "@plane/types";
 // local imports
+import { IssueAttachmentSlots } from "../../attachment/slots";
 import { IssueAttachmentItemList } from "../../attachment/attachment-item-list";
 import { useAttachmentOperations } from "./helper";
 
@@ -25,13 +26,25 @@ export const IssueAttachmentsCollapsibleContent = observer(function IssueAttachm
   // helper
   const attachmentHelpers = useAttachmentOperations(workspaceSlug, projectId, issueId, issueServiceType);
   return (
-    <IssueAttachmentItemList
-      workspaceSlug={workspaceSlug}
-      projectId={projectId}
-      issueId={issueId}
-      disabled={disabled}
-      attachmentHelpers={attachmentHelpers}
-      issueServiceType={issueServiceType}
-    />
+    <>
+      {issueServiceType === EIssueServiceType.ISSUES && (
+        <IssueAttachmentSlots
+          key={`${workspaceSlug}:${projectId}:${issueId}`}
+          workspaceSlug={workspaceSlug}
+          projectId={projectId}
+          issueId={issueId}
+          disabled={disabled}
+          attachmentHelpers={attachmentHelpers}
+        />
+      )}
+      <IssueAttachmentItemList
+        workspaceSlug={workspaceSlug}
+        projectId={projectId}
+        issueId={issueId}
+        disabled={disabled}
+        attachmentHelpers={attachmentHelpers}
+        issueServiceType={issueServiceType}
+      />
+    </>
   );
 });

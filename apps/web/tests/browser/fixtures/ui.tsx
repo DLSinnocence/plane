@@ -6,4 +6,7 @@
 
 export { ComboDropDown } from "../../../../../packages/ui/src/dropdowns/combo-box";
 export { CustomSearchSelect } from "../../../../../packages/ui/src/dropdowns/custom-search-select";
+export { ModalCore } from "../../../../../packages/ui/src/modals/modal-core";
+export { AlertModalCore } from "../../../../../packages/ui/src/modals/alert-modal";
+export { CustomMenu } from "../../../../../packages/ui/src/dropdowns/custom-menu";
 export const Spinner = () => <span>Loading</span>;

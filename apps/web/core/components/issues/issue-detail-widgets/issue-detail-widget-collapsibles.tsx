@@ -7,6 +7,7 @@
 import React from "react";
 import { observer } from "mobx-react";
 // plane imports
+import { EIssueServiceType } from "@plane/types";
 import type { TIssueServiceType, TWorkItemWidgets } from "@plane/types";
 // hooks
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
@@ -47,8 +48,8 @@ export const IssueDetailWidgetCollapsibles = observer(function IssueDetailWidget
   const attachmentUploads = getAttachmentsUploadStatusByIssueId(issueId);
   const attachmentsCount = getAttachmentsCountByIssueId(issueId);
   const shouldRenderAttachments =
-    attachmentsCount > 0 ||
-    (!!attachmentUploads && attachmentUploads.length > 0 && !hideWidgets?.includes("attachments"));
+    !hideWidgets?.includes("attachments") &&
+    (issueServiceType === EIssueServiceType.ISSUES || attachmentsCount > 0 || (attachmentUploads?.length ?? 0) > 0);
 
   return (
     <div className="flex flex-col">
