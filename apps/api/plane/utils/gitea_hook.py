@@ -24,6 +24,8 @@ MODE = $mode
 API_URL = $api_url
 TOKEN = $token
 REPOSITORY_URL = $repository_url
+RESOLVED_REPOSITORY_URL = ""
+REPOSITORY_NAME = ""
 MAX_COMMITS = 10000
 MAX_MESSAGE_BYTES = 65536
 MAX_BATCH_BYTES = 512 * 1024
@@ -170,22 +172,61 @@ def newly_introduced_commits():
     return git(*command).splitlines()
 
 
+def repository_metadata():
+    hint = "Set GITEA_ROOT_URL, GITEA_REPO_USER_NAME and GITEA_REPO_NAME, or PLANE_GITEA_REPOSITORY_URL."
+
+    def checked_url(value):
+        try:
+            parsed = urllib.parse.urlsplit(value)
+            if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                    or parsed.username is not None or parsed.password is not None
+                    or "?" in value or "#" in value or "\\\\" in value
+                    or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)):
+                raise ValueError()
+            parsed.port
+        except ValueError:
+            raise HookError("Invalid repository URL configuration. " + hint) from None
+        return value.rstrip("/")
+
+    # These URLs are metadata only. All network requests use the embedded API_URL.
+    explicit = REPOSITORY_URL or os.environ.get("PLANE_GITEA_REPOSITORY_URL", "")
+    if explicit:
+        value = checked_url(explicit)
+        path = urllib.parse.urlsplit(value).path.strip("/")
+        name = path if REPOSITORY_URL else "/".join(urllib.parse.unquote(part) for part in path.split("/")[-2:])
+        return value, name[:255]
+    # Official Gitea variables: modules/repository/env.go (v1.24.6).
+    root = os.environ.get("GITEA_ROOT_URL", "")
+    owner = os.environ.get("GITEA_REPO_USER_NAME", "")
+    name = os.environ.get("GITEA_REPO_NAME", "")
+    if not root or not owner or not name:
+        raise HookError("Missing Gitea repository environment. " + hint)
+    for segment in (owner, name):
+        if (segment in {".", ".."} or "/" in segment or "\\\\" in segment
+                or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in segment)):
+            raise HookError("Invalid Gitea repository owner or name. " + hint)
+    value = checked_url(root) + "/" + urllib.parse.quote(owner, safe="") + "/" + urllib.parse.quote(name, safe="")
+    return value, (owner + "/" + name)[:255]
+
+
 def report_metadata(sha, message):
     author, date = git("show", "--no-patch", "--format=%an%x00%aI", sha).rstrip("\\n").split("\\0", 1)
     return {
         "sha": sha, "message": message,
-        "url": REPOSITORY_URL + "/commit/" + sha,
+        "url": RESOLVED_REPOSITORY_URL + "/commit/" + sha,
         "author_name": author[:255], "committed_at": date,
-        "repository_name": urllib.parse.urlsplit(REPOSITORY_URL).path.strip("/")[:255],
+        "repository_name": REPOSITORY_NAME,
     }
 
 
 def main():
-    global PENDING
+    global PENDING, RESOLVED_REPOSITORY_URL, REPOSITORY_NAME
     commits = newly_introduced_commits()
     if len(commits) > MAX_COMMITS:
         raise HookError("More than %d new commits; split this push into smaller batches." % MAX_COMMITS)
     PENDING = list(commits)
+    if MODE == "report" and commits:
+        RESOLVED_REPOSITORY_URL, REPOSITORY_NAME = repository_metadata()
     batch, batch_bytes = [], 20
     for sha in commits:
         if int(git("cat-file", "-s", sha)) > MAX_MESSAGE_BYTES + 65536:
@@ -221,6 +262,8 @@ def fail(message):
     )
     if PENDING:
         command = [sys.executable, os.path.realpath(__file__), "--commits", *PENDING]
+        if not REPOSITORY_URL and RESOLVED_REPOSITORY_URL:
+            command = ["env", "PLANE_GITEA_REPOSITORY_URL=" + RESOLVED_REPOSITORY_URL, *command]
         print("[Plane] Retry in this bare repository after fixing the error: " + shlex.join(command), file=sys.stderr)
     return 0
 
@@ -269,9 +312,10 @@ def generate_pre_receive_hook(validation_url, secret):
     return _generate("validate", validation_url, secret)
 
 
-def generate_hooks(validation_url, commits_url, secret, repository_url):
-    """The repository URL configures report links only; no server binding is created."""
-    repository_url = _url(repository_url)
+def generate_hooks(validation_url, commits_url, secret, repository_url=""):
+    """Resolve Gitea repository links at runtime unless a legacy URL is supplied."""
+    if repository_url != "":
+        repository_url = _url(repository_url)
     return {
         "pre_receive": {"filename": "pre-receive", "content": generate_pre_receive_hook(validation_url, secret)},
         "post_receive": {

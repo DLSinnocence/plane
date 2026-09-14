@@ -25,8 +25,8 @@ export class GiteaService extends APIService {
     return this.patch(this.path(workspaceSlug), data).then((response) => response.data);
   }
 
-  async generateHooks(workspaceSlug: string, repositoryUrl: string): Promise<GiteaHooks> {
-    return this.post(`${this.path(workspaceSlug)}hooks/`, { repository_url: repositoryUrl }).then(
+  async generateHooks(workspaceSlug: string, repositoryUrl?: string): Promise<GiteaHooks> {
+    return this.post(`${this.path(workspaceSlug)}hooks/`, repositoryUrl ? { repository_url: repositoryUrl } : {}).then(
       (response) => response.data
     );
   }

@@ -42,7 +42,7 @@ from plane.utils.gitea import (
 class StrictInput(serializers.Serializer):
     def to_internal_value(self, data):
         if not isinstance(data, dict) or set(data) - set(self.fields):
-            raise ValidationError("Unknown fields or invalid object.")
+            raise ValidationError({"non_field_errors": ["Unknown fields or invalid object."]})
         return super().to_internal_value(data)
 
 
@@ -71,10 +71,10 @@ class SafeURLField(serializers.CharField):
 
 
 class HookInput(StrictInput):
-    repository_url = SafeURLField()
+    repository_url = SafeURLField(required=False, allow_blank=True, default="")
 
     def validate_repository_url(self, value):
-        if any(separator in self.initial_data["repository_url"] for separator in ("?", "#")):
+        if any(separator in self.initial_data.get("repository_url", "") for separator in ("?", "#")):
             raise ValidationError("Repository URL must not contain a query or fragment.")
         return value
 

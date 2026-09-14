@@ -36,11 +36,13 @@ test("workspace config and explicit hook generation preserve envelopes, bodies, 
   assert.equal(await service.getConfig("team/one"), payload);
   assert.equal(await service.updateConfig("team/one", { enabled: true }), payload);
   assert.equal(await service.generateHooks("team/one", "https://git.example/a/b"), payload);
+  assert.equal(await service.generateHooks("team/one"), payload);
   assert.equal(await service.rotateToken("team/one"), payload);
   assert.deepEqual(calls, [
     ["get", root],
     ["patch", root, { enabled: true }],
     ["post", `${root}hooks/`, { repository_url: "https://git.example/a/b" }],
+    ["post", `${root}hooks/`, {}],
     ["post", `${root}rotate-token/`, {}],
   ]);
 });

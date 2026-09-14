@@ -49,7 +49,7 @@ export async function mockGiteaApi(page: Page, initial: GiteaConfig = config) {
       configs.set(workspace, updated);
       await route.fulfill({ json: updated });
     } else if (suffix === "hooks/" && method === "POST") {
-      expect(Object.keys(body)).toEqual(["repository_url"]);
+      expect(body).toEqual({});
       await route.fulfill({ json: generatedHooks });
     } else if (suffix === "rotate-token/" && method === "POST") {
       expect(body).toEqual({});
