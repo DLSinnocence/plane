@@ -287,6 +287,10 @@ overrides:
   toml: ">=4.2.0 <5"
 
 allowBuilds:
+  # Pi pulls in prebuilt GenAI/protobuf packages. Their install hooks only print
+  # a no-op/version warning; explicitly skip them so pnpm CI stays fail-closed.
+  "@google/genai": false
+  protobufjs: false
   "@parcel/watcher": true
   "@swc/core": true
   esbuild: true
