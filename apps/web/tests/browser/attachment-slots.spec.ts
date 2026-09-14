@@ -10,11 +10,15 @@ const action = (page: Page, name: string) =>
   page.getByRole("button", { name: `attachment.slots.${name}`, exact: true });
 const dialog = (page: Page) => page.getByRole("dialog").last();
 const state = async (page: Page) => JSON.parse((await page.getByTestId("attachment-state").textContent()) || "{}");
-const slotCard = (page: Page, name: string) =>
+const slotRow = (page: Page, name: string) =>
   page
-    .locator('[data-testid^="attachment-slot-"]')
-    .filter({ has: page.getByRole("button", { name, exact: true }) })
-    .filter({ has: page.locator('[data-testid^="attachment-slot-name-"]') });
+    .locator('[data-testid^="attachment-slot-"]:has(> [data-testid^="attachment-slot-label-"])')
+    .filter({ has: page.getByRole("button", { name, exact: true }) });
+const menuItem = (page: Page, name: string) =>
+  page.getByRole("menuitem", { name: `attachment.slots.${name}`, exact: true });
+const openSlotMenu = async (page: Page, id = "design") => {
+  await page.getByTestId(`attachment-slot-actions-${id}`).locator('button[aria-haspopup="menu"]').click();
+};
 const addEmpty = (page: Page) => page.getByTestId("add-empty-attachment");
 const library = (page: Page) => page.getByTestId("attachment-template-library-button");
 const nameInput = (page: Page) => page.locator('[data-testid^="attachment-slot-name-input-"]');
@@ -60,7 +64,7 @@ for (const entry of ["slots", "ordinary-upload-dropzone"]) {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto("/?attachment-slots&role=member&limit-5mb");
     const section = page.getByTestId(entry);
-    const picker = (entry === "slots" ? slotCard(page, "Design") : section).locator('input[type="file"]');
+    const picker = (entry === "slots" ? slotRow(page, "Design") : section).locator('input[type="file"]');
     await picker.setInputFiles({ ...upload, name: "forbidden.txt" });
     await expect(section.getByRole("alert")).toContainText("attachment.permission_denied");
     await expect(section.getByRole("alert")).toContainText("HTTP 403: Uploads denied by project policy");
@@ -72,14 +76,14 @@ for (const entry of ["slots", "ordinary-upload-dropzone"]) {
     );
     await expect(section.getByRole("alert")).not.toContainText("attachment.file_size_limit");
     await expect(section.getByRole("alert")).not.toContainText("private-request-id");
-    await expect(slotCard(page, "Design").getByRole("link")).toContainText("old.txt");
+    await expect(slotRow(page, "Design").getByRole("link")).toContainText("old.txt");
     await expect.poll(async () => (await state(page)).files.length).toBe(1);
     expect(errors).toEqual([]);
   });
   test(`${entry} shows actual selected bytes and limit when the file is too large`, async ({ page }) => {
     await page.goto("/?attachment-slots&limit-5mb");
     const section = page.getByTestId(entry);
-    await (entry === "slots" ? slotCard(page, "Design") : section)
+    await (entry === "slots" ? slotRow(page, "Design") : section)
       .locator('input[type="file"]')
       .setInputFiles({ name: "large.zip", mimeType: "application/zip", buffer: Buffer.alloc(5 * 1024 ** 2 + 1) });
     await expect(section.getByRole("alert")).toContainText("attachment.file_size_limit");
@@ -104,7 +108,7 @@ test("adds slots, saves a template, and applies missing names idempotently", asy
   await addEmpty(page).click();
   await nameInput(page).fill("Design");
   await nameInput(page).press("Enter");
-  await expect(slotCard(page, "Design")).toBeVisible();
+  await expect(slotRow(page, "Design")).toBeVisible();
   await library(page).click();
   await action(page, "save_template").click();
   await dialog(page).getByRole("textbox").first().fill("Current slots");
@@ -117,7 +121,7 @@ test("adds slots, saves a template, and applies missing names idempotently", asy
     .toEqual(["Design"]);
   const review = page.getByText("Review template", { exact: true }).locator("..");
   await review.getByRole("button", { name: "attachment.slots.apply", exact: true }).click();
-  await expect(slotCard(page, "Approval")).toBeVisible();
+  await expect(slotRow(page, "Approval")).toBeVisible();
   await library(page).click();
   await review.getByRole("button", { name: "attachment.slots.apply", exact: true }).click();
   await expect
@@ -130,7 +134,7 @@ test("adds slots, saves a template, and applies missing names idempotently", asy
 
 test("replacement failure retains the old file, success releases it to ordinary attachments", async ({ page }) => {
   await page.goto("/?attachment-slots");
-  const design = slotCard(page, "Design");
+  const design = slotRow(page, "Design");
   await expect(design.getByRole("link")).toContainText("old.txt");
   await expect(page.getByTestId("ordinary")).not.toContainText("old.txt");
   await design.locator('input[type="file"]').setInputFiles({ ...upload, name: "fail.txt" });
@@ -145,11 +149,13 @@ test("replacement failure retains the old file, success releases it to ordinary 
 
 test("deleting a slot requires confirmation and keeps its file in the ordinary list", async ({ page }) => {
   await page.goto("/?attachment-slots");
-  await action(page, "delete_slot").click();
+  await openSlotMenu(page);
+  await menuItem(page, "delete_slot").click();
   await expect(dialog(page)).toContainText("attachment.slots.delete_slot_help");
   await dialog(page).getByRole("button", { name: "attachment.slots.close", exact: true }).click();
-  await expect(slotCard(page, "Design")).toBeVisible();
-  await action(page, "delete_slot").click();
+  await expect(slotRow(page, "Design")).toBeVisible();
+  await openSlotMenu(page);
+  await menuItem(page, "delete_slot").click();
   await dialog(page).getByRole("button", { name: "attachment.slots.confirm_delete", exact: true }).click();
   await expect(page.getByTestId("attachment-slot-design")).toHaveCount(0);
   await expect(page.getByTestId("ordinary")).toContainText("old.txt");
@@ -164,27 +170,30 @@ test("rename failure keeps the inline input and Escape cancels without closing p
   await expect(page.getByTestId("slots").getByRole("alert")).toBeVisible();
   await expect(nameInput(page)).toHaveValue("reject");
   await nameInput(page).press("Escape");
-  await expect(slotCard(page, "Design")).toBeVisible();
+  await expect(slotRow(page, "Design")).toBeVisible();
   await expect(page.getByTestId("attachment-peek")).toBeVisible();
 });
 
 test("members can replace another member's file but only owner or admin can delete it", async ({ page }) => {
   await page.goto("/?attachment-slots&role=member");
-  await expect(slotCard(page, "Design")).toBeVisible();
-  await expect(action(page, "delete_file")).toHaveCount(0);
-  await expect(action(page, "replace")).toBeEnabled();
+  await expect(slotRow(page, "Design")).toBeVisible();
+  await openSlotMenu(page);
+  await expect(menuItem(page, "delete_file")).toHaveCount(0);
+  await expect(menuItem(page, "replace")).toBeEnabled();
   await page.goto("/?attachment-slots&role=member&own-file");
-  await expect(action(page, "delete_file")).toBeVisible();
-  await action(page, "delete_file").click();
+  await openSlotMenu(page);
+  await expect(menuItem(page, "delete_file")).toBeVisible();
+  await menuItem(page, "delete_file").click();
   await dialog(page).getByRole("button", { name: "attachment.slots.confirm_delete", exact: true }).click();
-  await expect(slotCard(page, "Design").getByRole("link")).toHaveCount(0);
+  await expect(slotRow(page, "Design").getByRole("link")).toHaveCount(0);
   await page.goto("/?attachment-slots");
-  await expect(action(page, "delete_file")).toBeVisible();
+  await openSlotMenu(page);
+  await expect(menuItem(page, "delete_file")).toBeVisible();
 });
 
 test("guest sees slot files but cannot configure slots or templates", async ({ page }) => {
   await page.goto("/?attachment-slots&role=guest");
-  await expect(slotCard(page, "Design").getByRole("link")).toContainText("old.txt");
+  await expect(slotRow(page, "Design").getByRole("link")).toContainText("old.txt");
   await expect(page.getByTestId("attachment-slot-name-design")).toBeDisabled();
   await expect(addEmpty(page)).toHaveCount(0);
   await expect(library(page)).toHaveCount(0);
@@ -194,7 +203,7 @@ test("guest sees slot files but cannot configure slots or templates", async ({ p
 
 test("disabled issue allows workspace template browsing but prevents issue modifications", async ({ page }) => {
   await page.goto("/?attachment-slots&disabled&role=member");
-  await expect(slotCard(page, "Design").getByRole("link")).toBeVisible();
+  await expect(slotRow(page, "Design").getByRole("link")).toBeVisible();
   await expect(action(page, "add")).toHaveCount(0);
   await expect(action(page, "replace")).toHaveCount(0);
   await expect(action(page, "delete_slot")).toHaveCount(0);
@@ -237,12 +246,12 @@ for (const collapsed of [false, true]) {
     await expect(nameInput(page)).toHaveValue("Research");
     await expect(nameInput(page)).toBeFocused();
     await nameInput(page).press("Enter");
-    await expect(slotCard(page, "Research")).toBeVisible();
+    await expect(slotRow(page, "Research")).toBeVisible();
     await expect.poll(async () => (await state(page)).slots[0].name).toBe("Research");
     await trigger.click();
     await expect(library(page)).toBeVisible();
     await trigger.click();
-    await expect(slotCard(page, "Research")).toBeVisible();
+    await expect(slotRow(page, "Research")).toBeVisible();
     expect(choosers).toBe(0);
   });
 }
@@ -252,7 +261,7 @@ test("inline names save on blur and duplicate errors preserve typed input", asyn
   await page.getByTestId("attachment-slot-name-design").click();
   await nameInput(page).fill("Updated design");
   await page.getByRole("heading").click();
-  await expect(slotCard(page, "Updated design")).toBeVisible();
+  await expect(slotRow(page, "Updated design")).toBeVisible();
   await addEmpty(page).click();
   await nameInput(page).fill("updated DESIGN");
   await nameInput(page).press("Enter");
@@ -329,6 +338,148 @@ test("template add and edit preserve independent slot input rows inside peek", a
     .toEqual(["Final evidence"]);
   await expect(page.getByTestId("attachment-peek")).toBeVisible();
 });
+
+test("new empty attachment uploads directly while its unchanged default name is still editing", async ({ page }) => {
+  await page.goto("/?attachment-slots&empty");
+  await addEmpty(page).click();
+  await expect(nameInput(page)).toBeFocused();
+  const defaultName = await nameInput(page).inputValue();
+  const center = page.getByTestId("attachment-slot-file-slot-1");
+  await expect(center).toBeEnabled();
+  const chooserPromise = page.waitForEvent("filechooser");
+  await center.click();
+  await (await chooserPromise).setFiles(upload);
+  await expect(center).toHaveText("replacement.txt");
+  await expect(center).toHaveAttribute("href", "/files/replacement.txt");
+  await expect(nameInput(page)).toHaveCount(0);
+  await expect(page.getByTestId("attachment-slot-name-slot-1")).toHaveText(defaultName);
+  await expect.poll(async () => (await state(page)).slots[0].name).toBe(defaultName);
+  await expect
+    .poll(async () => (await state(page)).calls.filter((call: string) => call.startsWith("upload:")))
+    .toEqual(["upload:replacement.txt:slot-1"]);
+  await expect(page.getByTestId("attachment-peek")).toBeVisible();
+});
+
+test("empty center uploads with the native picker while the left label only edits", async ({ page }) => {
+  await page.goto("/?attachment-slots&empty");
+  let choosers = 0;
+  page.on("filechooser", () => choosers++);
+  await addEmpty(page).click();
+  await nameInput(page).press("Escape");
+  const label = page.getByTestId("attachment-slot-name-slot-1");
+  await label.click();
+  await nameInput(page).fill("Evidence");
+  await nameInput(page).press("Enter");
+  await expect(label).toHaveText("Evidence");
+  expect(choosers).toBe(0);
+  const center = page.getByTestId("attachment-slot-file-slot-1");
+  await expect(center).toHaveText("attachment.slots.empty_slot");
+  await expect(center).toHaveJSProperty("tagName", "BUTTON");
+  const chooserPromise = page.waitForEvent("filechooser");
+  await center.click();
+  await (await chooserPromise).setFiles(upload);
+  await expect(center).toHaveJSProperty("tagName", "A");
+  await expect(center).toHaveAttribute("href", "/files/replacement.txt");
+  await expect(center).toHaveText("replacement.txt");
+  expect(choosers).toBe(1);
+  await expect
+    .poll(async () => (await state(page)).calls.filter((call: string) => call.startsWith("upload:")))
+    .toEqual(["upload:replacement.txt:slot-1"]);
+});
+
+test("compact row hides actions until the real menu opens and replacement uses its picker", async ({ page }) => {
+  await page.goto("/?attachment-slots");
+  const row = page.getByTestId("attachment-slot-design");
+  const center = page.getByTestId("attachment-slot-file-design");
+  await expect(center).toHaveAttribute("href", "/files/old.txt");
+  await expect(center).toHaveText("old.txt");
+  await expect(row.getByRole("link")).toHaveCount(1);
+  await expect(row).not.toContainText("attachment.slots.download");
+  await Promise.all(
+    ["replace", "delete_file", "delete_slot"].flatMap((name) => [
+      expect(action(page, name)).toHaveCount(0),
+      expect(menuItem(page, name)).not.toBeVisible(),
+    ])
+  );
+  await openSlotMenu(page);
+  await Promise.all(
+    ["replace", "delete_file", "delete_slot"].map((name) => expect(menuItem(page, name)).toBeVisible())
+  );
+  await openSlotMenu(page);
+  await expect(menuItem(page, "replace")).not.toBeVisible();
+  await expect(page.getByTestId("attachment-peek")).toBeVisible();
+  await openSlotMenu(page);
+  const chooserPromise = page.waitForEvent("filechooser");
+  await menuItem(page, "replace").click();
+  await (await chooserPromise).setFiles(upload);
+  await expect(center).toHaveText("replacement.txt");
+  await expect(page.getByTestId("ordinary")).toContainText("old.txt");
+  await expect(menuItem(page, "replace")).not.toBeVisible();
+});
+
+for (const readonly of ["role=guest", "role=viewer", "disabled&role=member"]) {
+  for (const empty of [false, true]) {
+    test(`${readonly} cannot edit or upload to ${empty ? "empty" : "populated"} slots`, async ({ page }) => {
+      await page.goto(`/?attachment-slots&${readonly}${empty ? "&empty-slot" : ""}`);
+      const row = page.getByTestId("attachment-slot-design");
+      await expect(row).toBeVisible();
+      await expect(page.getByTestId("attachment-slot-name-design")).toBeDisabled();
+      await expect(row.locator('input[type="file"]')).toHaveCount(0);
+      await expect(row.locator('button[aria-haspopup="menu"]')).toHaveCount(0);
+      if (empty) await expect(page.getByTestId("attachment-slot-file-design")).toBeDisabled();
+      else await expect(row.getByRole("link")).toHaveAttribute("href", "/files/old.txt");
+      await Promise.all(
+        ["replace", "delete_file", "delete_slot"].map((name) => expect(menuItem(page, name)).not.toBeVisible())
+      );
+      await expect.poll(async () => [...new Set((await state(page)).calls)]).toEqual(["fetchSlots"]);
+    });
+  }
+}
+
+for (const width of [1280, 375]) {
+  test(`attachment row keeps left label, centered file and right actions at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/?attachment-slots&long-names");
+    const row = page.getByTestId("attachment-slot-design");
+    await expect(row).toBeVisible();
+    const bounds = async (id: string) => {
+      const box = await page.getByTestId(id).boundingBox();
+      expect(box).not.toBeNull();
+      return box!;
+    };
+    const r = await bounds("attachment-slot-design");
+    const left = await bounds("attachment-slot-label-design");
+    const center = await bounds("attachment-slot-content-design");
+    const right = await bounds("attachment-slot-actions-design");
+    const file = await bounds("attachment-slot-file-design");
+    expect(r.height).toBeGreaterThanOrEqual(44);
+    expect(r.height).toBeLessThan(64);
+    expect(r.x).toBeGreaterThanOrEqual(0);
+    expect(r.x + r.width).toBeLessThanOrEqual(width);
+    expect(left.x).toBeLessThan(center.x);
+    expect(left.x + left.width).toBeLessThanOrEqual(center.x + 1);
+    expect(center.x + center.width).toBeLessThanOrEqual(right.x + 1);
+    expect(Math.abs(center.x + center.width / 2 - (r.x + r.width / 2))).toBeLessThanOrEqual(1);
+    expect(Math.abs(file.x + file.width / 2 - (r.x + r.width / 2))).toBeLessThanOrEqual(2);
+    expect(right.x + right.width).toBeLessThanOrEqual(r.x + r.width);
+    const rowStyle = await row.evaluate((el) => ({
+      border: getComputedStyle(el).borderTopWidth,
+      radius: getComputedStyle(el).borderTopLeftRadius,
+      overflows: el.scrollWidth > el.clientWidth,
+    }));
+    expect(rowStyle).toEqual({ border: "0px", radius: "0px", overflows: false });
+    await Promise.all(
+      ["attachment-slot-name-design", "attachment-slot-file-design"].map(async (id) => {
+        const truncation = await page.getByTestId(id).evaluate((el) => {
+          const text = el.matches(".truncate") ? el : el.querySelector(".truncate")!;
+          return { ellipsis: getComputedStyle(text).textOverflow, clipped: text.scrollWidth > text.clientWidth };
+        });
+        expect(truncation.ellipsis).toBe("ellipsis");
+        if (width === 375) expect(truncation.clipped).toBe(true);
+      })
+    );
+  });
+}
 
 test("Escape closes the peek when no modal or inline input owns it", async ({ page }) => {
   await page.goto("/?attachment-slots");

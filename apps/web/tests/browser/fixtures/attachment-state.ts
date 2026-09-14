@@ -29,7 +29,21 @@ const file = (id: string, name: string): TIssueAttachment => ({
 class AttachmentFixtureState {
   slots: TIssueAttachmentSlot[] = params.has("empty")
     ? []
-    : [{ id: "design", name: "Design", sort_order: 0, attachment: file("old", "old.txt") }];
+    : [
+        {
+          id: "design",
+          name: params.has("long-names") ? "Design requirements and supporting evidence for the release" : "Design",
+          sort_order: 0,
+          attachment: params.has("empty-slot")
+            ? null
+            : file(
+                "old",
+                params.has("long-names")
+                  ? "release-supporting-evidence-and-complete-design-requirements.txt"
+                  : "old.txt"
+              ),
+        },
+      ];
   files: TIssueAttachment[] = params.has("empty") ? [] : [file("old", "old.txt")];
   templates: TAttachmentTemplate[] = [
     {

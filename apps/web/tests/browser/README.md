@@ -21,6 +21,12 @@ Run `pnpm --filter web test:browser gitea-settings.spec.ts issue-git-commits.spe
 
 The existing Vite fixture mounts the real `GiteaSettings` and `IssueGitCommits` components with their real API service and confirmation modal. Translation keys are deterministic adapters; every Git integration request is intercepted. Settings tests cover workspace enable, explicit dual-hook generation, exact copy/download contents and filenames, four read-only endpoint URLs, reset/hide/rotate/disable secret clearing, discarded in-flight generation, and workspace switching without URL persistence. Generic failures never expose response secrets in DOM or browser storage. Commit tests cover multiple repositories on one work item, caller-supplied safe links, hostname fallback, unsafe URLs as text, metadata and invalid dates, retry, empty results and server-directed pagination including later-page errors. The integration route fixture retains Feishu and admin access checks with the workspace Gitea config contract. Scripts in browser responses are inert synthetic contents; Python/Git generator semantics belong to API tests. No external writes or Gitea connection occur.
 
+## Attachment row regressions
+
+Run `pnpm --filter web test:browser attachment-slots.spec.ts issue-git-commits-menu.spec.ts --workers=1`.
+
+The attachment fixture renders the production attachment rows, toolbar, template dialogs, real CustomMenu and peek outside-click/Escape hooks. Coverage includes persistent empty creation and inline naming, center-button native file selection, menu replacement/deletion and ownership permissions, upload failures, template operations, and read-only populated/empty slots. Desktop (1280px) and mobile (375px) geometry checks verify compact three-column rows, centered filenames, truncation and no row overflow. The fixture stylesheet supplies only missing utility rules; row markup and grid classes come from production. These are fixture-layout checks, not a full application CSS screenshot comparison.
+
 ## Invitation authentication regressions
 
 Run the focused suite with `pnpm --filter web test:browser invitation-auth.spec.ts --workers=1`.
