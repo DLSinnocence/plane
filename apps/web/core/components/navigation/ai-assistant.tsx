@@ -1,165 +1,249 @@
 /** Copyright (c) 2023-present Plane Software, Inc. and contributors
  * SPDX-License-Identifier: AGPL-3.0-only */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Dialog } from "@headlessui/react";
-import { ArrowDown, ImagePlus, Sparkles, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  Copy,
+  Maximize2,
+  Minimize2,
+  Plus,
+  Settings2,
+  Sparkles,
+  Square,
+  X,
+} from "lucide-react";
 import { observer } from "mobx-react";
 import { useParams } from "next/navigation";
-import { useLocation } from "react-router";
 import { useTranslation } from "@plane/i18n";
-import { Button } from "@plane/propel/button";
 import { ChatMarkdown } from "@plane/ui";
 import { useUser } from "@/hooks/store/user";
 import { useCommandPalette } from "@/hooks/store/use-command-palette";
-import { getAISettings, startAgentChat } from "@/services/agent.service";
-import { readAgentStream } from "@/helpers/agent-stream";
+import { AgentRequestError, getAISettings, startAgentChat } from "@/services/agent.service";
+import type { AISettings } from "@/helpers/agent-settings";
+import { AgentStreamError, readAgentStream } from "@/helpers/agent-stream";
+import type { AgentImage, AgentMessage } from "@/helpers/agent-stream";
 import { agentAnswerContent } from "@/helpers/agent-content";
 import { agentWorkItemHref, canSendAgentMessage, collectAgentWorkItems, updateAgentTools } from "@/helpers/agent-chat";
 import type { AgentToolProgress } from "@/helpers/agent-chat";
-import type { AgentImage, AgentMessage } from "@/helpers/agent-stream";
 import { canAddAgentImages, readAgentImage } from "@/helpers/agent-images";
 import { AgentImagePreviews } from "./agent-image-previews";
 import { AgentMessageContent, useAgentMarkdownLabels } from "./agent-message-content";
 import { AgentToolDetails } from "./agent-tool-details";
 
-type ChatMessage = AgentMessage & { id: number; thinking?: string; tools?: AgentToolProgress[] };
+type ChatError = { message: string; code?: string; mayHaveChanges: boolean };
+type ChatMessage = AgentMessage & {
+  id: number;
+  thinking?: string;
+  tools?: AgentToolProgress[];
+  duration?: number;
+  error?: ChatError;
+  contextContent?: string;
+};
+const errorKeys: Record<string, string> = {
+  ai_service_not_configured: "service_unavailable",
+  ai_service_unavailable: "service_unavailable",
+  ai_service_auth: "service_unavailable",
+  ai_model_not_configured: "configure_required",
+  ai_images_disabled: "image_vision_required",
+  ai_access_denied: "access_denied",
+  ai_key_unreadable: "key_unreadable",
+  ai_busy: "service_busy",
+  ai_run_limit: "run_limit",
+  ai_model_error: "model_error",
+  ai_tools_unavailable: "tools_unavailable",
+  ai_connection_interrupted: "connection_error",
+};
+const mutationActions = new Set(["create", "update", "manage_assignee", "manage_label", "manage_workitems"]);
+const elapsed = (ms: number) =>
+  ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))}s` : `${Math.floor(ms / 60_000)}m ${Math.round(ms / 1000) % 60}s`;
+
+function MessageCopy({ text }: { text: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <button
+      type="button"
+      className="agent-icon-button agent-message-copy"
+      aria-label={t("account_settings.ai.copy_reply")}
+      title={t("account_settings.ai.copy_reply")}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setFailed(false);
+        } catch {
+          setFailed(true);
+        }
+      }}
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+      <span className="sr-only" role="status">
+        {copied ? t("account_settings.ai.copied") : failed ? t("account_settings.ai.copy_failed") : ""}
+      </span>
+    </button>
+  );
+}
 
 export const AIAssistant = observer(function AIAssistant() {
   const { data: user } = useUser();
   const { workspaceSlug, projectId } = useParams();
-  const location = useLocation();
   if (!user?.id || typeof workspaceSlug !== "string") return null;
   return (
     <ScopedAssistant
-      key={JSON.stringify([
-        user.id,
-        workspaceSlug,
-        projectId,
-        location.key,
-        location.pathname,
-        location.search,
-        location.hash,
-      ])}
+      key={`${user.id}:${workspaceSlug}`}
       workspaceSlug={workspaceSlug}
       projectId={typeof projectId === "string" ? projectId : undefined}
     />
   );
 });
 
-function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; projectId?: string }) {
+const ScopedAssistant = observer(function ScopedAssistant({
+  workspaceSlug,
+  projectId,
+}: {
+  workspaceSlug: string;
+  projectId?: string;
+}) {
   const { t } = useTranslation();
   const markdownLabels = useAgentMarkdownLabels();
-  const { toggleProfileSettingsModal } = useCommandPalette();
+  const { toggleProfileSettingsModal, profileSettingsModal } = useCommandPalette();
+  const settingsOpen = profileSettingsModal.isOpen;
   const [open, setOpen] = useState(false);
-  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [wide, setWide] = useState(false);
+  const [dock, setDock] = useState<HTMLElement | null>(null);
+  const [settings, setSettings] = useState<AISettings | null>(null);
+  const [loadingSettings, setLoadingSettings] = useState(false);
   const [history, setHistory] = useState<ChatMessage[]>([]);
-  const [supportsImages, setSupportsImages] = useState(false);
+  const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<AgentImage[]>([]);
   const [pendingImages, setPendingImages] = useState<AgentImage[]>([]);
-  const [imageLoading, setImageLoading] = useState(false);
-  const [imageError, setImageError] = useState<string | null>(null);
-  const imageController = useRef<AbortController | null>(null);
-  const imagePicker = useRef<HTMLInputElement | null>(null);
-  const [draft, setDraft] = useState("");
   const [pendingUser, setPendingUser] = useState("");
   const [partial, setPartial] = useState("");
   const [thinking, setThinking] = useState("");
   const [tools, setTools] = useState<AgentToolProgress[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [interrupted, setInterrupted] = useState(false);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [error, setError] = useState<ChatError | null>(null);
   const [following, setFollowing] = useState(true);
-  const controller = useRef<AbortController | null>(null);
+  const [duration, setDuration] = useState(0);
+  const [reload, setReload] = useState(0);
+  const run = useRef<AbortController | null>(null);
+  const loading = useRef<AbortController | null>(null);
+  const imageReader = useRef<AbortController | null>(null);
   const sequence = useRef(0);
   const conversation = useRef<HTMLDivElement | null>(null);
-  const conversationContent = useRef<HTMLDivElement | null>(null);
+  const content = useRef<HTMLDivElement | null>(null);
+  const composer = useRef<HTMLTextAreaElement | null>(null);
+  const imagePicker = useRef<HTMLInputElement | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
   const followLatest = useRef(true);
-  const reset = () => {
-    imageController.current?.abort();
-    imageController.current = null;
-    setAttachments([]);
-    setPendingImages([]);
-    setImageLoading(false);
-    setImageError(null);
-    setHistory([]);
-    setDraft("");
-    setPendingUser("");
-    setPartial("");
-    setThinking("");
-    setTools([]);
-    setError(null);
-    setInterrupted(false);
-    followLatest.current = true;
-    setFollowing(true);
-  };
-  const close = () => {
-    controller.current?.abort();
-    controller.current = null;
-    setOpen(false);
-    setBusy(false);
-    reset();
-  };
+  const startedAt = useRef(0);
+  const configured = Boolean(settings?.has_api_key);
+  const supportsImages = Boolean(settings?.supports_images);
+  const modelName = settings?.model_metadata?.name || settings?.model || t("account_settings.ai.select_model");
+  const focusComposer = () => requestAnimationFrame(() => composer.current?.focus());
+  useEffect(() => {
+    setDock(document.getElementById("workspace-ai-sidebar"));
+  }, []);
   useEffect(
     () => () => {
-      controller.current?.abort();
-      imageController.current?.abort();
+      run.current?.abort();
+      loading.current?.abort();
+      imageReader.current?.abort();
     },
     []
   );
   useEffect(() => {
-    if (!open) return;
+    if (!open || settingsOpen) return;
+    loading.current?.abort();
     const request = new AbortController();
-    controller.current = request;
-    setConfigured(null);
-    setError(null);
+    loading.current = request;
+    setLoadingSettings(true);
     void getAISettings(request.signal)
-      .then((settings) => {
-        if (!request.signal.aborted) {
-          setConfigured(settings.has_api_key);
-          setSupportsImages(Boolean(settings.supports_images));
-        }
-        return settings;
+      .then((value) => {
+        if (!request.signal.aborted) setSettings(value);
+        return undefined;
       })
-      .catch((requestError: unknown) => {
-        if (!request.signal.aborted) {
-          setConfigured(false);
-          setError(requestError instanceof Error ? requestError.message : "");
-        }
+      .catch((failure: unknown) => {
+        if (!request.signal.aborted)
+          setError({ message: failure instanceof Error ? failure.message : "", mayHaveChanges: false });
+      })
+      .finally(() => {
+        if (!request.signal.aborted) setLoadingSettings(false);
       });
     return () => request.abort();
-  }, [open]);
+  }, [open, settingsOpen, reload]);
   useEffect(() => {
-    if (!open || !configured || !conversationContent.current) return;
+    if (open && !settingsOpen && configured) focusComposer();
+  }, [open, settingsOpen, configured]);
+  useEffect(() => {
+    if (!busy) return;
+    const timer = setInterval(() => setDuration(Date.now() - startedAt.current), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
+  useEffect(() => {
+    const element = composer.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.min(180, Math.max(64, element.scrollHeight))}px`;
+  }, [draft, open, configured]);
+  useEffect(() => {
+    if (!open || !content.current) return;
     const resize = new ResizeObserver(() => {
       if (followLatest.current && conversation.current)
         conversation.current.scrollTop = conversation.current.scrollHeight;
     });
-    resize.observe(conversationContent.current);
-    const container = conversation.current;
-    const onToggle = (event: Event) => {
+    resize.observe(content.current);
+    const element = conversation.current;
+    const toggle = (event: Event) => {
       if (event.target instanceof HTMLDetailsElement && event.target.open) {
         followLatest.current = false;
         setFollowing(false);
       }
     };
-    container?.addEventListener("toggle", onToggle, true);
+    element?.addEventListener("toggle", toggle, true);
     return () => {
       resize.disconnect();
-      container?.removeEventListener("toggle", onToggle, true);
+      element?.removeEventListener("toggle", toggle, true);
     };
-  }, [open, configured]);
-  const workItems = useMemo(
-    () =>
-      collectAgentWorkItems([...history.flatMap((message) => message.tools ?? []), ...tools]).flatMap((item) =>
-        item.identifier
-          ? [{ identifier: item.identifier, title: item.name, href: agentWorkItemHref(workspaceSlug, item) }]
-          : []
-      ),
-    [history, tools, workspaceSlug]
-  );
-
+  }, [open, loadingSettings]);
+  const reset = () => {
+    run.current?.abort();
+    run.current = null;
+    imageReader.current?.abort();
+    imageReader.current = null;
+    setHistory([]);
+    setDraft("");
+    setAttachments([]);
+    setPendingUser("");
+    setPendingImages([]);
+    setPartial("");
+    setThinking("");
+    setTools([]);
+    setError(null);
+    setImageError(null);
+    setBusy(false);
+    setImageLoading(false);
+    setDuration(0);
+    followLatest.current = true;
+    setFollowing(true);
+    focusComposer();
+  };
+  const close = () => {
+    run.current?.abort();
+    imageReader.current?.abort();
+    setOpen(false);
+    trigger.current?.focus();
+  };
+  const configure = () => toggleProfileSettingsModal({ isOpen: true, activeTab: "ai" });
   const addImages = async (files: File[]) => {
-    if (!files.length || busy || imageLoading || imageController.current || interrupted) return;
+    if (!files.length || busy || imageLoading || imageReader.current) return;
     setImageError(null);
     if (!supportsImages) {
       setImageError(t("account_settings.ai.image_vision_required"));
@@ -171,7 +255,7 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
       return;
     }
     const request = new AbortController();
-    imageController.current = request;
+    imageReader.current = request;
     setImageLoading(true);
     try {
       const images = await Promise.all(files.map((file) => readAgentImage(file, request.signal)));
@@ -179,48 +263,85 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
     } catch {
       if (!request.signal.aborted) setImageError(t("account_settings.ai.image_invalid"));
     } finally {
-      if (imageController.current === request) {
-        imageController.current = null;
+      if (imageReader.current === request) {
+        imageReader.current = null;
         setImageLoading(false);
       }
     }
   };
+  const workItems = useMemo(
+    () =>
+      collectAgentWorkItems([...history.flatMap((message) => message.tools ?? []), ...tools]).flatMap((item) =>
+        item.identifier
+          ? [{ identifier: item.identifier, title: item.name, href: agentWorkItemHref(workspaceSlug, item) }]
+          : []
+      ),
+    [history, tools, workspaceSlug]
+  );
+  const errorText = (failure: ChatError) =>
+    failure.code && errorKeys[failure.code]
+      ? t(`account_settings.ai.${errorKeys[failure.code]}`)
+      : failure.message || t("account_settings.ai.connection_error");
   const sendEnabled = canSendAgentMessage(
     draft,
     busy || imageLoading,
     configured,
-    interrupted,
     supportsImages ? attachments.length : 0
   );
   const send = async () => {
-    if (!sendEnabled || imageController.current) return;
-    const content = draft.trim();
+    if (!sendEnabled || imageReader.current || run.current) return;
+    const prompt = draft.trim();
+    const sentImages = attachments;
     const request = new AbortController();
-    controller.current = request;
-    // UI-only reasoning and tool details are not sent back as model history.
+    run.current = request;
     const messages: AgentMessage[] = history.flatMap((message) => {
-      const answer = message.role === "assistant" ? agentAnswerContent(message.content) : message.content;
+      const answer =
+        message.contextContent ||
+        (message.role === "assistant" ? agentAnswerContent(message.content) : message.content);
       return answer.trim() || message.images?.length
         ? [{ role: message.role, content: answer, ...(message.images?.length ? { images: message.images } : {}) }]
         : [];
     });
-    const sentImages = attachments;
-    messages.push({ role: "user", content, ...(sentImages.length ? { images: sentImages } : {}) });
-    setPendingImages(sentImages);
-    setAttachments([]);
-    setImageError(null);
+    messages.push({ role: "user", content: prompt, ...(sentImages.length ? { images: sentImages } : {}) });
     setBusy(true);
     setError(null);
+    setImageError(null);
     setDraft("");
-    setPendingUser(content);
+    setAttachments([]);
+    setPendingUser(prompt);
+    setPendingImages(sentImages);
     setPartial("");
     setThinking("");
     setTools([]);
+    startedAt.current = Date.now();
+    setDuration(0);
     followLatest.current = true;
     setFollowing(true);
-    let text = "";
-    let modelThinking = "";
+    let text = "",
+      thought = "";
     let turnTools: AgentToolProgress[] = [];
+    let received = false;
+    let mutationStarted = false;
+    let renderTimer: number | undefined;
+    const flush = () => {
+      if (renderTimer !== undefined) clearTimeout(renderTimer);
+      renderTimer = undefined;
+      if (run.current === request) {
+        setPartial(text);
+        setThinking(thought);
+        setTools(turnTools);
+      }
+    };
+    const schedule = () => {
+      renderTimer ??= window.setTimeout(flush, 40);
+    };
+    const clearPending = () => {
+      setPendingUser("");
+      setPendingImages([]);
+      setPartial("");
+      setThinking("");
+      setTools([]);
+    };
     try {
       const body = await startAgentChat(workspaceSlug, messages, projectId, request.signal);
       await readAgentStream(
@@ -229,265 +350,457 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
           if (request.signal.aborted) return;
           if (event.type === "text") {
             text += event.text;
-            setPartial(text);
+            received = true;
           }
           if (event.type === "thinking") {
-            modelThinking += event.text;
-            setThinking(modelThinking);
+            thought += event.text;
+            received = true;
           }
           if (event.type === "tool") {
             turnTools = updateAgentTools(turnTools, event);
-            setTools(turnTools);
+            received = true;
+            if (mutationActions.has(event.action ?? "")) mutationStarted = true;
           }
+          schedule();
         },
         request.signal
       );
       request.signal.throwIfAborted();
-      if (!agentAnswerContent(text).trim()) throw new Error(t("account_settings.ai.empty_response"));
+      flush();
+      if (!agentAnswerContent(text).trim()) throw new AgentStreamError(t("account_settings.ai.empty_response"));
       setHistory([
         ...history,
-        { id: ++sequence.current, role: "user", content, ...(sentImages.length ? { images: sentImages } : {}) },
-        { id: ++sequence.current, role: "assistant", content: text, thinking: modelThinking, tools: turnTools },
+        { id: ++sequence.current, role: "user", content: prompt, ...(sentImages.length ? { images: sentImages } : {}) },
+        {
+          id: ++sequence.current,
+          role: "assistant",
+          content: text,
+          thinking: thought,
+          tools: turnTools,
+          duration: Date.now() - startedAt.current,
+        },
       ]);
-      setPartial("");
-      setThinking("");
-      setTools([]);
-      setPendingUser("");
-      setPendingImages([]);
-    } catch (requestError: unknown) {
-      if (controller.current === request) {
-        setInterrupted(true);
-        setError(
-          request.signal.aborted
-            ? t("account_settings.ai.cancelled")
-            : requestError instanceof Error
-              ? requestError.message
-              : ""
-        );
+      clearPending();
+    } catch (failure: unknown) {
+      if (run.current !== request) return;
+      flush();
+      const noExecution =
+        failure instanceof AgentRequestError ||
+        (failure instanceof AgentStreamError && failure.mayHaveChanges === false);
+      const mayHaveChanges = noExecution
+        ? false
+        : failure instanceof AgentStreamError && failure.mayHaveChanges !== undefined
+          ? failure.mayHaveChanges
+          : mutationStarted;
+      const problem: ChatError = {
+        message: request.signal.aborted
+          ? t("account_settings.ai.cancelled")
+          : failure instanceof Error
+            ? failure.message
+            : "",
+        code: failure instanceof AgentRequestError || failure instanceof AgentStreamError ? failure.code : undefined,
+        mayHaveChanges,
+      };
+      if (!received && !mayHaveChanges) {
+        setDraft(prompt);
+        setAttachments(sentImages);
+        setError(problem);
+        clearPending();
+      } else {
+        const summary = mayHaveChanges
+          ? "The previous request stopped after tool writes may have started. Verify the current Plane state before repeating any mutation."
+          : "The previous response did not complete. No tool writes were started.";
+        setHistory([
+          ...history,
+          {
+            id: ++sequence.current,
+            role: "user",
+            content: prompt,
+            ...(sentImages.length ? { images: sentImages } : {}),
+          },
+          {
+            id: ++sequence.current,
+            role: "assistant",
+            content: text,
+            thinking: thought,
+            tools: turnTools,
+            error: problem,
+            contextContent: `${agentAnswerContent(text)}\n\n${summary}`,
+            duration: Date.now() - startedAt.current,
+          },
+        ]);
+        clearPending();
       }
     } finally {
-      if (controller.current === request) {
+      if (renderTimer !== undefined) clearTimeout(renderTimer);
+      if (run.current === request) {
+        run.current = null;
         setBusy(false);
-        controller.current = null;
+        focusComposer();
       }
     }
   };
-  const configure = () => {
-    close();
-    toggleProfileSettingsModal({ isOpen: true, activeTab: "ai" });
+  const stop = () => run.current?.abort();
+  const verify = () => {
+    setDraft(t("account_settings.ai.verify_prompt"));
+    focusComposer();
   };
-  const scrollToLatest = () => {
-    followLatest.current = true;
-    setFollowing(true);
-    if (conversation.current) conversation.current.scrollTop = conversation.current.scrollHeight;
+  const toolRunning = tools.some((tool) => tool.status === "running");
+  const suggestion = (key: string) => {
+    setDraft(t(`account_settings.ai.${key}`));
+    focusComposer();
   };
+  const panel = (
+    <aside
+      className={`agent-sidebar${wide ? " agent-sidebar--wide" : ""}${dock ? "" : " agent-sidebar--floating"}`}
+      aria-label={t("account_settings.ai.title")}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !settingsOpen && !(event.target as HTMLElement).closest("[role=listbox]")) {
+          event.stopPropagation();
+          close();
+        }
+      }}
+    >
+      <header className="agent-sidebar-header">
+        <div className="agent-sidebar-brand">
+          <span className="agent-brand-icon">
+            <Sparkles size={16} />
+          </span>
+          <div>
+            <h2>{t("account_settings.ai.title")}</h2>
+            <span>{workspaceSlug}</span>
+          </div>
+        </div>
+        <div className="agent-sidebar-actions">
+          <button
+            type="button"
+            className="agent-icon-button"
+            onClick={reset}
+            aria-label={t("account_settings.ai.new_chat")}
+            title={t("account_settings.ai.new_chat")}
+          >
+            <Plus size={17} />
+          </button>
+          <button
+            type="button"
+            className="agent-icon-button agent-expand-button"
+            onClick={() => setWide(!wide)}
+            aria-label={t(wide ? "account_settings.ai.collapse_panel" : "account_settings.ai.expand_panel")}
+            title={t(wide ? "account_settings.ai.collapse_panel" : "account_settings.ai.expand_panel")}
+          >
+            {wide ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+          <button
+            type="button"
+            className="agent-icon-button"
+            disabled={busy}
+            onClick={configure}
+            aria-label={t("account_settings.ai.model_settings")}
+            title={t("account_settings.ai.model_settings")}
+          >
+            <Settings2 size={16} />
+          </button>
+          <button
+            type="button"
+            className="agent-icon-button"
+            onClick={close}
+            aria-label={t("account_settings.ai.close")}
+            title={t("account_settings.ai.close")}
+          >
+            <X size={18} />
+          </button>
+        </div>
+      </header>
+      <div
+        ref={conversation}
+        className="agent-conversation"
+        aria-label={t("account_settings.ai.conversation")}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          const pinned = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
+          followLatest.current = pinned;
+          setFollowing(pinned);
+        }}
+      >
+        <div ref={content} className="agent-conversation-content">
+          {!history.length && !busy && !pendingUser && !pendingImages.length && (
+            <div className="agent-empty-state">
+              <div className="agent-empty-spark">
+                <Sparkles size={29} />
+              </div>
+              <h3>{t(configured ? "account_settings.ai.empty_title" : "account_settings.ai.connect_title")}</h3>
+              <p>
+                {t(configured ? "account_settings.ai.empty_description" : "account_settings.ai.connect_description")}
+              </p>
+              {loadingSettings ? (
+                <span role="status" className="agent-muted">
+                  {t("account_settings.ai.loading")}
+                </span>
+              ) : !configured ? (
+                <button type="button" className="agent-primary-button" onClick={configure}>
+                  {t("account_settings.ai.configure")}
+                </button>
+              ) : (
+                <div className="agent-suggestions">
+                  {["suggest_tasks", "suggest_create", "suggest_image"].map((key) => (
+                    <button key={key} type="button" onClick={() => suggestion(key)}>
+                      {t(`account_settings.ai.${key}`)}
+                      <ArrowUp size={13} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {history.map((message) => (
+            <article
+              key={message.id}
+              className={`agent-turn agent-turn--${message.role}`}
+              aria-label={t(message.role === "user" ? "account_settings.ai.you" : "account_settings.ai.title")}
+            >
+              {message.role === "user" ? (
+                <>
+                  <div className="agent-user-bubble">
+                    <ChatMarkdown content={message.content} labels={markdownLabels} />
+                    <AgentImagePreviews images={message.images} />
+                  </div>
+                  <div className="agent-message-actions">
+                    <MessageCopy text={message.content} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="agent-turn-progress">
+                    {message.duration && (
+                      <span>
+                        {t("account_settings.ai.elapsed")} {elapsed(message.duration)}
+                      </span>
+                    )}
+                  </div>
+                  <AgentMessageContent content={message.content} thinking={message.thinking} workItems={workItems} />
+                  <AgentToolDetails tools={message.tools ?? []} workspaceSlug={workspaceSlug} />
+                  {message.error && (
+                    <div className="agent-inline-error" role="alert">
+                      <p>{errorText(message.error)}</p>
+                      {message.error.mayHaveChanges && (
+                        <>
+                          <p>{t("account_settings.ai.check_changes")}</p>
+                          <button type="button" onClick={verify}>
+                            {t("account_settings.ai.verify_changes")}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {agentAnswerContent(message.content) && (
+                    <div className="agent-message-actions">
+                      <MessageCopy text={agentAnswerContent(message.content)} />
+                    </div>
+                  )}
+                </>
+              )}
+            </article>
+          ))}
+          {(pendingUser || pendingImages.length > 0) && (
+            <article className="agent-turn agent-turn--user" aria-label={t("account_settings.ai.you")}>
+              <div className="agent-user-bubble">
+                <ChatMarkdown content={pendingUser} labels={markdownLabels} />
+                <AgentImagePreviews images={pendingImages} />
+              </div>
+            </article>
+          )}
+          {busy && (
+            <article className="agent-turn agent-turn--assistant" aria-label={t("account_settings.ai.title")}>
+              <div className="agent-live-status" role="status">
+                <span className="agent-live-dot" />
+                {t(
+                  toolRunning
+                    ? "account_settings.ai.working_tools"
+                    : thinking
+                      ? "account_settings.ai.working_thinking"
+                      : "account_settings.ai.working_answer"
+                )}
+                <span>{elapsed(duration)}</span>
+              </div>
+              <AgentMessageContent content={partial} thinking={thinking} streaming workItems={workItems} />
+              <AgentToolDetails tools={tools} workspaceSlug={workspaceSlug} />
+            </article>
+          )}
+        </div>
+      </div>
+      <footer className="agent-sidebar-footer">
+        {!following && (
+          <button
+            type="button"
+            className="agent-jump-latest"
+            aria-label={t("account_settings.ai.scroll_latest")}
+            title={t("account_settings.ai.scroll_latest")}
+            onClick={() => {
+              followLatest.current = true;
+              setFollowing(true);
+              if (conversation.current) conversation.current.scrollTop = conversation.current.scrollHeight;
+            }}
+          >
+            <ArrowDown size={17} />
+          </button>
+        )}
+        {error && (
+          <div className="agent-inline-error" role="alert">
+            <p>{errorText(error)}</p>
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setReload((value) => value + 1);
+                  focusComposer();
+                }}
+              >
+                {t("account_settings.ai.retry_connection")}
+              </button>
+              {error.code === "ai_model_not_configured" && (
+                <button type="button" onClick={configure}>
+                  {t("account_settings.ai.configure")}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {imageError && (
+          <p role="alert" className="agent-image-error">
+            {imageError}
+          </p>
+        )}
+        <form
+          className="agent-chat-composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void send();
+          }}
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+          }}
+          onDrop={(event) => {
+            if (event.dataTransfer.files.length) {
+              event.preventDefault();
+              void addImages(Array.from(event.dataTransfer.files));
+            }
+          }}
+        >
+          <AgentImagePreviews
+            images={attachments}
+            onRemove={(index) => setAttachments((current) => current.filter((_image, position) => position !== index))}
+          />
+          <input
+            ref={imagePicker}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            multiple
+            className="hidden"
+            aria-label={t("account_settings.ai.image_add")}
+            disabled={!supportsImages || busy || imageLoading}
+            onChange={(event) => {
+              const files = Array.from(event.currentTarget.files ?? []);
+              event.currentTarget.value = "";
+              void addImages(files);
+            }}
+          />
+          <textarea
+            ref={composer}
+            aria-label={t("account_settings.ai.message")}
+            placeholder={t("account_settings.ai.composer_placeholder")}
+            value={draft}
+            disabled={busy || !configured}
+            rows={2}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                void send();
+              }
+            }}
+            onPaste={(event) => {
+              const files = Array.from(event.clipboardData.items)
+                .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+                .map((item) => item.getAsFile())
+                .filter((file): file is File => file !== null);
+              if (files.length) {
+                event.preventDefault();
+                void addImages(files);
+              }
+            }}
+          />
+          <div className="agent-composer-toolbar">
+            <button
+              type="button"
+              className="agent-icon-button agent-attach-button"
+              disabled={!supportsImages || busy || imageLoading}
+              onClick={() => imagePicker.current?.click()}
+              aria-label={t("account_settings.ai.image_add")}
+              title={
+                supportsImages ? t("account_settings.ai.image_add") : t("account_settings.ai.image_vision_required")
+              }
+            >
+              <Plus size={19} />
+            </button>
+            <button
+              type="button"
+              className="agent-model-button"
+              disabled={busy}
+              onClick={configure}
+              aria-label={`${t("account_settings.ai.model_settings")}: ${modelName}`}
+              title={modelName}
+            >
+              <span>{modelName}</span>
+              <ChevronDown size={12} />
+            </button>
+            {imageLoading && (
+              <span role="status" className="agent-upload-status">
+                {t("account_settings.ai.image_uploading")}
+              </span>
+            )}
+            {busy ? (
+              <button
+                type="button"
+                className="agent-send-button agent-stop-button"
+                onClick={stop}
+                aria-label={t("account_settings.ai.cancel")}
+                title={t("account_settings.ai.cancel")}
+              >
+                <Square size={14} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                className="agent-send-button"
+                disabled={!sendEnabled}
+                aria-label={t("account_settings.ai.send")}
+                title={t("account_settings.ai.send")}
+              >
+                <ArrowUp size={19} />
+              </button>
+            )}
+          </div>
+        </form>
+        <p className="agent-composer-hint">{t("account_settings.ai.composer_hint")}</p>
+      </footer>
+    </aside>
+  );
   return (
     <>
       <button
+        ref={trigger}
         type="button"
+        className={`agent-launcher${open ? " agent-launcher--active" : ""}`}
         aria-label={t("account_settings.ai.title")}
+        aria-expanded={open}
         title={t("account_settings.ai.title")}
-        className="flex h-8 items-center justify-center gap-1 rounded-md px-2 text-body-xs-medium hover:bg-layer-1-hover"
-        onClick={() => setOpen(true)}
+        onClick={() => (open ? close() : setOpen(true))}
       >
-        <Sparkles className="size-4" />
+        <Sparkles size={15} />
         <span>AI</span>
       </button>
-      <Dialog open={open} onClose={close} className="fixed inset-0 z-[100]">
-        <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-        <div className="fixed inset-0 flex items-center justify-center p-4">
-          <Dialog.Panel className="agent-chat-panel flex max-h-[85vh] w-full max-w-2xl min-w-0 flex-col gap-4 rounded-xl bg-surface-1 p-5 shadow-raised-200">
-            <div className="flex shrink-0 items-center justify-between">
-              <Dialog.Title className="text-h5-medium">{t("account_settings.ai.title")}</Dialog.Title>
-              <button type="button" aria-label={t("account_settings.ai.close")} onClick={close}>
-                <X className="size-5" />
-              </button>
-            </div>
-            <Dialog.Description className="agent-chat-description text-body-sm-regular text-secondary">
-              {t("account_settings.ai.chat_description")}
-            </Dialog.Description>
-            <p className="shrink-0 text-body-xs-regular text-secondary">{workspaceSlug}</p>
-            {configured === null ? (
-              <p role="status">{t("account_settings.ai.loading")}</p>
-            ) : !configured ? (
-              <Button onClick={configure}>{t("account_settings.ai.configure")}</Button>
-            ) : (
-              <>
-                <div
-                  ref={conversation}
-                  className="agent-conversation min-h-20 min-w-0 flex-1 overflow-y-auto"
-                  aria-label={t("account_settings.ai.conversation")}
-                  onScroll={(event) => {
-                    const element = event.currentTarget;
-                    const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
-                    followLatest.current = nearBottom;
-                    setFollowing(nearBottom);
-                  }}
-                >
-                  <div ref={conversationContent} className="min-w-0 space-y-4">
-                    {history.map((message) => (
-                      <div key={message.id} className="agent-chat-message min-w-0 rounded-lg bg-layer-1 p-3">
-                        <p className="mb-1 text-body-xs-medium">
-                          {t(message.role === "user" ? "account_settings.ai.you" : "account_settings.ai.title")}
-                        </p>
-                        {message.role === "assistant" ? (
-                          <>
-                            <AgentMessageContent
-                              content={message.content}
-                              thinking={message.thinking}
-                              workItems={workItems}
-                            />
-                            <AgentToolDetails tools={message.tools ?? []} workspaceSlug={workspaceSlug} />
-                          </>
-                        ) : (
-                          <>
-                            <ChatMarkdown content={message.content} labels={markdownLabels} />
-                            <AgentImagePreviews images={message.images} />
-                          </>
-                        )}
-                      </div>
-                    ))}
-                    {(pendingUser || pendingImages.length > 0) && (
-                      <div className="agent-chat-message min-w-0 rounded-lg bg-layer-1 p-3">
-                        <p className="mb-1 text-body-xs-medium">
-                          {t(interrupted ? "account_settings.ai.interrupted_request" : "account_settings.ai.you")}
-                        </p>
-                        <ChatMarkdown content={pendingUser} labels={markdownLabels} />
-                        <AgentImagePreviews images={pendingImages} />
-                      </div>
-                    )}
-                    {(partial || thinking || tools.length > 0 || busy) && (
-                      <div className="agent-chat-message min-w-0 rounded-lg bg-layer-1 p-3">
-                        <p className="mb-1 text-body-xs-medium">{t("account_settings.ai.title")}</p>
-                        <AgentMessageContent
-                          content={partial}
-                          thinking={thinking}
-                          streaming={busy}
-                          workItems={workItems}
-                        />
-                        <AgentToolDetails tools={tools} workspaceSlug={workspaceSlug} />
-                        {busy && !partial && !thinking && tools.length === 0 && (
-                          <p role="status" className="text-body-xs-regular text-secondary">
-                            {t("account_settings.ai.receiving")}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {!following && (
-                  <button
-                    type="button"
-                    onClick={scrollToLatest}
-                    className="flex shrink-0 items-center justify-center gap-1 text-body-xs-regular text-accent-primary"
-                  >
-                    <ArrowDown className="size-3" />
-                    {t("account_settings.ai.scroll_latest")}
-                  </button>
-                )}
-                <form
-                  className="agent-chat-composer flex shrink-0 flex-col gap-3"
-                  onDragOver={(event) => {
-                    if (event.dataTransfer.types.includes("Files")) event.preventDefault();
-                  }}
-                  onDrop={(event) => {
-                    if (!event.dataTransfer.files.length) return;
-                    event.preventDefault();
-                    void addImages(Array.from(event.dataTransfer.files));
-                  }}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void send();
-                  }}
-                >
-                  <AgentImagePreviews
-                    images={attachments}
-                    onRemove={(index) =>
-                      setAttachments((current) => current.filter((_image, position) => position !== index))
-                    }
-                  />
-                  <input
-                    ref={imagePicker}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    multiple
-                    className="hidden"
-                    aria-label={t("account_settings.ai.image_add")}
-                    disabled={!supportsImages || busy || imageLoading || interrupted}
-                    onChange={(event) => {
-                      const files = Array.from(event.currentTarget.files ?? []);
-                      event.currentTarget.value = "";
-                      void addImages(files);
-                    }}
-                  />
-                  <textarea
-                    onPaste={(event) => {
-                      const files = Array.from(event.clipboardData.items)
-                        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
-                        .map((item) => item.getAsFile())
-                        .filter((file): file is File => file !== null);
-                      if (files.length) {
-                        event.preventDefault();
-                        void addImages(files);
-                      }
-                    }}
-                    className="min-h-24 w-full resize-y rounded border border-subtle bg-surface-1 p-3"
-                    aria-label={t("account_settings.ai.message")}
-                    aria-describedby={interrupted ? "ai-interrupted-guidance" : undefined}
-                    placeholder={t("account_settings.ai.message")}
-                    value={draft}
-                    disabled={busy}
-                    onChange={(event) => setDraft(event.target.value)}
-                  />
-                  {imageLoading && (
-                    <p role="status" className="text-body-xs-regular text-secondary">
-                      {t("account_settings.ai.image_uploading")}
-                    </p>
-                  )}
-                  {imageError && (
-                    <p role="alert" className="text-body-xs-regular text-danger-primary">
-                      {imageError}
-                    </p>
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="submit" disabled={!sendEnabled}>
-                      {t("account_settings.ai.send")}
-                    </Button>
-                    {busy && (
-                      <Button variant="secondary" onClick={() => controller.current?.abort()}>
-                        {t("account_settings.ai.cancel")}
-                      </Button>
-                    )}
-                    <Button
-                      variant="secondary"
-                      onClick={() => imagePicker.current?.click()}
-                      disabled={!supportsImages || busy || imageLoading || interrupted}
-                      title={!supportsImages ? t("account_settings.ai.image_vision_required") : undefined}
-                    >
-                      <ImagePlus className="size-4" />
-                      {t("account_settings.ai.image_add")}
-                    </Button>
-                    <Button variant="secondary" disabled={busy} onClick={reset}>
-                      {t("account_settings.ai.clear")}
-                    </Button>
-                    <Button variant="secondary" disabled={busy} onClick={configure}>
-                      {t("account_settings.ai.configure")}
-                    </Button>
-                  </div>
-                </form>
-              </>
-            )}
-            {error !== null && (
-              <div role="alert" className="agent-chat-error text-body-sm-regular text-danger-primary">
-                {error && <p>{error}</p>}
-                <p id={interrupted ? "ai-interrupted-guidance" : undefined}>
-                  {t(interrupted ? "account_settings.ai.interrupted_guidance" : "account_settings.ai.error")}
-                </p>
-              </div>
-            )}
-          </Dialog.Panel>
-        </div>
-      </Dialog>
+      {open && typeof document !== "undefined" && createPortal(panel, dock ?? document.body)}
     </>
   );
-}
+});

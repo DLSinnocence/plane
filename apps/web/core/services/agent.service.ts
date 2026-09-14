@@ -4,6 +4,17 @@ import { API_BASE_URL } from "@plane/constants";
 import type { AISettings, AISettingsInput } from "@/helpers/agent-settings";
 import type { AgentMessage } from "@/helpers/agent-stream";
 
+export class AgentRequestError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "AgentRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 function errorMessage(data: unknown): string | undefined {
   if (typeof data === "string") return data.trim() || undefined;
   if (Array.isArray(data)) return data.map(errorMessage).filter(Boolean).join(" ") || undefined;
@@ -51,7 +62,15 @@ async function request(path: string, method: string, signal: AbortSignal, data?:
   });
   if (!response.ok) {
     const errorData: unknown = await response.json().catch(() => undefined);
-    throw new Error(errorMessage(errorData) ?? `Request failed (${response.status})`);
+    const code =
+      errorData && typeof errorData === "object" && "code" in errorData && typeof errorData.code === "string"
+        ? errorData.code
+        : undefined;
+    throw new AgentRequestError(
+      errorMessage(errorData) ?? `Request failed (${response.status})`,
+      response.status,
+      code
+    );
   }
   return response;
 }
@@ -60,6 +79,9 @@ export type AIModelOption = {
   name: string;
   vision: boolean | null;
   tools: boolean | null;
+  metadata_source?: "models.dev" | "provider" | "custom";
+  reasoning?: boolean | null;
+  context_window?: number | null;
 };
 export type AIModelsInput = Pick<AISettingsInput, "provider" | "base_url" | "api_key">;
 export type AIModelsResponse = { models: AIModelOption[]; truncated: boolean };

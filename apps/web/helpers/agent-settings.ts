@@ -12,9 +12,17 @@ export type AISettings = {
   model: string;
   has_api_key: boolean;
   supports_images?: boolean;
+  model_metadata?: {
+    name?: string;
+    vision: boolean | null;
+    tools: boolean | null;
+    metadata_source?: "models.dev" | "provider" | "custom";
+    reasoning?: boolean | null;
+    context_window?: number | null;
+  };
 };
 
-export type AISettingsInput = Omit<AISettings, "has_api_key"> & { api_key?: string };
+export type AISettingsInput = Omit<AISettings, "has_api_key" | "model_metadata"> & { api_key?: string };
 
 export function buildAISettingsInput(
   provider: AIProvider,

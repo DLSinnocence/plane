@@ -14,6 +14,13 @@ FROM ${IMAGE_NAMESPACE}/plane-admin:${PLANE_VERSION} AS admin-img
 FROM ${IMAGE_NAMESPACE}/plane-live:${PLANE_VERSION} AS live-img
 FROM ${IMAGE_NAMESPACE}/plane-proxy:${PLANE_VERSION} AS proxy-img
 
+# Build MCP with the same Python/Alpine base as AIO, isolated from Django.
+# The Live image's venv uses Alpine's Python and cannot be copied across versions.
+FROM python:3.12.12-alpine AS mcp-builder
+RUN apk add --no-cache build-base libffi-dev openssl-dev cargo \
+    && python -m venv /opt/plane-mcp \
+    && /opt/plane-mcp/bin/pip install --no-cache-dir plane-mcp-server==0.3.2
+
 # **************************************************
 #  STAGE 1: Runner
 # **************************************************
@@ -36,6 +43,9 @@ RUN echo "apk-security-patch ${APK_SECURITY_PATCH}" && apk update && apk upgrade
 # to be installed further down are folded in here.
 RUN apk add --no-cache \
     "libpq" \
+    "libstdc++" \
+    "libffi" \
+    "openssl" \
     "libxslt" \
     "xmlsec" \
     "nss-tools" \
@@ -74,6 +84,11 @@ COPY --from=backend-img /usr/local/lib/python3.12/site-packages/ /usr/local/lib/
 COPY --from=backend-img /usr/local/bin/ /usr/local/bin/
 
 RUN pip install supervisor
+COPY --from=mcp-builder /opt/plane-mcp /opt/plane-mcp
+ENV PLANE_MCP_COMMAND="/opt/plane-mcp/bin/plane-mcp-server"
+# Check after all runtime copies so an incompatible Python fails the image build.
+RUN test -x "$PLANE_MCP_COMMAND" \
+    && /opt/plane-mcp/bin/python -c "import sys; from importlib.metadata import version; assert sys.version_info[:2] == (3, 12); assert version('plane-mcp-server') == '0.3.2'; from plane_mcp.__main__ import main"
 RUN mkdir -p /etc/supervisor/conf.d
 
 COPY start.sh /app/start.sh

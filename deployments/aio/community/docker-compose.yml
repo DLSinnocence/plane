@@ -13,6 +13,8 @@ services:
       REDIS_URL: redis://plane-redis:6379/0
       AMQP_URL: amqp://plane:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}@plane-mq:5672/plane
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      AI_AGENT_URL: ${AI_AGENT_URL:-http://127.0.0.1:3005/live}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:3004}
       LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY:?Set LIVE_SERVER_SECRET_KEY in .env}
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: plane-storage

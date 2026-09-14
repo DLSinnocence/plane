@@ -20,6 +20,7 @@ from corsheaders.defaults import default_headers
 
 
 # Module imports
+from plane.settings.ai import resolve_ai_agent_url
 from plane.utils.url import is_valid_url
 
 
@@ -416,6 +417,8 @@ if LIVE_BASE_URL and not is_valid_url(LIVE_BASE_URL):
 LIVE_BASE_PATH = os.environ.get("LIVE_BASE_PATH", "/live/")
 
 LIVE_URL = urljoin(LIVE_BASE_URL, LIVE_BASE_PATH) if LIVE_BASE_URL else None
+# Service-to-service traffic does not require a public LIVE_BASE_URL.
+AI_AGENT_URL = resolve_ai_agent_url(os.environ.get("AI_AGENT_URL"), LIVE_URL)
 LIVE_SERVER_SECRET_KEY = os.environ.get("LIVE_SERVER_SECRET_KEY", "")
 
 # WEB URL

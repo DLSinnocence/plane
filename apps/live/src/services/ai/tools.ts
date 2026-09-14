@@ -164,7 +164,8 @@ export function createCeTools(
   projectId: string | null,
   secrets: readonly string[],
   takeCall: () => void,
-  recordDetails?: (id: string, name: string, details: AiToolDetails) => void
+  recordDetails?: (id: string, name: string, details: AiToolDetails) => void,
+  onMutationStarted?: () => void
 ): AgentTool[] {
   // A 0.2 per-operation catalogue is incompatible with this adapter.
   if (!listed.some((tool) => tool.name === "workitem") || !listed.some((tool) => tool.name === "project")) {
@@ -208,6 +209,9 @@ export function createCeTools(
           takeCall();
           signal?.throwIfAborted();
           try {
+            // Only validated, allowed calls reaching MCP can have changed Plane.
+            if (args.action === "create" || args.action === "update" || String(args.action).startsWith("manage_"))
+              onMutationStarted?.();
             const result = await client.callTool({ name: tool.name, arguments: args }, undefined, {
               signal,
               timeout: AI_LIMITS.toolMs,

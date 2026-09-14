@@ -45,7 +45,17 @@ def test_discovery_protocol_and_plain_unknown_models(monkeypatch, provider, base
 
     factory = mock_gateway(monkeypatch, handler)
     assert ai_models.discover_models(provider, base, "secret") == {
-        "models": [{"id": "gpt-4o-vision-tools", "name": "Friendly", "vision": None, "tools": None}],
+        "models": [
+            {
+                "id": "gpt-4o-vision-tools",
+                "name": "Friendly",
+                "vision": None,
+                "tools": None,
+                "reasoning": None,
+                "context_window": None,
+                "metadata_source": "custom",
+            }
+        ],
         "truncated": False,
     }
     assert factory.call_args.kwargs["trust_env"] is False

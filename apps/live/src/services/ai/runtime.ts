@@ -99,6 +99,8 @@ export async function runAiChat(
   let calls = 0;
   let turns = 0;
   let outputChars = 0;
+  let mayHaveChanges = false;
+  let errorCode = "ai_tools_unavailable";
   const toolEvents = new Map<string, { name: string; action: string }>();
   const browserToolIds = new Map<string, string>();
   const verifiedDetails = new Map<string, { name: string; details: AiToolDetails }>();
@@ -161,9 +163,13 @@ export async function runAiChat(
         },
         (id, name, details) => {
           if (active && !control.signal.aborted) verifiedDetails.set(id, { name, details });
+        },
+        () => {
+          mayHaveChanges = true;
         }
       );
       if (!tools.length) throw new Error("Tools unavailable.");
+      errorCode = "ai_model_error";
       agent = dependencies.createAgent({
         initialState: {
           model,
@@ -253,6 +259,12 @@ export async function runAiChat(
         }
         if (event.type === "message_end" && event.message.role === "assistant" && event.message.stopReason === "error")
           outcome.reason = "error";
+        // Pi converts thrown provider failures into agent_end without message_end.
+        if (
+          event.type === "agent_end" &&
+          event.messages.some((message) => message.role === "assistant" && message.stopReason === "error")
+        )
+          outcome.reason = "error";
       });
       control.signal.throwIfAborted();
       const latest = input.messages.at(-1)!;
@@ -292,11 +304,14 @@ export async function runAiChat(
   if (reason === "error" || reason === "limit") {
     await emit({
       type: "error",
-      code: reason === "limit" ? "run_limit" : "agent_failed",
+      code: reason === "limit" ? "ai_run_limit" : errorCode,
+      may_have_changes: mayHaveChanges,
       message:
         reason === "limit"
-          ? "The assistant reached its execution limit. Check completed changes before continuing."
-          : "The assistant could not complete this request. Check your model settings and Plane access.",
+          ? "The assistant reached its execution limit."
+          : errorCode === "ai_tools_unavailable"
+            ? "Plane tools are unavailable. Please try again later."
+            : "The model could not complete this request. Check your personal AI settings and try again.",
     });
   }
   await emit({ type: "done", reason });

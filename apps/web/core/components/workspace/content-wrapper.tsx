@@ -23,12 +23,12 @@ export const WorkspaceContentWrapper = observer(function WorkspaceContentWrapper
   return (
     <div className="relative flex size-full flex-col overflow-hidden bg-canvas transition-all duration-300 ease-in-out">
       <TopNavigationRoot />
-      <div className="relative flex size-full overflow-hidden">
+      <div className="relative flex min-h-0 w-full flex-1 overflow-hidden">
         {/* Conditionally render AppRailRoot based on context */}
         {shouldRenderAppRail && <AppRailRoot />}
         <div
           className={cn(
-            "relative size-full flex-grow overflow-hidden pr-2 pb-2 pl-2 transition-all duration-300 ease-in-out",
+            "relative size-full min-w-0 flex-grow overflow-hidden pr-2 pb-2 pl-2 transition-all duration-300 ease-in-out",
             {
               "pl-0!": shouldRenderAppRail,
             }
@@ -36,6 +36,7 @@ export const WorkspaceContentWrapper = observer(function WorkspaceContentWrapper
         >
           {children}
         </div>
+        <div id="workspace-ai-sidebar" />
       </div>
     </div>
   );

@@ -63,12 +63,6 @@ export function agentToolLabelKeys(tool: AgentToolEvent): { action: string; enti
     entity: `account_settings.ai.entity_${entities.includes(tool.name) ? tool.name : "workspace"}`,
   };
 }
-export function canSendAgentMessage(
-  draft: string,
-  busy: boolean,
-  configured: boolean | null,
-  interrupted: boolean,
-  imageCount = 0
-): boolean {
-  return Boolean((draft.trim() || imageCount > 0) && !busy && configured && !interrupted);
+export function canSendAgentMessage(draft: string, busy: boolean, configured: boolean | null, imageCount = 0): boolean {
+  return Boolean((draft.trim() || imageCount > 0) && !busy && configured);
 }

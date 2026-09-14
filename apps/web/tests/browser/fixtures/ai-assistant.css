@@ -1,90 +1,188 @@
 @import "@plane/ui/styles/chat-markdown.css";
 @import "../../../styles/agent-chat.css";
 
-/* Missing layout utilities for this isolated component fixture; production markup is unchanged. */
+/* Workspace context only; the assistant uses its production CSS unchanged. */
 body.ai-fixture-page {
-  min-height: 100vh;
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: #191a22;
+  color: #dce0f0;
+  font-family: Inter, system-ui, sans-serif;
+  --background-color-surface-1: #1b1c25;
+  --background-color-layer-1: #262833;
+  --text-color-primary: #dce0f0;
+  --text-color-secondary: #9498af;
+  --border-color-subtle: #ffffff12;
+  --text-color-accent-primary: #aaaaf2;
+  --text-color-danger-primary: #ec929d;
 }
-.ai-fixture-page * {
-  box-sizing: border-box;
+.ai-fixture-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
 }
-.ai-fixture-page .ai-fixture-shell {
-  margin: 32px auto;
-  max-width: 1000px;
-  padding: 24px;
-}
-.ai-fixture-page header {
+.ai-fixture-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 15px;
+  border-bottom: 1px solid #ffffff0c;
+  background: #191a22;
+  font-size: 12px;
 }
-.ai-fixture-page h1 {
-  font-size: 22px;
+.ai-fixture-topbar strong {
+  font-weight: 600;
 }
-.ai-fixture-page .flex-col {
-  flex-direction: column;
+.ai-fixture-topbar strong span {
+  color: #767c96;
+  margin-left: 12px;
+  font-weight: 400;
 }
-.ai-fixture-page .flex-wrap {
-  flex-wrap: wrap;
+.ai-fixture-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
 }
-.ai-fixture-page .max-w-2xl {
-  max-width: 672px;
+.ai-fixture-workspace {
+  min-width: 0;
+  flex: 1;
+  padding: 45px 35px;
+  overflow: auto;
 }
-.ai-fixture-page .gap-4 {
-  gap: 16px;
+.ai-fixture-workspace-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  align-items: center;
 }
-.ai-fixture-page .gap-5 {
-  gap: 20px;
+.ai-fixture-workspace-header h1 {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 7px 0 24px;
 }
-.ai-fixture-page .p-4 {
+.ai-fixture-workspace-header span {
+  font-size: 10px;
+  color: #70778e;
+  letter-spacing: 2px;
+}
+.ai-fixture-workspace-header button {
+  color: #a9b0c6;
+  background: #252834;
+  border: 1px solid #ffffff12;
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+.ai-fixture-tabs {
+  display: flex;
+  gap: 28px;
+  padding: 10px 0 16px;
+  font-size: 12px;
+  color: #8c92a9;
+  border-bottom: 1px solid #ffffff12;
+}
+.ai-fixture-tabs span:first-child {
+  color: #dce0f0;
+}
+.ai-fixture-section-title {
+  font-size: 12px;
+  margin: 24px 0 12px;
+  font-weight: 600;
+}
+.ai-fixture-section-title span {
+  color: #767c96;
+  margin-left: 9px;
+}
+.ai-fixture-task {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid #ffffff09;
+  padding: 17px 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ai-fixture-state {
+  color: #c3a578;
+}
+.ai-fixture-task code {
+  color: #777f9c;
+  font-size: 10px;
+}
+.ai-fixture-task small {
+  margin-left: auto;
+  color: #8b91a7;
+}
+.ai-fixture-note {
+  color: #666e88;
+  font-size: 11px;
+  margin-top: 30px;
+}
+.ai-fixture-workspace output {
+  font-size: 10px;
+  color: #565d74;
+}
+.ai-fixture-settings {
+  position: fixed;
+  z-index: 100;
+  top: 8vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(650px, 92vw);
+  max-height: 84vh;
+  overflow: auto;
+  background: #20212d;
+  border: 1px solid #ffffff22;
+  border-radius: 15px;
   padding: 16px;
+  box-shadow: 0 15px 90px #0009;
 }
-.ai-fixture-page .p-5 {
+.ai-fixture-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.ai-fixture-settings form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
   padding: 20px;
 }
-.ai-fixture-page .p-6 {
-  padding: 24px;
+.ai-fixture-settings input,
+.ai-fixture-settings select {
+  padding: 8px;
+  background: #292b37;
+  color: #ddd;
+  border: 1px solid #ffffff20;
+  border-radius: 6px;
 }
-.ai-fixture-page .rounded-xl {
-  border-radius: 12px;
+.ai-fixture-settings [role="listbox"] {
+  background: #252734;
+  max-height: 260px;
+  overflow: auto;
 }
-.ai-fixture-page .max-h-\[85vh\] {
-  max-height: 85vh;
+.ai-fixture-settings [role="option"] {
+  padding: 8px;
 }
-.ai-fixture-page .min-h-24 {
-  min-height: 96px;
+.ai-fixture-settings output {
+  display: block;
+  font-size: 10px;
+  color: #7e85a0;
 }
-.ai-fixture-page .min-h-20 {
-  min-height: 80px;
-}
-.ai-fixture-page .bg-black\/30 {
-  background: #0008;
-}
-.ai-fixture-page [role="dialog"] {
-  z-index: 100;
-}
-.ai-fixture-page [role="dialog"] h2 {
-  margin: 0;
-}
-.ai-fixture-page [role="dialog"] p {
-  margin: 8px 0;
-}
-.ai-fixture-page textarea,
-.ai-fixture-page select {
-  font: inherit;
-  padding: 12px;
-  background: #292929;
-  color: #eee;
-  border: 1px solid #666;
-  border-radius: 4px;
-}
-.ai-fixture-page button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.ai-fixture-page [role="alert"] {
-  color: #ffb4b4;
-}
-.ai-fixture-page .prose {
-  line-height: 1.6;
+@media (max-width: 760px) {
+  .ai-fixture-workspace {
+    padding: 24px 16px;
+  }
+  .ai-fixture-workspace-header button {
+    display: none;
+  }
+  .ai-fixture-task small {
+    display: none;
+  }
 }

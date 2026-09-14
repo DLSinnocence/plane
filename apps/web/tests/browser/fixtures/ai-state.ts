@@ -29,6 +29,7 @@ declare global {
       finish: () => void;
       navigate: (path: string) => void;
       switchUser: () => void;
+      failNext?: { status: number; body: Record<string, unknown> };
     };
   }
 }
@@ -59,6 +60,14 @@ if (aiFixtureEnabled()) {
     });
     const signal = init?.signal;
     signal?.throwIfAborted();
+    if (window.aiFixture.failNext) {
+      const failure = window.aiFixture.failNext;
+      delete window.aiFixture.failNext;
+      return new Response(JSON.stringify(failure.body), {
+        status: failure.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         active = controller;

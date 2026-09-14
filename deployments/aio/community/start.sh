@@ -176,6 +176,25 @@ update_env_file(){
     fi
     update_env_value "LIVE_SERVER_SECRET_KEY" "$LIVE_SERVER_SECRET_KEY"
 
+    # Add internal AI/MCP settings even when upgrading an older plane.env.
+    # Preserve an existing override unless the container environment replaces it.
+    local key value stored
+    for key in AI_AGENT_URL API_BASE_URL PLANE_MCP_COMMAND; do
+        value="${!key}"
+        stored=$(grep "^${key}=" plane.env 2>/dev/null | cut -d'=' -f2-)
+        if [ -z "$value" ]; then
+            value="$stored"
+        fi
+        if [ -z "$value" ]; then
+            case "$key" in
+                AI_AGENT_URL) value="http://127.0.0.1:3005/live" ;;
+                API_BASE_URL) value="http://localhost:3004" ;;
+                PLANE_MCP_COMMAND) value="/opt/plane-mcp/bin/plane-mcp-server" ;;
+            esac
+        fi
+        update_env_value "$key" "$value"
+    done
+
     update_env_value "API_KEY_RATE_LIMIT" "${API_KEY_RATE_LIMIT:-60/minute}"
     update_env_value "GUNICORN_WORKERS" "${GUNICORN_WORKERS:-1}"
 

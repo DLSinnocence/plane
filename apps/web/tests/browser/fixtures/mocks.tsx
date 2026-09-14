@@ -18,6 +18,7 @@ import chineseAttachmentMessages from "../../../../../packages/i18n/src/locales/
 import { authFixtureEnabled, invitationAuthState } from "./invitation-auth-state";
 import { aiFixtureEnabled, aiFixtureState } from "./ai-state";
 import aiMessages from "../../../../../packages/i18n/src/locales/en/settings.json";
+import aiChineseMessages from "../../../../../packages/i18n/src/locales/zh-CN/settings.json";
 import { workflowStates } from "./stage-data";
 
 export const users = {
@@ -110,7 +111,8 @@ export default function Link({ href, children, ...props }: React.AnchorHTMLAttri
 export const useTranslation = () => ({
   t: (key: string, values?: Record<string, unknown>) =>
     aiFixtureEnabled() && key.startsWith("account_settings.ai.")
-      ? (aiMessages.account_settings.ai[
+      ? ((new URLSearchParams(window.location.search).get("lang") === "zh" ? aiChineseMessages : aiMessages)
+          .account_settings.ai[
           key.slice("account_settings.ai.".length) as keyof typeof aiMessages.account_settings.ai
         ] ?? key)
       : key === "attachment.slots.default_name"

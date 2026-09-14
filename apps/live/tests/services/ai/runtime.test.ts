@@ -233,9 +233,100 @@ describe("ephemeral Pi runtime", () => {
     });
     await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
     expect(h.events.at(-1)).toEqual({ type: "done", reason: "error" });
-    expect(h.events[0]).toMatchObject({ type: "error", code: "agent_failed" });
+    expect(h.events[0]).toMatchObject({ type: "error", code: "ai_model_error", may_have_changes: false });
     expect(JSON.stringify(h.events)).not.toContain("secret");
     expect(h.connection.close).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { action: "create", project_id: input.project_id, changed: true, calls: 1 },
+    { action: "update", project_id: input.project_id, changed: true, calls: 1 },
+    { action: "manage_assignee", project_id: input.project_id, changed: true, calls: 1 },
+    { action: "list", project_id: input.project_id, changed: false, calls: 1 },
+    { action: "create", project_id: "invalid-id", changed: false, calls: 0 },
+    { action: "delete", project_id: input.project_id, changed: false, calls: 0 },
+  ])(
+    "tracks actual wrapper dispatch after validation: $action / $project_id",
+    async ({ action, project_id, changed, calls }) => {
+      const h = harness();
+      let modelCalls = 0;
+      const createAgent = (options: AgentOptions) =>
+        new Agent({
+          ...options,
+          streamFn: (model) => {
+            if (modelCalls++ > 0) throw new Error("private-provider-url model-secret");
+            const message: AssistantMessage = {
+              role: "assistant",
+              api: model.api,
+              provider: model.provider,
+              model: model.id,
+              timestamp: Date.now(),
+              stopReason: "toolUse",
+              content: [{ type: "toolCall", id: "write-1", name: "workitem", arguments: { action, project_id } }],
+              usage: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 0,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+            };
+            const stream = createAssistantMessageEventStream();
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: "toolUse", message });
+            return stream;
+          },
+        });
+      await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, {
+        ...h.dependencies,
+        createAgent,
+      });
+      expect(h.connection.client.callTool).toHaveBeenCalledTimes(calls);
+      expect(h.events.at(-2)).toEqual({
+        type: "error",
+        code: "ai_model_error",
+        may_have_changes: changed,
+        message: "The model could not complete this request. Check your personal AI settings and try again.",
+      });
+      expect(h.events.at(-1)).toEqual({ type: "done", reason: "error" });
+      expect(JSON.stringify(h.events)).not.toMatch(/private-provider-url|model-secret/);
+    }
+  );
+
+  it.each(["missing-executable", "mcp-connect", "unsupported-catalogue"])(
+    "reports unavailable tools without claiming changes: %s",
+    async (failure) => {
+      const h = harness();
+      if (failure === "unsupported-catalogue") h.connection.tools = [];
+      else h.dependencies.connectMcp.mockRejectedValue(new Error(`${failure} private-url model-secret`));
+      await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
+      expect(h.events).toEqual([
+        {
+          type: "error",
+          code: "ai_tools_unavailable",
+          may_have_changes: false,
+          message: "Plane tools are unavailable. Please try again later.",
+        },
+        { type: "done", reason: "error" },
+      ]);
+      expect(h.dependencies.createAgent).not.toHaveBeenCalled();
+    }
+  );
+
+  it("does not treat provider mutation announcements as actual calls", async () => {
+    const h = harness(async (event) => {
+      await event({
+        type: "tool_execution_start",
+        toolCallId: "fake",
+        toolName: "workitem",
+        args: { action: "create" },
+      });
+      throw new Error("provider failure");
+    });
+    await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
+    expect(h.events.at(-2)).toMatchObject({ code: "ai_model_error", may_have_changes: false });
+    expect(h.connection.client.callTool).not.toHaveBeenCalled();
   });
 
   it("bounds hanging providers by elapsed time and discards late output", async () => {

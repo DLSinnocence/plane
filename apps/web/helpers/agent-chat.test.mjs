@@ -64,10 +64,9 @@ test("friendly labels use known translation keys and never raw tool identifiers"
     }
   );
 });
-test("interrupted turns cannot send follow-ups until explicitly reset", () => {
-  assert.equal(canSendAgentMessage("verify my change", false, true, true), false);
-  assert.equal(canSendAgentMessage("verify my change", false, true, false), true);
-  assert.equal(canSendAgentMessage("hello", true, true, false), false);
-  assert.equal(canSendAgentMessage("hello", false, null, false), false);
-  assert.equal(canSendAgentMessage("  ", false, true, false), false);
+test("composer permits follow-ups when configured and idle", () => {
+  assert.equal(canSendAgentMessage("verify my change", false, true), true);
+  assert.equal(canSendAgentMessage("hello", true, true), false);
+  assert.equal(canSendAgentMessage("hello", false, null), false);
+  assert.equal(canSendAgentMessage("  ", false, true), false);
 });

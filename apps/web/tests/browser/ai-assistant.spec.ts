@@ -31,7 +31,7 @@ async function mockSettings(page: Page, configured = true, supportsImages = fals
 }
 async function open(page: Page) {
   await page.getByRole("button", { name: "AI assistant", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "AI assistant" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "AI assistant" })).toBeVisible();
 }
 async function send(page: Page, message: string) {
   await page.getByRole("textbox", { name: "Message the assistant" }).fill(message);
@@ -52,7 +52,120 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("opens real portal dialog and configures personal settings without repopulating the key", async ({ page }) => {
+test("sidebar is docked, keeps the workspace interactive and retains memory while hidden", async ({ page }) => {
+  await mockSettings(page);
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.goto("/?ai-assistant");
+  await open(page);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const aside = page.getByRole("complementary");
+  const box = await aside.boundingBox();
+  expect(box?.x).toBeGreaterThan(850);
+  expect(box?.height).toBeGreaterThan(850);
+  await page.getByRole("button", { name: "Workspace action" }).click();
+  await expect(page.getByTestId("workspace-actions")).toHaveText("1");
+  await send(page, "Remember this task");
+  await frames(page, [{ type: "text", text: "I will use this context." }, { type: "done" }]);
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(aside).toHaveCount(0);
+  await open(page);
+  await expect(aside).toContainText("I will use this context.");
+  await page.evaluate(() => window.aiFixture.navigate("/workspace/projects/another-project"));
+  await expect(aside).toContainText("I will use this context.");
+  await send(page, "Continue");
+  expect(JSON.stringify(await page.evaluate(() => window.aiFixture.requests[1].body))).toContain("Remember this task");
+  await frames(page, [{ type: "text", text: "Continued." }, { type: "done" }]);
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await expect(aside).not.toContainText("Remember this task");
+});
+
+test("composer uses Enter to send and Shift+Enter for a newline and shows the current model", async ({ page }) => {
+  await mockSettings(page);
+  await page.goto("/?ai-assistant");
+  await open(page);
+  await expect(page.getByRole("button", { name: "Model settings: fixture-model" })).toBeVisible();
+  const input = page.getByRole("textbox", { name: "Message the assistant" });
+  await input.fill("First line");
+  await input.press("Shift+Enter");
+  await input.press("End");
+  await expect(input).toHaveValue("First line\n");
+  await input.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.aiFixture.requests.length)).toBe(1);
+  await frames(page, [
+    {
+      type: "text",
+      text: '## A clear answer\n\nHere is the result.\n\n- First action\n- Next action\n\n```ts\nconst task = "ENG-42";\n```',
+    },
+    { type: "done" },
+  ]);
+  await page.screenshot({ path: "test-results/ai-sidebar.png", fullPage: true });
+});
+
+test("Chinese sidebar presents a complete Agent conversation beside the workspace", async ({ page }) => {
+  await mockSettings(page, true, true);
+  await page.setViewportSize({ width: 1521, height: 1085 });
+  await page.route("**/api/users/me/ai-settings/", (route) =>
+    route.fulfill({
+      json: {
+        provider: "openai",
+        base_url: "https://custom.example/v1",
+        model: "gpt-4o",
+        has_api_key: true,
+        supports_images: true,
+        model_metadata: { name: "GPT-4o", vision: true, tools: true, metadata_source: "models.dev" },
+      },
+    })
+  );
+  await page.goto("/?ai-assistant&lang=zh");
+  await page.getByRole("button", { name: "AI 助手", exact: true }).click();
+  const aside = page.getByRole("complementary", { name: "AI 助手" });
+  await page.getByRole("textbox", { name: "向助手发送消息" }).fill("帮我整理登录超时问题，创建工作项并补充验收标准。");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.aiFixture.requests.length)).toBe(1);
+  await frames(page, [
+    { type: "thinking", text: "先检查项目中是否已有相同的问题，再整理复现步骤和验收标准。" },
+    { type: "tool", id: "lookup", name: "workitem", action: "list", status: "running" },
+    {
+      type: "tool",
+      id: "lookup",
+      name: "workitem",
+      action: "list",
+      status: "complete",
+      details: { output: '{"results":[]}' },
+    },
+  ]);
+  await frames(page, [
+    {
+      type: "tool",
+      id: "create",
+      name: "workitem",
+      action: "create",
+      status: "complete",
+      details: {
+        input: '{"name":"修复登录超时","priority":"high"}',
+        output: '{"identifier":"ENG-42","state":"待处理"}',
+        workItems: [
+          {
+            id: "12345678-1234-4234-8234-123456789abc",
+            projectId: "87654321-1234-4234-8234-123456789abc",
+            identifier: "ENG-42",
+            name: "修复登录超时",
+          },
+        ],
+      },
+    },
+    {
+      type: "text",
+      text: "已创建 **ENG-42：修复登录超时**，优先级设为高。\n\n### 验收标准\n\n- 登录请求超时后显示明确的错误提示\n- 用户可以直接重试，无需刷新页面\n- 正常网络下登录流程保持可用\n\n已经补充复现步骤和预期结果，你可以打开工作项继续完善。",
+    },
+    { type: "done" },
+  ]);
+  await expect(aside.getByRole("link", { name: "ENG-42", exact: true })).toBeVisible();
+  await expect(aside.getByRole("button", { name: "模型设置: GPT-4o" })).toBeVisible();
+  await page.screenshot({ path: "test-results/ai-sidebar-zh.png", fullPage: true });
+});
+
+test("opens docked sidebar and configures personal settings without repopulating the key", async ({ page }) => {
   const mutations = await mockSettings(page, false);
   await page.route("**/api/users/me/ai-settings/models/", (route) =>
     route.fulfill({
@@ -62,10 +175,10 @@ test("opens real portal dialog and configures personal settings without repopula
   await page.goto("/?ai-assistant");
   await expect(page.getByRole("button", { name: "AI assistant", exact: true })).toHaveText("AI");
   await open(page);
-  await expect(page.locator("#headlessui-portal-root [role=dialog]")).toBeVisible();
-  await expect(page.getByRole("dialog")).not.toContainText("fixture-project");
+  await expect(page.locator("#workspace-ai-sidebar > aside")).toBeVisible();
+  await expect(page.getByRole("complementary")).not.toContainText("fixture-project");
   await page.getByRole("button", { name: "Configure AI", exact: true }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Profile settings fixture" })).toBeVisible();
   await expect(page.getByTestId("profile-options")).toContainText('"activeTab":"ai"');
   await page.getByLabel(/^API key/).fill("synthetic-fixture-key");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
@@ -90,8 +203,42 @@ test("opens real portal dialog and configures personal settings without repopula
   await expect.poll(() => mutations.length).toBe(2);
   expect(mutations[1].body).not.toHaveProperty("api_key");
   await page.getByRole("button", { name: "Close settings" }).click();
+  await expect(page.getByRole("textbox", { name: "Message the assistant" })).toBeEnabled();
+});
+
+test("saved model metadata renders registry capabilities without unknown placeholders", async ({ page }) => {
+  await mockSettings(page);
+  await page.route("**/api/users/me/ai-settings/", (route) =>
+    route.fulfill({
+      json: {
+        provider: "openai",
+        base_url: "https://custom.example/v1",
+        model: "gpt-4o",
+        has_api_key: true,
+        supports_images: false,
+        model_metadata: {
+          name: "GPT-4o",
+          vision: true,
+          tools: true,
+          reasoning: false,
+          context_window: 128000,
+          metadata_source: "models.dev",
+        },
+      },
+    })
+  );
+  await page.goto("/?ai-assistant");
   await open(page);
-  await expect(page.getByRole("textbox", { name: "Message the assistant" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Model settings: GPT-4o" })).toBeVisible();
+  await page.getByRole("button", { name: "Model settings", exact: true }).click();
+  await page.getByRole("button", { name: "Model GPT-4o", exact: true }).click();
+  const option = page.getByRole("listbox").getByRole("option");
+  await expect(option).toContainText("Images supported");
+  await expect(option).toContainText("Tools supported");
+  await expect(option).toContainText("models.dev");
+  await expect(option).not.toContainText("unknown");
+  await option.click();
+  await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeEnabled();
 });
 
 test("fetches models from an arbitrary gateway and searches by name or ID with capability selection", async ({
@@ -128,7 +275,7 @@ test("fetches models from an arbitrary gateway and searches by name or ID with c
   await search.press("ArrowDown");
   await search.press("Enter");
   await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeDisabled();
+  await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeEnabled();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => mutations.length).toBe(1);
   expect(mutations[0].body).toMatchObject({
@@ -205,7 +352,7 @@ test("attaches real image data, sends image-only prompts and preserves images fo
   const storage = await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }));
   const picker = page.locator('input[type="file"]');
   await picker.setInputFiles(imageFile);
-  await expect(page.getByRole("dialog").getByRole("img", { name: "screen.png" })).toBeVisible();
+  await expect(page.getByRole("complementary").getByRole("img", { name: "screen.png" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
   await send(page, "");
   const request = await page.evaluate(() => window.aiFixture.requests[0].body);
@@ -216,7 +363,7 @@ test("attaches real image data, sends image-only prompts and preserves images fo
     project_id: "fixture-project",
   });
   await frames(page, [{ type: "text", text: "I can see the screenshot." }, { type: "done" }]);
-  await expect(page.getByRole("dialog").getByRole("img", { name: "screen.png" })).toBeVisible();
+  await expect(page.getByRole("complementary").getByRole("img", { name: "screen.png" })).toBeVisible();
   await send(page, "Explain the highlighted part");
   const followup = await page.evaluate(() => window.aiFixture.requests[1].body);
   expect(followup).toMatchObject({
@@ -228,8 +375,8 @@ test("attaches real image data, sends image-only prompts and preserves images fo
   });
   await frames(page, [{ type: "text", text: "The highlight is here." }, { type: "done" }]);
   expect(await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }))).toEqual(storage);
-  await page.getByRole("button", { name: "Clear chat", exact: true }).click();
-  await expect(page.getByRole("dialog").locator(".agent-image-preview")).toHaveCount(0);
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await expect(page.getByRole("complementary").locator(".agent-image-preview")).toHaveCount(0);
 });
 
 test("image upload rejects invalid files and excessive images and supports paste and removal", async ({ page }) => {
@@ -251,7 +398,7 @@ test("image upload rejects invalid files and excessive images and supports paste
   }, imageData);
   await expect(page.getByRole("img", { name: "pasted.png" })).toBeVisible();
   await page.getByRole("button", { name: "Remove image: pasted.png" }).click();
-  await expect(page.getByRole("dialog").locator(".agent-image-preview")).toHaveCount(0);
+  await expect(page.getByRole("complementary").locator(".agent-image-preview")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
   await page.locator(".agent-chat-composer").evaluate((element, base64) => {
     const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
@@ -288,17 +435,17 @@ test("streams safe Markdown, updates friendly tool progress and keeps only succe
     { type: "tool", id: "one", name: "workitem", action: "list", status: "running" },
     { type: "text", text: "**Found two" },
   ]);
-  await expect(page.getByRole("dialog")).toContainText("Found two");
-  await expect(page.getByRole("status")).toHaveText("Read · Work items: Running");
+  await expect(page.getByRole("complementary")).toContainText("Found two");
+  await expect(page.locator(".agent-tool-detail").getByRole("status")).toHaveText("Read · Work items: Running");
   await frames(page, [
     { type: "tool", id: "one", name: "workitem", action: "list", status: "complete" },
     { type: "text", text: " work items.**\n\n<img src=javascript:alert(1) onerror=alert(1)>" },
     { type: "done", reason: "complete" },
   ]);
-  await expect(page.getByRole("status")).toHaveText("Read · Work items: Complete");
-  await expect(page.getByRole("dialog").locator("[data-tool-id]")).toHaveCount(1);
-  await expect(page.getByRole("dialog").locator("strong")).toHaveText("Found two work items.");
-  await expect(page.getByRole("dialog").locator("img")).toHaveCount(0);
+  await expect(page.locator(".agent-tool-detail").getByRole("status")).toHaveText("Read · Work items: Complete");
+  await expect(page.getByRole("complementary").locator("[data-tool-id]")).toHaveCount(1);
+  await expect(page.getByRole("complementary").locator("strong")).toHaveText("Found two work items.");
+  await expect(page.getByRole("complementary").locator("img")).toHaveCount(0);
   await page.screenshot({ path: "test-results/ai-assistant-fixture.png", fullPage: true });
   await send(page, "Summarize them");
   const body = await page.evaluate(() => window.aiFixture.requests[1].body);
@@ -311,17 +458,17 @@ test("streams safe Markdown, updates friendly tool progress and keeps only succe
     project_id: "fixture-project",
   });
   await frames(page, [{ type: "text", text: "Summary complete." }, { type: "done" }]);
-  await page.getByRole("button", { name: "Clear chat", exact: true }).click();
-  await expect(page.getByRole("dialog")).not.toContainText("Summary complete.");
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await expect(page.getByRole("complementary")).not.toContainText("Summary complete.");
   expect(await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }))).toEqual(
     storageBefore
   );
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("complementary")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "AI assistant", exact: true })).toBeFocused();
 });
 
-test("cancellation aborts transport and blocks uncertain follow-ups until explicit clear", async ({ page }) => {
+test("cancellation preserves the interrupted turn and offers verification without clearing chat", async ({ page }) => {
   await mockSettings(page);
   await page.goto("/?ai-assistant");
   await open(page);
@@ -332,24 +479,21 @@ test("cancellation aborts transport and blocks uncertain follow-ups until explic
   ]);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Request cancelled.");
-  await expect(page.getByRole("alert")).toContainText("Clearing chat does not undo changes.");
+  await expect(page.getByRole("alert")).toContainText("Some tool operations may have completed");
+  await expect(page.getByRole("alert")).not.toContainText("clear");
   await expect.poll(() => page.evaluate(() => window.aiFixture.aborted)).toBe(1);
-  await page.getByRole("textbox", { name: "Message the assistant" }).fill("Try again");
-  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
-  expect(await page.evaluate(() => window.aiFixture.requests.length)).toBe(1);
-  await expect(page.getByRole("dialog")).toContainText("Create a work item");
-  await page.getByRole("button", { name: "Clear chat", exact: true }).click();
+  await page.getByRole("button", { name: "Verify results", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
   await send(page, "Check whether the work item exists");
-  expect(await page.evaluate(() => window.aiFixture.requests[1].body)).toEqual({
-    messages: [{ role: "user", content: "Check whether the work item exists" }],
-    project_id: "fixture-project",
-  });
+  const body = await page.evaluate(() => window.aiFixture.requests[1].body);
+  expect(JSON.stringify(body)).toContain("Create a work item");
+  expect(JSON.stringify(body)).toContain("Verify the current Plane state");
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.aiFixture.aborted)).toBe(2);
 });
 
 for (const failure of ["model-error", "interrupted-stream"] as const) {
-  test(`${failure} after a write preserves the attempted turn and requires a new chat`, async ({ page }) => {
+  test(`${failure} after a write preserves results and supports a verification follow-up`, async ({ page }) => {
     await mockSettings(page);
     await page.goto("/?ai-assistant");
     await open(page);
@@ -360,33 +504,65 @@ for (const failure of ["model-error", "interrupted-stream"] as const) {
       { type: "text", text: "The work item was created; checking the result…" },
     ]);
     if (failure === "model-error")
-      await frames(page, [{ type: "error", message: "Model connection ended while verifying the write." }]);
+      await frames(page, [
+        { type: "error", message: "Model connection ended while verifying the write.", may_have_changes: true },
+      ]);
     else await page.evaluate(() => window.aiFixture.finish());
-    await expect(page.getByRole("dialog")).toContainText("Interrupted request");
-    await expect(page.getByRole("dialog")).toContainText("Create the release work item");
-    await expect(page.getByRole("dialog")).toContainText("The work item was created; checking the result…");
-    await expect(page.getByRole("status")).toHaveText("Create · Work items: Complete");
-    await expect(page.getByRole("alert")).toContainText(
-      failure === "model-error"
-        ? "Model connection ended while verifying the write."
-        : "Assistant response interrupted before completion"
-    );
-    const composer = page.getByRole("textbox", { name: "Message the assistant" });
-    await expect(composer).toHaveAccessibleDescription(/Some changes may already have taken effect/);
-    await composer.fill("Retry the same write");
-    await expect(page.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
-    await composer.evaluate((element) => (element.closest("form") as HTMLFormElement).requestSubmit());
-    expect(await page.evaluate(() => window.aiFixture.requests.length)).toBe(1);
-    await page.getByRole("button", { name: "Clear chat", exact: true }).click();
-    await expect(page.getByRole("dialog")).not.toContainText("Create the release work item");
+    const panel = page.getByRole("complementary");
+    await expect(panel).toContainText("Create the release work item");
+    await expect(panel).toContainText("The work item was created; checking the result…");
+    await expect(page.locator(".agent-tool-detail").getByRole("status")).toHaveText("Create · Work items: Complete");
+    await expect(page.getByRole("alert")).toContainText("Some tool operations may have completed");
+    await expect(page.getByRole("alert")).not.toContainText("clear");
     await send(page, "Check whether the release work item exists before creating anything");
-    expect(await page.evaluate(() => window.aiFixture.requests[1].body)).toEqual({
-      messages: [{ role: "user", content: "Check whether the release work item exists before creating anything" }],
-      project_id: "fixture-project",
-    });
+    const body = await page.evaluate(() => window.aiFixture.requests[1].body);
+    expect(JSON.stringify(body)).toContain("Verify the current Plane state before repeating any mutation");
     await page.getByRole("button", { name: "Close", exact: true }).click();
   });
 }
+
+test("pre-execution service configuration errors preserve the draft and never claim changes", async ({ page }) => {
+  await mockSettings(page);
+  await page.goto("/?ai-assistant");
+  await open(page);
+  await page.evaluate(() => {
+    window.aiFixture.failNext = {
+      status: 503,
+      body: {
+        error: "The AI service is not configured on this instance.",
+        code: "ai_service_not_configured",
+        may_have_changes: false,
+      },
+    };
+  });
+  await send(page, "Create a task later");
+  await expect(page.getByRole("alert")).toContainText("assistant service is unavailable");
+  await expect(page.getByRole("alert")).not.toContainText("changes");
+  await expect(page.getByRole("alert")).not.toContainText("clear");
+  await expect(page.getByRole("textbox", { name: "Message the assistant" })).toHaveValue("Create a task later");
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
+  await send(page, "Show my tasks instead");
+  expect(await page.evaluate(() => window.aiFixture.requests[1].body)).toEqual({
+    messages: [{ role: "user", content: "Show my tasks instead" }],
+    project_id: "fixture-project",
+  });
+  await frames(page, [{ type: "text", text: "The service is connected." }, { type: "done" }]);
+  await expect(page.getByRole("complementary")).toContainText("The service is connected.");
+});
+
+test("stream setup errors with no execution allow immediate retry", async ({ page }) => {
+  await mockSettings(page);
+  await page.goto("/?ai-assistant");
+  await open(page);
+  await send(page, "Hello");
+  await frames(page, [
+    { type: "error", code: "ai_tools_unavailable", message: "unavailable", may_have_changes: false },
+  ]);
+  await expect(page.getByRole("alert")).toContainText("Plane tools are unavailable");
+  await expect(page.getByRole("alert")).not.toContainText("changes");
+  await expect(page.getByRole("textbox", { name: "Message the assistant" })).toHaveValue("Hello");
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
+});
 
 test("separates streamed native thoughts and tagged thoughts from the final answer and prompt history", async ({
   page,
@@ -399,7 +575,7 @@ test("separates streamed native thoughts and tagged thoughts from the final answ
     { type: "thinking", text: "Native thought preview" },
     { type: "text", text: "<thi" },
   ]);
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("complementary");
   await expect(dialog).not.toContainText("<thi");
   await expect(dialog.locator('[data-agent-part="native-thinking"]')).toHaveCount(1);
   await expect(dialog.getByText("Native thought preview", { exact: true })).not.toBeVisible();
@@ -433,7 +609,7 @@ test("textual tool tags never impersonate executed tools and code examples prese
     },
     { type: "done" },
   ]);
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("complementary");
   await expect(dialog.locator("[data-tool-id]")).toHaveCount(0);
   await expect(dialog.locator('[data-agent-part="thinking"]')).toHaveCount(0);
   await dialog.locator('[data-agent-part="tool-call"] summary').click();
@@ -502,7 +678,7 @@ test("shows safe tool details and verified work-item links and retains them with
     { type: "text", text: "Created ENG-42. Unverified ENG-99 stays plain." },
     { type: "done" },
   ]);
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("complementary");
   await expect(dialog.getByRole("link", { name: "ENG-42", exact: true })).toHaveAttribute(
     "href",
     `/workspace/projects/${item.projectId}/issues/${item.id}/`
@@ -531,7 +707,7 @@ test("renders GFM, safe structural HTML and bounded rich content on a narrow scr
   const table = "| Column A | Column B | Column C |\n| --- | --- | --- |\n| one | two | three |";
   const rich = `# Result\n\n${table}\n\n- [x] Complete\n- [ ] Pending\n\n~~Removed~~\n\n<details><summary>Extra detail</summary><p>Press <kbd>Enter</kbd>, H<sub>2</sub>O and x<sup>2</sup>.</p></details>\n\n\`\`\`javascript\nconst message = "${"long-value-".repeat(200)}";\n\`\`\`\n\n<script>window.invalidMarkupRan = true</script><iframe src="https://example.invalid"></iframe><span onclick="alert(1)" style="position:fixed">Safe text</span>`;
   await frames(page, [{ type: "text", text: rich }, { type: "done" }]);
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("complementary");
   await expect(dialog.getByRole("heading", { name: "Result", exact: true })).toBeVisible();
   await expect(dialog.getByRole("table")).toHaveCount(1);
   await expect(dialog.locator('input[type="checkbox"]')).toHaveCount(2);
@@ -541,7 +717,7 @@ test("renders GFM, safe structural HTML and bounded rich content on a narrow scr
   await dialog.locator("summary").filter({ hasText: "Extra detail" }).click();
   await expect(dialog.locator("kbd")).toHaveText("Enter");
   await expect(dialog.locator("code .hljs-keyword")).toContainText("const");
-  await expect(dialog.locator("script, iframe, [onclick], [style]")).toHaveCount(0);
+  await expect(dialog.locator(".agent-message-content").locator("script, iframe, [onclick], [style]")).toHaveCount(0);
   expect(await page.evaluate(() => Reflect.get(window, "invalidMarkupRan"))).toBeUndefined();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.getByRole("button", { name: "Send", exact: true })).toBeInViewport();
@@ -587,10 +763,10 @@ test("sanitized model errors remain visible and navigation or user changes destr
   await send(page, "Hello");
   await frames(page, [{ type: "error", message: "This model is unavailable for your account." }]);
   await expect(page.getByRole("alert")).toContainText("This model is unavailable for your account.");
-  await page.getByRole("button", { name: "Clear chat", exact: true }).click();
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
   await send(page, "Check project");
   await page.evaluate(() => window.aiFixture.navigate("/other/projects/next-project"));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("complementary")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.aiFixture.aborted)).toBe(1);
   await open(page);
   await send(page, "Hello other workspace");
@@ -598,6 +774,6 @@ test("sanitized model errors remain visible and navigation or user changes destr
     "/api/workspaces/other/agent/chat/"
   );
   await page.evaluate(() => window.aiFixture.switchUser());
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("complementary")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.aiFixture.aborted)).toBe(2);
 });

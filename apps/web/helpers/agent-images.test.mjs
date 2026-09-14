@@ -20,9 +20,9 @@ test("image limits span existing conversation and draft and permit image-only se
   assert.equal(canAddAgentImages(2, 1), true);
   assert.equal(canAddAgentImages(2, 2), false);
   assert.equal(canAddAgentImages(0, 0), false);
-  assert.equal(canSendAgentMessage("", false, true, false, 1), true);
-  assert.equal(canSendAgentMessage("", true, true, false, 1), false);
-  assert.equal(canSendAgentMessage("", false, true, true, 1), false);
+  assert.equal(canSendAgentMessage("", false, true, 1), true);
+  assert.equal(canSendAgentMessage("", true, true, 1), false);
+  assert.equal(canSendAgentMessage("", false, false, 1), false);
   assert.equal(imagePreviewUrl({ data: "abc", mime_type: "image/png" }), "data:image/png;base64,abc");
 });
 test("rejects oversized images and aborted reads before allocating FileReader", async () => {

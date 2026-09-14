@@ -27,7 +27,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def stream_boundary(monkeypatch, settings):
     """Replace DB/cache/network boundaries, preserving the real async generator."""
-    settings.LIVE_URL = "http://live.internal/"
+    settings.AI_AGENT_URL = "http://live.internal/"
     settings.LIVE_SERVER_SECRET_KEY = "internal-secret"
     cache_values = {}
     cache = Mock()
@@ -94,8 +94,73 @@ def payload():
     }
 
 
+@pytest.mark.parametrize("model,known", [("gpt-4o", True), ("test-model", False)])
+def test_public_settings_include_only_known_offline_model_metadata(monkeypatch, model, known):
+    config = SimpleNamespace(
+        provider="openai",
+        base_url="https://api.openai.com/v1",
+        model=model,
+        api_key_encrypted="unreadable-private-key",
+        supports_images=False,
+    )
+    monkeypatch.setattr(ai, "decrypt_model_key", Mock(side_effect=AssertionError("Do not decrypt")))
+    monkeypatch.setattr(ai.httpx, "Client", Mock(side_effect=AssertionError("Do not fetch")))
+    data = ai.PersonalAISettingsEndpoint.public_config(config)
+    assert data["supports_images"] is False
+    assert data["has_api_key"] is True
+    assert "unreadable-private-key" not in json.dumps(data)
+    if known:
+        assert data["model_metadata"]["metadata_source"] == "models.dev"
+        assert data["model_metadata"]["vision"] is True
+        assert data["model_metadata"]["tools"] is True
+    else:
+        assert "model_metadata" not in data
+
+
+@pytest.mark.parametrize("vision", [True, False, None])
+@pytest.mark.parametrize("stored", [False, True])
+def test_public_settings_preserve_saved_image_preference(monkeypatch, vision, stored):
+    config = SimpleNamespace(
+        provider="openai",
+        base_url="https://api.openai.com/v1",
+        model="custom",
+        api_key_encrypted="private-key",
+        supports_images=stored,
+    )
+    monkeypatch.setattr(ai, "lookup_model_metadata", lambda *args: {"vision": vision})
+    assert ai.PersonalAISettingsEndpoint.public_config(config)["supports_images"] is stored
+
+
 async def collect(stream):
     return [chunk async for chunk in stream]
+
+
+@pytest.mark.parametrize(
+    "url", ["", "not-a-url", "http://@live", "http://live?", "http://live#", "http://live:99999", "http://live/\u0001"]
+)
+def test_invalid_internal_service_url_is_rejected(url):
+    assert ai.valid_agent_url(url) is False
+
+
+@pytest.mark.parametrize(
+    "url", ["http://live:3000", "http://127.0.0.1:3000/", "https://ai.internal/prefix", "http://[::1]:3000"]
+)
+def test_internal_service_urls_allow_private_service_destinations(url):
+    assert ai.valid_agent_url(url) is True
+
+
+def test_missing_shared_secret_never_starts_execution(settings):
+    settings.AI_AGENT_URL = "http://live.internal"
+    settings.LIVE_SERVER_SECRET_KEY = ""
+    request = SimpleNamespace(data={"messages": [{"role": "user", "content": "hello"}]})
+    # Workspace permission checks are covered separately; no DB access may follow this guard.
+    response = ai.WorkspaceAgentChatEndpoint.post.__wrapped__(ai.WorkspaceAgentChatEndpoint(), request, "alpha")
+    assert response.status_code == 503
+    assert response.data == {
+        "error": "The AI service is not configured on this instance.",
+        "code": "ai_service_not_configured",
+        "may_have_changes": False,
+    }
 
 
 def test_stream_never_started_creates_no_authority(stream_boundary):
@@ -146,10 +211,28 @@ def test_upstream_failures_are_sanitized_and_revoke_token(stream_boundary, failu
     events = [json.loads(chunk) for chunk in chunks if chunk.strip()]
     assert [event["type"] for event in events] == ["error", "done"]
     assert events[-1]["reason"] == "error"
+    assert events[0]["code"] == "ai_service_unavailable"
+    assert events[0]["may_have_changes"] is False
     assert b"model-secret" not in b"".join(chunks)
     assert b"temporary-secret" not in b"".join(chunks)
     stream_boundary.cleanup.assert_called_once_with("token-id")
     assert not stream_boundary.cache_values
+
+
+@pytest.mark.parametrize(
+    "status,code",
+    [(401, "ai_service_auth"), (403, "ai_service_auth"), (429, "ai_busy"), (500, "ai_service_unavailable")],
+)
+def test_upstream_rejection_never_claims_changes(stream_boundary, status, code):
+    stream_boundary.status = status
+    chunks = asyncio.run(collect(ai.stream_agent_turn(payload(), "workspace-id")))
+    event = json.loads(chunks[1])
+    assert event == {
+        "type": "error",
+        "code": code,
+        "may_have_changes": False,
+        "message": "The AI service is unavailable. Please try again later.",
+    }
 
 
 def test_disconnect_cancellation_during_upstream_read_revokes_token(stream_boundary):
@@ -244,6 +327,11 @@ def test_total_turn_deadline_cancels_stalled_upstream_and_revokes_token(stream_b
     chunks = asyncio.run(scenario())
     assert budgets == [135]
     assert stream_boundary.entered.is_set()
+    assert json.loads(chunks[-2]) == {
+        "type": "error",
+        "code": "ai_connection_interrupted",
+        "message": "The AI connection was interrupted. Please try again.",
+    }
     assert json.loads(chunks[-1]) == {"type": "done", "reason": "error"}
     stream_boundary.cleanup.assert_called_once_with("token-id")
     assert not stream_boundary.cache_values
@@ -272,6 +360,12 @@ def test_busy_user_cannot_create_second_token_or_release_first_lock(stream_bound
     stream_boundary.cache_values["plane-ai-turn:user-id"] = "existing-owner"
     events = [json.loads(chunk) for chunk in asyncio.run(collect(ai.stream_agent_turn(payload(), "workspace-id")))]
     assert [event["type"] for event in events] == ["error", "done"]
+    assert events[0] == {
+        "type": "error",
+        "message": "Another AI request is running. Wait for it to finish.",
+        "code": "ai_busy",
+        "may_have_changes": False,
+    }
     stream_boundary.create.assert_not_called()
     stream_boundary.cleanup.assert_not_called()
     stream_boundary.cache.delete.assert_not_called()
@@ -296,6 +390,8 @@ def test_token_creation_failure_emits_safe_error_and_releases_lock(stream_bounda
     events = [json.loads(chunk) for chunk in chunks if chunk.strip()]
     assert [event["type"] for event in events] == ["error", "done"]
     assert events[-1]["reason"] == "error"
+    assert events[0]["code"] == "ai_service_unavailable"
+    assert events[0]["may_have_changes"] is False
     assert b"private-db-host" not in b"".join(chunks)
     assert b"model-secret" not in b"".join(chunks)
     assert not stream_boundary.cache_values

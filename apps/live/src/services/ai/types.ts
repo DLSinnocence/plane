@@ -70,6 +70,6 @@ export type AiStreamEvent =
       status: "running" | "complete" | "error";
       details?: AiToolDetails;
     }
-  | { type: "error"; code: "agent_failed" | "run_limit"; message: string }
+  | { type: "error"; code?: string; message: string; may_have_changes?: boolean }
   | { type: "done"; reason: AiDoneReason };
 export type AiEmit = (event: AiStreamEvent) => Promise<void>;

@@ -8,6 +8,8 @@ import time
 
 import httpx
 
+from plane.utils.ai_model_metadata import registry_metadata
+
 MAX_MODEL_PAGES = 5
 MAX_MODELS = 1000
 MAX_CATALOGUE_BYTES = 4 * 1024 * 1024
@@ -20,8 +22,9 @@ class ModelDiscoveryError(Exception):
 
 
 def model_capabilities(model):
-    """Only upstream metadata is evidence; model IDs never imply capabilities."""
-    vision = tools = None
+    """Read explicit upstream capability fields, without inferring from IDs."""
+    vision = model.get("vision") if isinstance(model.get("vision"), bool) else None
+    tools = model.get("tool_call") if isinstance(model.get("tool_call"), bool) else None
     architecture = model.get("architecture")
     sources = [model]
     if isinstance(architecture, dict):
@@ -47,6 +50,41 @@ def model_capabilities(model):
         vision = any(item in capabilities for item in ("vision", "image", "images"))
         tools = any(item in capabilities for item in ("tools", "tool_calling", "function_calling"))
     return vision, tools
+
+
+def lookup_model_metadata(provider, base_url, model_id):
+    """Return offline registry metadata for a saved selection, or None.
+
+    `provider` is the request protocol, not evidence of the model's publisher.
+    No credentials or upstream request are needed; API origin and exact IDs
+    determine the registry match. The original model ID is never rewritten.
+    """
+    if not isinstance(model_id, str) or not model_id or len(model_id) > 200:
+        return None
+    metadata = registry_metadata(model_id, base_url, include_name=True)
+    if metadata is None:
+        return None
+    return {**metadata, "metadata_source": "models.dev"}
+
+
+def enriched_metadata(model, base_url):
+    """Prefer registry fields; retain explicit upstream evidence for missing fields."""
+    vision, tools = model_capabilities(model)
+    reasoning = model.get("reasoning")
+    limits = model.get("limit")
+    context = limits.get("context") if isinstance(limits, dict) else model.get("context_window")
+    metadata = {
+        "vision": vision,
+        "tools": tools,
+        "reasoning": reasoning if isinstance(reasoning, bool) else None,
+        "context_window": context if type(context) is int and context > 0 else None,
+    }
+    registered = registry_metadata(model["id"], base_url)
+    source = "provider" if any(value is not None for value in metadata.values()) else "custom"
+    if registered is not None:
+        metadata.update({key: value for key, value in registered.items() if value is not None})
+        source = "models.dev"
+    return {**metadata, "metadata_source": source}
 
 
 def discover_models(provider, base_url, api_key):
@@ -95,8 +133,7 @@ def discover_models(provider, base_url, api_key):
                     if not isinstance(name, str) or len(name) > 1000:
                         raise ModelDiscoveryError()
                     if model_id not in seen:
-                        vision, tools = model_capabilities(item)
-                        models.append({"id": model_id, "name": name, "vision": vision, "tools": tools})
+                        models.append({"id": model_id, "name": name, **enriched_metadata(item, base_url)})
                         seen.add(model_id)
                     entries_read += 1
                     if entries_read >= MAX_MODELS:

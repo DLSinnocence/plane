@@ -46,6 +46,7 @@ services:
     env_file:
       - ./apps/api/.env
     environment:
+      AI_AGENT_URL: ${AI_AGENT_URL:-http://live:3000/live}
       LIVE_BASE_URL: http://live:3000
       LIVE_BASE_PATH: /live
     depends_on:

@@ -65,7 +65,17 @@ function AISettingsForm() {
       .then((value) => {
         if (request.signal.aborted) return undefined;
         setSettings(value);
-        setSelectedModel(value.model ? { id: value.model, name: value.model, vision: null, tools: null } : null);
+        setSelectedModel(
+          value.model
+            ? {
+                id: value.model,
+                name: value.model_metadata?.name || value.model,
+                vision: null,
+                tools: null,
+                ...value.model_metadata,
+              }
+            : null
+        );
         return undefined;
       })
       .catch((requestError: unknown) => {
@@ -302,23 +312,17 @@ function AISettingsForm() {
                           {model.name !== model.id && (
                             <p className="text-body-xs-regular break-all text-secondary">{model.id}</p>
                           )}
-                          <p className="text-body-xs-regular text-secondary">
-                            {t(
-                              model.vision === true
-                                ? "account_settings.ai.capability_vision"
-                                : model.vision === false
-                                  ? "account_settings.ai.capability_no_vision"
-                                  : "account_settings.ai.capability_vision_unknown"
-                            )}{" "}
-                            ·{" "}
-                            {t(
-                              model.tools === true
-                                ? "account_settings.ai.capability_tools"
-                                : model.tools === false
-                                  ? "account_settings.ai.capability_no_tools"
-                                  : "account_settings.ai.capability_tools_unknown"
-                            )}
-                          </p>
+                          <div className="ai-model-capabilities">
+                            {model.vision === true && <span>{t("account_settings.ai.capability_vision")}</span>}
+                            {model.tools === true && <span>{t("account_settings.ai.capability_tools")}</span>}
+                            {model.reasoning && <span>{t("account_settings.ai.capability_reasoning")}</span>}
+                            {model.context_window && <span>{Math.round(model.context_window / 1000)}K</span>}
+                            {model.metadata_source === "models.dev" ? (
+                              <span className="ai-model-source">models.dev</span>
+                            ) : model.vision === null && model.tools === null ? (
+                              <span>{t("account_settings.ai.custom_model")}</span>
+                            ) : null}
+                          </div>
                         </>
                       )}
                     </Combobox.Option>
@@ -337,7 +341,7 @@ function AISettingsForm() {
               <input
                 type="checkbox"
                 checked={settings.supports_images ?? false}
-                disabled={saving || !settings.model || selectedModel?.vision != null}
+                disabled={saving || !settings.model || selectedModel?.vision === false}
                 aria-describedby="ai-vision-help"
                 onChange={(event) => {
                   setSettings({ ...settings, supports_images: event.target.checked });

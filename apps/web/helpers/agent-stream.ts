@@ -63,6 +63,17 @@ function readToolDetails(value: unknown): AgentToolDetails {
   }
   return details;
 }
+export class AgentStreamError extends Error {
+  readonly code?: string;
+  readonly mayHaveChanges?: boolean;
+  constructor(message: string, code?: string, mayHaveChanges?: boolean) {
+    super(message);
+    this.name = "AgentStreamError";
+    this.code = code;
+    this.mayHaveChanges = mayHaveChanges;
+  }
+}
+
 export type AgentEvent =
   | { type: "text"; text: string }
   | { type: "thinking"; text: string }
@@ -107,8 +118,13 @@ export async function readAgentStream(
         ...(typeof frame.action === "string" ? { action: frame.action } : {}),
         ...(frame.details !== undefined ? { details: readToolDetails(frame.details) } : {}),
       });
-    } else if (frame.type === "error" && typeof frame.message === "string") throw new Error(frame.message);
-    else if (frame.type === "done") {
+    } else if (frame.type === "error" && typeof frame.message === "string") {
+      throw new AgentStreamError(
+        frame.message,
+        typeof frame.code === "string" ? frame.code : undefined,
+        typeof frame.may_have_changes === "boolean" ? frame.may_have_changes : undefined
+      );
+    } else if (frame.type === "done") {
       if (frame.reason && frame.reason !== "complete")
         throw new Error("Assistant response interrupted before completion");
       completed = true;

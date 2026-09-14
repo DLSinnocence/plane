@@ -31,7 +31,7 @@ def chat_url(workspace):
 
 @pytest.fixture(autouse=True)
 def ai_environment(settings):
-    settings.LIVE_URL = "http://live.internal"
+    settings.AI_AGENT_URL = "http://live.internal"
     settings.LIVE_SERVER_SECRET_KEY = "test-internal-secret"
 
 
@@ -82,6 +82,29 @@ def test_settings_are_owned_by_session_user_even_with_injected_owner(session_cli
     assert mine.api_key_encrypted not in response.content.decode()
     assert "api_key" not in response.json()
     assert "api_key_encrypted" not in response.json()
+
+
+def test_saved_model_metadata_reloads_without_upstream_access(session_client, create_user, monkeypatch):
+    config = save_settings(create_user)
+    config.model = "gpt-4o"
+    config.save()
+    discover = Mock(side_effect=AssertionError("Settings must not fetch upstream models"))
+    decrypt = Mock(side_effect=AssertionError("Settings must not decrypt saved keys"))
+    monkeypatch.setattr("plane.app.views.ai.discover_models", discover)
+    monkeypatch.setattr("plane.app.views.ai.decrypt_model_key", decrypt)
+    response = session_client.get(SETTINGS_URL)
+    assert response.status_code == 200
+    metadata = response.json()["model_metadata"]
+    assert metadata["metadata_source"] == "models.dev"
+    assert metadata["vision"] is True
+    assert metadata["tools"] is True
+    assert response.json()["supports_images"] is False
+    config.refresh_from_db()
+    assert config.supports_images is False
+    assert response["Cache-Control"] == "no-store"
+    assert "model-secret" not in response.content.decode()
+    discover.assert_not_called()
+    decrypt.assert_not_called()
 
 
 @pytest.mark.parametrize("change", [{"provider": "anthropic"}, {"base_url": "https://api.anthropic.com/v1"}])
@@ -213,6 +236,8 @@ def test_chat_requires_active_workspace_membership(session_client, create_user, 
         chat_url(workspace), {"messages": [{"role": "user", "content": "hello"}]}, format="json"
     )
     assert response.status_code == 403
+    assert response.json()["code"] == "ai_access_denied"
+    assert response.json()["may_have_changes"] is False
     stream.assert_not_called()
 
 
@@ -233,6 +258,8 @@ def test_chat_project_scope_requires_active_membership_in_same_workspace(session
         format="json",
     )
     assert response.status_code == 403
+    assert response.json()["code"] == "ai_access_denied"
+    assert response.json()["may_have_changes"] is False
     assert not APIToken.objects.filter(user=create_user, label=AGENT_TOKEN_LABEL).exists()
 
 
@@ -279,6 +306,46 @@ def test_authorized_chat_uses_saved_config_and_session_identity_without_eager_to
     response.close()
 
 
+@pytest.mark.parametrize(
+    "url,secret",
+    [
+        ("http://live.internal", ""),
+        ("", "secret"),
+        ("not-a-url", "secret"),
+        ("http://user:key@live.internal", "secret"),
+    ],
+)
+def test_service_configuration_failure_never_claims_changes(
+    session_client, create_user, workspace, settings, monkeypatch, url, secret
+):
+    settings.AI_AGENT_URL = url
+    settings.LIVE_SERVER_SECRET_KEY = secret
+    stream = Mock()
+    monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
+    response = session_client.post(
+        chat_url(workspace), {"messages": [{"role": "user", "content": "hello"}]}, format="json"
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": "The AI service is not configured on this instance.",
+        "code": "ai_service_not_configured",
+        "may_have_changes": False,
+    }
+    stream.assert_not_called()
+    assert not APIToken.objects.filter(user=create_user, label=AGENT_TOKEN_LABEL).exists()
+
+
+def test_chat_does_not_require_public_live_url(session_client, create_user, workspace, settings, monkeypatch):
+    settings.LIVE_URL = ""
+    save_settings(create_user)
+    monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", Mock(return_value=iter([])))
+    response = session_client.post(
+        chat_url(workspace), {"messages": [{"role": "user", "content": "hello"}]}, format="json"
+    )
+    assert response.status_code == 200
+    response.close()
+
+
 @pytest.mark.parametrize("problem", ["missing", "unreadable", "invalid-url"])
 def test_unusable_saved_settings_prevent_starting_chat(
     session_client, create_user, workspace, problem, settings, monkeypatch
@@ -297,6 +364,8 @@ def test_unusable_saved_settings_prevent_starting_chat(
         chat_url(workspace), {"messages": [{"role": "user", "content": "hello"}]}, format="json"
     )
     assert response.status_code == 400
+    assert response.json()["code"] == ("ai_key_unreadable" if problem == "unreadable" else "ai_model_not_configured")
+    assert response.json()["may_have_changes"] is False
     stream.assert_not_called()
     assert "not-a-valid-ciphertext" not in response.content.decode()
 
@@ -348,7 +417,10 @@ def test_discovery_saved_key_destination_isolation_without_mutation(
     save_settings(other_user, "other-user-key")
     before = (config.provider, config.base_url, config.api_key_encrypted, config.updated_at)
     discover = Mock(
-        return_value={"models": [{"id": "custom", "name": "Custom", "vision": None, "tools": None}], "truncated": False}
+        return_value={
+            "models": [{"id": "custom", "name": "Custom", "vision": None, "tools": None}],
+            "truncated": False,
+        }
     )
     monkeypatch.setattr("plane.app.views.ai.discover_models", discover)
     body = {"provider": provider, "base_url": base, "user": str(other_user.id)}
@@ -383,7 +455,10 @@ def test_discovery_with_new_key_and_valid_csrf_does_not_save(create_user, monkey
     csrf = "a" * 32
     client.cookies[django_settings.CSRF_COOKIE_NAME] = csrf
     discover = Mock(
-        return_value={"models": [{"id": "custom", "name": "Custom", "vision": True, "tools": None}], "truncated": False}
+        return_value={
+            "models": [{"id": "custom", "name": "Custom", "vision": True, "tools": None}],
+            "truncated": False,
+        }
     )
     monkeypatch.setattr("plane.app.views.ai.discover_models", discover)
     response = client.post(
@@ -397,8 +472,45 @@ def test_discovery_with_new_key_and_valid_csrf_does_not_save(create_user, monkey
     assert not UserAISettings.objects.filter(user=create_user).exists()
 
 
+@pytest.mark.parametrize("vision", [True, False, None])
+@pytest.mark.parametrize("stored", [False, True])
+def test_saved_image_preference_matches_settings_chat_gate_and_payload(
+    session_client, create_user, workspace, monkeypatch, vision, stored
+):
+    config = save_settings(create_user)
+    config.supports_images = stored
+    config.save()
+    monkeypatch.setattr("plane.app.views.ai.lookup_model_metadata", lambda *args: {"vision": vision})
+    stream = Mock(return_value=iter([]))
+    monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
+    assert session_client.get(SETTINGS_URL).json()["supports_images"] is stored
+    response = session_client.post(
+        chat_url(workspace),
+        {
+            "messages": [
+                {"role": "user", "content": "Describe", "images": [{"data": "iVBORw0KGgo=", "mime_type": "image/png"}]}
+            ]
+        },
+        format="json",
+    )
+    if stored:
+        assert response.status_code == 200
+        assert stream.call_args.args[0]["model_config"]["supports_images"] is True
+    else:
+        assert response.status_code == 400
+        assert response.json()["code"] == "ai_images_disabled"
+        assert response.json()["may_have_changes"] is False
+        stream.assert_not_called()
+    config.refresh_from_db()
+    assert config.supports_images is stored
+    if stored:
+        response.close()
+
+
 def test_image_support_settings_and_forwarding(session_client, create_user, workspace, monkeypatch):
     config = save_settings(create_user)
+    config.model = "custom/not-in-catalogue"
+    config.save()
     stream = Mock(return_value=iter([]))
     monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
     messages = [
