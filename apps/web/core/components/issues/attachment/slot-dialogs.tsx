@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { Dialog } from "@headlessui/react";
 import { Input, InputGroup } from "@makeplane/propel/components/input";
 import { Button } from "@plane/propel/button";
 import { useTranslation } from "@plane/i18n";
@@ -24,8 +25,10 @@ export function AttachmentDialog({
     <ModalCore isOpen handleClose={onClose}>
       <div className="space-y-4 p-5">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-h4-medium text-secondary">{title}</h3>
-          <Button variant="secondary" size="sm" onClick={onClose}>
+          <Dialog.Title as="h3" className="text-h4-medium text-secondary">
+            {title}
+          </Dialog.Title>
+          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
             {t("attachment.slots.close")}
           </Button>
         </div>
@@ -105,12 +108,18 @@ export function AttachmentNameForm({
                     }
                   />
                 </InputGroup>
-                <Button variant="secondary" size="sm" onClick={() => setSlots(slots.filter((_, i) => i !== index))}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSlots(slots.filter((_, i) => i !== index))}
+                >
                   {t("attachment.slots.remove")}
                 </Button>
               </div>
             ))}
             <Button
+              type="button"
               variant="secondary"
               size="sm"
               disabled={slots.length >= 50}

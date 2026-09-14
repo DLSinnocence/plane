@@ -19,6 +19,8 @@ type Props = {
   issueId: string;
   disabled: boolean;
   issueServiceType?: TIssueServiceType;
+  focusSlotId?: string | null;
+  onFocusHandled?: () => void;
 };
 
 export const IssueAttachmentsCollapsibleContent = observer(function IssueAttachmentsCollapsibleContent(props: Props) {
@@ -29,6 +31,8 @@ export const IssueAttachmentsCollapsibleContent = observer(function IssueAttachm
     <>
       {issueServiceType === EIssueServiceType.ISSUES && (
         <IssueAttachmentSlots
+          focusSlotId={props.focusSlotId}
+          onFocusHandled={props.onFocusHandled}
           key={`${workspaceSlug}:${projectId}:${issueId}`}
           workspaceSlug={workspaceSlug}
           projectId={projectId}

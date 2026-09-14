@@ -195,7 +195,9 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
     const slot = await this.attachmentTemplateService.updateSlot(workspaceSlug, projectId, issueId, slotId, name);
     this.setAttachmentSlots(
       issueId,
-      (this.attachmentSlots[issueId] ?? []).map((current) => (current.id === slotId ? slot : current))
+      (this.attachmentSlots[issueId] ?? []).map((current) =>
+        current.id === slotId ? Object.assign({}, current, { name: slot.name }) : current
+      )
     );
     return slot;
   };

@@ -78,6 +78,16 @@ export function AttachmentTemplateLibrary({
         >
           {t("attachment.slots.new_template")}
         </Button>
+        {slotNames.length > 0 && (
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={loading || error || busy !== null}
+            onClick={() => setEditor({ name: "", slots: [...slotNames] })}
+          >
+            {t("attachment.slots.save_template")}
+          </Button>
+        )}
         {loading ? (
           <p role="status">{t("attachment.slots.loading")}</p>
         ) : error ? (

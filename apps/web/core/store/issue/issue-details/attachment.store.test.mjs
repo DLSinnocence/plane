@@ -142,6 +142,26 @@ test("deleting a slot keeps its file, while deleting a file empties its slot", a
   assert.deepEqual([...second.store.getAttachmentsByIssueId("issue")], []);
 });
 
+test("a late rename response cannot restore a file replaced during the request", async () => {
+  const pending = deferred();
+  let current = slot(file("old"));
+  const { store } = fixture(
+    {},
+    {
+      fetchSlots: async () => [current],
+      updateSlot: () => pending.promise,
+    }
+  );
+  await store.fetchAttachmentSlots("workspace", "project", "issue");
+  const renaming = store.updateAttachmentSlot("workspace", "project", "issue", "slot", "Release");
+  current = slot(file("new"));
+  await store.createAttachment("workspace", "project", "issue", new File(["zip"], "new.zip"), "slot");
+  pending.resolve({ ...slot(file("old")), name: "Release" });
+  await renaming;
+  assert.equal(store.getAttachmentSlotsByIssueId("issue")[0].name, "Release");
+  assert.equal(store.getAttachmentSlotsByIssueId("issue")[0].attachment.id, "new");
+});
+
 test("late debounced progress does not recreate a completed upload", async () => {
   const { store } = fixture({
     uploadIssueAttachment: async (...args) => {

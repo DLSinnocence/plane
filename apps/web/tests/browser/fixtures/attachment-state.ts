@@ -41,6 +41,12 @@ class AttachmentFixtureState {
     },
   ];
   calls: string[] = [];
+  openWidgets: string[] = params.has("collapsed") ? [] : ["attachments"];
+  toggleOpenWidget(widget: string) {
+    this.openWidgets = this.openWidgets.includes(widget)
+      ? this.openWidgets.filter((item) => item !== widget)
+      : [...this.openWidgets, widget];
+  }
   serial = 0;
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
@@ -61,6 +67,9 @@ class AttachmentFixtureState {
   }
   async createAttachmentSlot(_workspace: string, _project: string, _issue: string, name: string) {
     this.calls.push("createSlot");
+    if (params.has("create-fail")) throw httpError(503, { detail: "Attachment creation unavailable" });
+    if (this.slots.some((slot) => slot.name.toLowerCase() === name.toLowerCase()))
+      throw httpError(400, { name: ["A slot with this name already exists."] });
     const slot = { id: `slot-${++this.serial}`, name, sort_order: this.slots.length, attachment: null };
     this.slots.push(slot);
     return slot;
@@ -68,7 +77,9 @@ class AttachmentFixtureState {
   async updateAttachmentSlot(_workspace: string, _project: string, _issue: string, id: string, name: string) {
     this.calls.push("renameSlot");
     const slot = this.slots.find((item) => item.id === id)!;
-    if (name === "reject") throw new Error("Rejected rename");
+    if (name === "reject") throw httpError(503, { detail: "Rejected rename" });
+    if (this.slots.some((item) => item.id !== id && item.name.toLowerCase() === name.toLowerCase()))
+      throw httpError(400, { name: ["A slot with this name already exists."] });
     slot.name = name;
     return slot;
   }
@@ -113,6 +124,11 @@ class AttachmentFixtureState {
 }
 export const attachmentFixture = new AttachmentFixtureState();
 export const useIssueDetail = () => ({
+  openWidgets: attachmentFixture.openWidgets,
+  toggleOpenWidget: attachmentFixture.toggleOpenWidget,
+  issue: {
+    getIssueById: () => ({ id: "issue", project_id: "project", attachment_count: attachmentFixture.files.length }),
+  },
   attachment: attachmentFixture,
   attachmentDeleteModalId: null,
   toggleDeleteAttachmentModal: () => {},
