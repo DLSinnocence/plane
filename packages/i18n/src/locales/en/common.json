@@ -778,7 +778,7 @@
       "replace": "Replace file",
       "upload": "Upload file",
       "uploading": "Uploading…",
-      "empty_slot": "No file uploaded",
+      "empty_slot": "Empty attachment",
       "empty": "No attachments yet.",
       "loading": "Loading…",
       "error": "Unable to complete the request. Please try again.",

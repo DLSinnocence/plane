@@ -147,7 +147,67 @@ output {
 .min-h-full {
   min-height: 100%;
 }
+/* Minimal layout utilities used by the production attachment rows. */
+.grid {
+  display: grid;
+}
+.grid-cols-\[minmax\(0\,1fr\)_minmax\(0\,2fr\)_minmax\(0\,1fr\)\] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+}
+.min-h-11 {
+  min-height: 44px;
+}
+.min-w-0 {
+  min-width: 0;
+}
+.flex-1 {
+  flex: 1 1 0%;
+}
+.shrink-0 {
+  flex-shrink: 0;
+}
+.justify-end {
+  justify-content: flex-end;
+}
+.gap-3 {
+  gap: 12px;
+}
+.px-3 {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.py-1 {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.block {
+  display: block;
+}
+.hidden {
+  display: none;
+}
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.text-left {
+  text-align: left;
+}
+.text-center {
+  text-align: center;
+}
+[data-testid="attachment-peek"],
+[data-testid="attachment-peek"] * {
+  box-sizing: border-box;
+}
+[data-testid="attachment-state"] {
+  overflow-wrap: anywhere;
+}
 @media (min-width: 640px) {
+  .sm\:inline {
+    display: inline;
+  }
   .sm\:max-w-2xl {
     max-width: 672px;
   }
