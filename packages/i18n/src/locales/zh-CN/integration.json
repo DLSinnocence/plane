@@ -10,7 +10,7 @@
     "disabled": "已停用",
     "get_hooks": "生成 Hook 代码",
     "hook_ready": "两份 Hook 代码已生成。",
-    "hook_requirements": "Gitea 运行环境需要 Python 3 和 Git。",
+    "hook_requirements": "使用官方 Gitea 镜像自带的 sh、Git、curl 和标准工具，无需安装 Python 或 jq。",
     "hook_installation": "分别复制到 Gitea 仓库 设置 → Git 钩子 对应编辑框并保存。",
     "pre_receive_help": "提交前校验工作项编号，校验失败时拒绝推送。",
     "post_receive_help": "推送成功后上报提交，自动关联工作项。",
