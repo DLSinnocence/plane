@@ -4,6 +4,8 @@
  * See the LICENSE file for details.
  */
 
+export { ChatMarkdown } from "./chat-markdown/chat-markdown";
+export type { ChatMarkdownProps, ChatWorkItemReference } from "./chat-markdown/chat-markdown";
 export * from "./avatar";
 export * from "./breadcrumbs";
 export * from "./card";

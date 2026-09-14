@@ -5,5 +5,10 @@ export default defineConfig({
   format: ["esm"],
   dts: true,
   platform: "neutral",
-  exports: true,
+  exports: {
+    customExports: (exports) => ({
+      ...exports,
+      "./styles/chat-markdown.css": "./styles/chat-markdown.css",
+    }),
+  },
 });

@@ -19,6 +19,7 @@ import { logger, loggerMiddleware } from "@plane/logger";
 import { CONTROLLERS } from "@/controllers";
 // env
 import { env } from "@/env";
+import { omitAiRequestLogs, sanitizeAiBodyErrors } from "@/lib/ai-logging";
 // hocuspocus server
 import { HocusPocusServerManager } from "@/hocuspocus";
 // redis
@@ -60,10 +61,13 @@ export class Server {
     // Middleware for response compression
     this.app.use(compression({ level: env.COMPRESSION_LEVEL, threshold: env.COMPRESSION_THRESHOLD }));
     // Logging middleware
-    this.app.use(loggerMiddleware);
+    this.app.use(omitAiRequestLogs(loggerMiddleware, env.LIVE_BASE_PATH));
+    // Chat requests can contain up to 60k Unicode characters of in-memory history.
+    this.app.use(`${env.LIVE_BASE_PATH.replace(/\/$/, "")}/ai/chat`, express.json({ limit: "256kb" }));
     // Body parsing middleware
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));
+    this.app.use(sanitizeAiBodyErrors(env.LIVE_BASE_PATH));
     // cors middleware
     this.setupCors();
   }

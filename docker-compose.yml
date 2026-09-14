@@ -45,6 +45,9 @@ services:
     command: ./bin/docker-entrypoint-api.sh
     env_file:
       - ./apps/api/.env
+    environment:
+      LIVE_BASE_URL: http://live:3000
+      LIVE_BASE_PATH: /live
     depends_on:
       - plane-db
       - plane-redis
@@ -104,6 +107,16 @@ services:
       args:
         DOCKER_BUILDKIT: 1
     restart: always
+    env_file:
+      - ./apps/live/.env
+    environment:
+      PORT: "3000"
+      API_BASE_URL: http://api:8000
+      REDIS_URL: redis://plane-redis:6379/
+      LIVE_BASE_PATH: /live
+    depends_on:
+      - api
+      - plane-redis
 
   plane-db:
     container_name: plane-db

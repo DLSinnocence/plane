@@ -69,6 +69,14 @@ RUN apk del go 2>/dev/null || true
 # package at a time.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
+# Bundle MCP at build time; agent turns never download or install executables.
+RUN apk add --no-cache python3 py3-pip libstdc++ libffi openssl \
+    && apk add --no-cache --virtual .mcp-build-deps build-base python3-dev libffi-dev openssl-dev cargo \
+    && python3 -m venv /opt/plane-mcp \
+    && /opt/plane-mcp/bin/pip install --no-cache-dir plane-mcp-server==0.3.2 \
+    && apk del .mcp-build-deps
+ENV PLANE_MCP_COMMAND="/opt/plane-mcp/bin/plane-mcp-server"
+
 COPY --from=installer /app/packages ./packages
 COPY --from=installer /app/apps/live/dist ./apps/live/dist
 COPY --from=installer /app/apps/live/node_modules ./apps/live/node_modules

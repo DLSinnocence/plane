@@ -16,13 +16,16 @@ import {
 import attachmentMessages from "../../../../../packages/i18n/src/locales/en/common.json";
 import chineseAttachmentMessages from "../../../../../packages/i18n/src/locales/zh-CN/common.json";
 import { authFixtureEnabled, invitationAuthState } from "./invitation-auth-state";
+import { aiFixtureEnabled, aiFixtureState } from "./ai-state";
+import aiMessages from "../../../../../packages/i18n/src/locales/en/settings.json";
 import { workflowStates } from "./stage-data";
 
 export const users = {
   developer: { id: "developer", display_name: "Developer", first_name: "Dev", last_name: "", avatar_url: "" },
   reviewer: { id: "reviewer", display_name: "Reviewer", first_name: "Review", last_name: "", avatar_url: "" },
 };
-export const useUser = () => (authFixtureEnabled() ? invitationAuthState : { data: users.developer });
+export const useUser = () =>
+  aiFixtureEnabled() ? aiFixtureState.user : authFixtureEnabled() ? invitationAuthState : { data: users.developer };
 export const useUserProfile = () => ({
   data: authFixtureEnabled() ? invitationAuthState.profile : { start_of_the_week: 1 },
 });
@@ -106,13 +109,17 @@ export default function Link({ href, children, ...props }: React.AnchorHTMLAttri
 }
 export const useTranslation = () => ({
   t: (key: string, values?: Record<string, unknown>) =>
-    key === "attachment.slots.default_name"
-      ? chineseAttachmentMessages.attachment.slots.default_name
-      : key === "attachment.slots.delete_slot_help"
-        ? attachmentMessages.attachment.slots.delete_slot_help.replace("{name}", String(values?.name ?? ""))
-        : key === "attachment.selection_details"
-          ? `${key}: size=${values?.size}; limit=${values?.limit}; reason=${values?.reason}`
-          : key,
+    aiFixtureEnabled() && key.startsWith("account_settings.ai.")
+      ? (aiMessages.account_settings.ai[
+          key.slice("account_settings.ai.".length) as keyof typeof aiMessages.account_settings.ai
+        ] ?? key)
+      : key === "attachment.slots.default_name"
+        ? chineseAttachmentMessages.attachment.slots.default_name
+        : key === "attachment.slots.delete_slot_help"
+          ? attachmentMessages.attachment.slots.delete_slot_help.replace("{name}", String(values?.name ?? ""))
+          : key === "attachment.selection_details"
+            ? `${key}: size=${values?.size}; limit=${values?.limit}; reason=${values?.reason}`
+            : key,
 });
 export const StateOption = ({ option }: { option: { value: string; content: React.ReactNode } }) => (
   <Combobox.Option value={option.value}>{option.content}</Combobox.Option>

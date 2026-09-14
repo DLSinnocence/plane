@@ -9,7 +9,10 @@ from plane.app.views import UnsplashEndpoint
 from plane.app.views import GPTIntegrationEndpoint, WorkspaceGPTIntegrationEndpoint
 
 
+from plane.app.views.ai import WorkspaceAgentChatEndpoint
+
 urlpatterns = [
+    path("workspaces/<str:slug>/agent/chat/", WorkspaceAgentChatEndpoint.as_view(), name="workspace-agent-chat"),
     path("unsplash/", UnsplashEndpoint.as_view(), name="unsplash"),
     path(
         "workspaces/<str:slug>/projects/<uuid:project_id>/ai-assistant/",

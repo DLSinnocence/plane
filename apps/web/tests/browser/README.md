@@ -37,6 +37,14 @@ The login form is explicitly labelled **Simulated session login**. It only updat
 
 Coverage includes exact encoded `next_path` with token and project ID, no invitation detail GET before login, returning after simulated login/signup, direct new-user acceptance without forced workspace creation, exact acceptance POST body and target navigation, workspace/settings refresh after acceptance, malformed/missing/expired links, wrong-email refusal, and 401 during acceptance preserving the invitation return URL. Every case asserts there are no browser `pageerror` events. These checks establish the client-side flow with a simulated session, **not full live SSO verification**.
 
+## AI assistant regressions
+
+Run `pnpm --filter web test:browser ai-assistant.spec.ts --workers=1`.
+
+The `/?ai-assistant` fixture mounts the production `AIAssistant` and `AIProfileSettings` components with the actual Headless UI portal dialog, Markdown renderer, fetch service, and NDJSON parser. User and command-palette hooks use deterministic fixture stores; settings and CSRF HTTP responses are intercepted. A controlled `ReadableStream` substitutes only the chat HTTP response so tests can assert intermediate text, tool status updates, and AbortSignal handling before completion. English AI labels come from the actual locale JSON. No real credentials, model calls, authentication, or workspace writes occur.
+
+Coverage includes visible AI text, configure-modal options, password clearing and blank-key omission, CSRF headers, successful user/assistant history, raw-HTML suppression, no browser storage persistence, incremental canonical NDJSON events (`text.text` and tool status `running`/`complete`/`error`), cancellation and explicit-clear recovery, sanitized error messages, Escape/focus restoration, and aborts on close, workspace navigation, and user changes. `test-results/ai-assistant-fixture.png` captures the actual dialog with fixture layout utilities; it is not a full application CSS comparison.
+
 ## Actual login-language regressions
 
 `auth-language.spec.ts` uses a second local Vite fixture configured by `language.vite.config.ts`. It loads the real `AuthBase`, login/signup forms, OAuth controls, i18next singleton, `TranslationProvider`, and locale JSON resources. Translations are not mocked in this fixture. Instance configuration and email-check/CSRF responses are synthetic; no real authentication or mail is performed.

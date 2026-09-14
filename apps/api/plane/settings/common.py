@@ -415,6 +415,19 @@ if LIVE_BASE_URL and not is_valid_url(LIVE_BASE_URL):
 LIVE_BASE_PATH = os.environ.get("LIVE_BASE_PATH", "/live/")
 
 LIVE_URL = urljoin(LIVE_BASE_URL, LIVE_BASE_PATH) if LIVE_BASE_URL else None
+LIVE_SERVER_SECRET_KEY = os.environ.get("LIVE_SERVER_SECRET_KEY", "")
+
+# Explicitly trusted origins for user-configured models. Operators may add an
+# internal gateway; arbitrary users cannot route server requests to private hosts.
+AI_MODEL_ALLOWED_ORIGINS = {
+    origin.strip().rstrip("/")
+    for origin in os.environ.get(
+        "AI_MODEL_ALLOWED_ORIGINS",
+        "https://api.openai.com,https://api.anthropic.com,https://api.deepseek.com,"
+        "https://openrouter.ai,https://api.siliconflow.cn,https://api.siliconflow.com",
+    ).split(",")
+    if origin.strip()
+}
 
 # WEB URL
 WEB_URL = os.environ.get("WEB_URL")

@@ -1,0 +1,197 @@
+.chat-markdown {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-color-primary, inherit);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+.chat-markdown :where(p, ul, ol, blockquote, pre, table, details, hr, .chat-markdown-code, .chat-markdown-table) {
+  margin-block: 0.75em;
+}
+.chat-markdown :where(h1, h2, h3, h4, h5, h6) {
+  margin-block: 1em 0.4em;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.chat-markdown h1 {
+  font-size: 1.4em;
+}
+.chat-markdown h2 {
+  font-size: 1.25em;
+}
+.chat-markdown h3 {
+  font-size: 1.1em;
+}
+.chat-markdown :where(ul, ol) {
+  padding-inline-start: 1.5em;
+}
+.chat-markdown ul {
+  list-style: disc;
+}
+.chat-markdown ol {
+  list-style: decimal;
+}
+.chat-markdown li > :where(ul, ol, p) {
+  margin-block: 0.25em;
+}
+.chat-markdown .task-list-item {
+  list-style: none;
+}
+.chat-markdown input[type="checkbox"] {
+  margin-inline: -1.25em 0.4em;
+  accent-color: var(--text-color-accent-primary);
+}
+.chat-markdown a {
+  color: var(--text-color-accent-primary, #3b6ad8);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-markdown :where(a, button, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--text-color-accent-primary, #3b6ad8);
+  outline-offset: 3px;
+}
+.chat-markdown blockquote {
+  border-inline-start: 3px solid var(--border-color-strong, #b4b8c0);
+  padding-inline-start: 1em;
+  color: var(--text-color-secondary, inherit);
+}
+.chat-markdown :where(code, kbd, pre) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+.chat-markdown :where(code, kbd) {
+  background: var(--background-color-layer-1, #88888815);
+  border-radius: 4px;
+  padding: 0.15em 0.3em;
+}
+.chat-markdown kbd {
+  border: 1px solid var(--border-color-subtle, #88888840);
+}
+.chat-markdown .chat-markdown-code {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border-color-subtle, #88888840);
+  border-radius: 8px;
+  background: var(--background-color-layer-1, #88888815);
+}
+.chat-markdown-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75em;
+  padding: 0.4em 0.75em;
+  border-bottom: 1px solid var(--border-color-subtle, #88888840);
+  color: var(--text-color-secondary, inherit);
+  font-size: 0.85em;
+}
+.chat-markdown-code-header > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-markdown-code-header button {
+  flex-shrink: 0;
+}
+.chat-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 0.9em 1em;
+  margin: 0;
+  white-space: pre;
+  overflow-wrap: normal;
+  line-height: 1.6;
+}
+.chat-markdown pre code {
+  padding: 0;
+  background: transparent;
+  font-size: inherit;
+}
+.chat-markdown .chat-markdown-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.chat-markdown table {
+  border-collapse: collapse;
+  min-width: 100%;
+  margin: 0;
+  font-size: 0.95em;
+}
+.chat-markdown :where(th, td) {
+  border: 1px solid var(--border-color-subtle, #88888840);
+  padding: 0.5em 0.75em;
+  min-width: 7em;
+}
+.chat-markdown th {
+  font-weight: 600;
+  background: var(--background-color-layer-1, #88888815);
+}
+.chat-markdown img {
+  display: block;
+  max-width: 100%;
+  max-height: 24rem;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 6px;
+  margin-block: 0.75em;
+}
+.chat-markdown summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.chat-markdown details {
+  border: 1px solid var(--border-color-subtle, #88888840);
+  border-radius: 6px;
+  padding: 0.5em 0.75em;
+}
+.chat-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--border-color-subtle, #88888840);
+}
+.chat-markdown mark {
+  background: #facc1540;
+  color: inherit;
+}
+.chat-markdown .hljs-comment,
+.chat-markdown .hljs-quote {
+  color: var(--text-color-tertiary, #737b88);
+  font-style: italic;
+}
+.chat-markdown .hljs-keyword,
+.chat-markdown .hljs-selector-tag,
+.chat-markdown .hljs-literal {
+  color: var(--text-color-accent-primary, #3b6ad8);
+  font-weight: 600;
+}
+.chat-markdown .hljs-string,
+.chat-markdown .hljs-regexp,
+.chat-markdown .hljs-addition {
+  color: var(--text-color-success-primary, #198754);
+}
+.chat-markdown .hljs-number,
+.chat-markdown .hljs-attr,
+.chat-markdown .hljs-title,
+.chat-markdown .hljs-built_in {
+  color: var(--text-color-warning-primary, #a06512);
+}
+.chat-markdown .hljs-deletion {
+  color: var(--text-color-danger-primary, #cf4141);
+}
+.chat-markdown-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

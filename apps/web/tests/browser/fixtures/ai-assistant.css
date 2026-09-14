@@ -1,0 +1,90 @@
+@import "@plane/ui/styles/chat-markdown.css";
+@import "../../../styles/agent-chat.css";
+
+/* Missing layout utilities for this isolated component fixture; production markup is unchanged. */
+body.ai-fixture-page {
+  min-height: 100vh;
+}
+.ai-fixture-page * {
+  box-sizing: border-box;
+}
+.ai-fixture-page .ai-fixture-shell {
+  margin: 32px auto;
+  max-width: 1000px;
+  padding: 24px;
+}
+.ai-fixture-page header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ai-fixture-page h1 {
+  font-size: 22px;
+}
+.ai-fixture-page .flex-col {
+  flex-direction: column;
+}
+.ai-fixture-page .flex-wrap {
+  flex-wrap: wrap;
+}
+.ai-fixture-page .max-w-2xl {
+  max-width: 672px;
+}
+.ai-fixture-page .gap-4 {
+  gap: 16px;
+}
+.ai-fixture-page .gap-5 {
+  gap: 20px;
+}
+.ai-fixture-page .p-4 {
+  padding: 16px;
+}
+.ai-fixture-page .p-5 {
+  padding: 20px;
+}
+.ai-fixture-page .p-6 {
+  padding: 24px;
+}
+.ai-fixture-page .rounded-xl {
+  border-radius: 12px;
+}
+.ai-fixture-page .max-h-\[85vh\] {
+  max-height: 85vh;
+}
+.ai-fixture-page .min-h-24 {
+  min-height: 96px;
+}
+.ai-fixture-page .min-h-20 {
+  min-height: 80px;
+}
+.ai-fixture-page .bg-black\/30 {
+  background: #0008;
+}
+.ai-fixture-page [role="dialog"] {
+  z-index: 100;
+}
+.ai-fixture-page [role="dialog"] h2 {
+  margin: 0;
+}
+.ai-fixture-page [role="dialog"] p {
+  margin: 8px 0;
+}
+.ai-fixture-page textarea,
+.ai-fixture-page select {
+  font: inherit;
+  padding: 12px;
+  background: #292929;
+  color: #eee;
+  border: 1px solid #666;
+  border-radius: 4px;
+}
+.ai-fixture-page button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ai-fixture-page [role="alert"] {
+  color: #ffb4b4;
+}
+.ai-fixture-page .prose {
+  line-height: 1.6;
+}

@@ -14,6 +14,7 @@ const path = (relative: string) => fileURLToPath(new URL(relative, import.meta.u
 
 export default defineConfig({
   root: path("./fixtures/"),
+  cacheDir: path("../../node_modules/.vite-browser-components"),
   define: { "process.env": JSON.stringify({ NODE_ENV: "test" }) },
   plugins: [
     {
@@ -66,6 +67,7 @@ export default defineConfig({
       { find: /^(?:.*\/)?archive-issue-modal$/, replacement: path("./fixtures/work-item-modals.tsx") },
       { find: /^(?:.*\/)?delete-issue-modal$/, replacement: path("./fixtures/work-item-modals.tsx") },
       { find: /^(?:.*\/)?issue-modal\/modal$/, replacement: path("./fixtures/work-item-modals.tsx") },
+      { find: "@/hooks/store/use-command-palette", replacement: path("./fixtures/ai-state.ts") },
       { find: "@/hooks/store/use-issues", replacement: path("./fixtures/mocks.tsx") },
       { find: "@/hooks/store/use-issue-detail", replacement: path("./fixtures/attachment-state.ts") },
       { find: "@/hooks/use-file-size", replacement: path("./fixtures/attachment-state.ts") },
@@ -83,6 +85,10 @@ export default defineConfig({
       { find: "next/navigation", replacement: path("./fixtures/mocks.tsx") },
       { find: "next/link", replacement: path("./fixtures/mocks.tsx") },
       { find: "@plane/i18n", replacement: path("./fixtures/mocks.tsx") },
+      {
+        find: "@plane/ui/styles/chat-markdown.css",
+        replacement: path("../../../../packages/ui/styles/chat-markdown.css"),
+      },
       { find: "@plane/ui", replacement: path("./fixtures/ui.tsx") },
       { find: "@", replacement: path("../../core") },
     ],

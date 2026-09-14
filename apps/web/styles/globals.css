@@ -1,8 +1,10 @@
 @import "@plane/tailwind-config/index.css";
 @import "@plane/editor/styles";
+@import "@plane/ui/styles/chat-markdown.css";
 @import "@plane/propel/styles/react-day-picker.css";
 @import "./power-k.css";
 @import "./emoji.css";
+@import "./agent-chat.css";
 @plugin "@tailwindcss/typography";
 
 /* stickies and editor colors

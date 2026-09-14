@@ -5,6 +5,7 @@
  */
 
 import type React from "react";
+import { Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { KeyOutline, LockOutline, SettingsOutline, SubscribeOutline, UserOutline } from "@makeplane/propel/icons";
 import { observer } from "mobx-react";
@@ -23,6 +24,7 @@ import { SettingsSidebarItem } from "../../sidebar/item";
 import { ProfileSettingsSidebarWorkspaceOptions } from "./workspace-options";
 
 const ICONS: Record<TProfileSettingsTabs, LucideIcon | React.FC<ISvgIcons>> = {
+  ai: Sparkles,
   general: UserOutline,
   security: LockOutline,
   preferences: SettingsOutline,

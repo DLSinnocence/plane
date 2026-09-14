@@ -91,7 +91,11 @@ class APITokenLogMiddleware:
     def __call__(self, request):
         # Gitea setup and hook downloads carry workspace credentials; omit both
         # request and response, even for malformed input or a supplied API key.
-        if "/integrations/gitea/" in request.path_info:
+        if (
+            "/integrations/gitea/" in request.path_info
+            or request.path_info.rstrip("/") == "/api/users/me/ai-settings"
+            or re.fullmatch(r"/api/workspaces/[^/]+/agent/chat/?", request.path_info)
+        ):
             return self.get_response(request)
         request_body = request.body
         response = self.get_response(request)
@@ -135,7 +139,11 @@ class APITokenLogMiddleware:
         return str(redacted)
 
     def process_request(self, request, response, request_body):
-        if "/integrations/gitea/" in request.path_info:
+        if (
+            "/integrations/gitea/" in request.path_info
+            or request.path_info.rstrip("/") == "/api/users/me/ai-settings"
+            or re.fullmatch(r"/api/workspaces/[^/]+/agent/chat/?", request.path_info)
+        ):
             return None
         api_key_header = "X-Api-Key"
         api_key = request.headers.get(api_key_header)

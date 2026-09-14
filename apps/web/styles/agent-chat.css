@@ -1,0 +1,80 @@
+/* Keep rich Agent output inside the dialog, including narrow screens. */
+.agent-chat-panel {
+  min-width: 0;
+  max-height: min(90dvh, 960px);
+  overflow: hidden;
+}
+.agent-conversation {
+  min-width: 0;
+  min-height: 80px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+}
+.agent-chat-message,
+.agent-message-content,
+.agent-tool-detail,
+.agent-semantic-block {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.agent-tool-payload {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.agent-semantic-block > div {
+  max-height: 320px;
+  overflow: auto;
+}
+.agent-tool-detail > div {
+  min-width: 0;
+}
+.agent-tool-detail summary:focus-visible,
+.agent-semantic-block summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+.agent-chat-composer textarea {
+  min-height: 80px;
+  max-height: 160px;
+}
+.agent-chat-error {
+  max-height: 20dvh;
+  overflow: auto;
+  flex-shrink: 0;
+}
+@media (max-width: 480px) {
+  .agent-chat-panel {
+    padding: 12px;
+    gap: 10px;
+  }
+  .agent-chat-composer textarea {
+    min-height: 64px;
+  }
+}
+@media (max-height: 480px) {
+  .agent-chat-panel {
+    padding: 10px;
+    gap: 6px;
+    max-height: 95dvh;
+  }
+  .agent-chat-description {
+    display: none;
+  }
+  .agent-conversation {
+    min-height: 48px;
+  }
+  .agent-chat-composer {
+    gap: 6px;
+  }
+  .agent-chat-composer textarea {
+    min-height: 48px;
+    max-height: 72px;
+  }
+  .agent-chat-error {
+    max-height: 16dvh;
+  }
+}

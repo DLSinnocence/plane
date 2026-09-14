@@ -18,6 +18,7 @@ import { Tooltip } from "@makeplane/propel/components/tooltip";
 import { AppSidebarItem } from "@/components/sidebar/sidebar-item";
 import { InboxOutline } from "@makeplane/propel/icons";
 import useSWR from "swr";
+import { AIAssistant } from "./ai-assistant";
 import { useWorkspaceNotifications } from "@/hooks/store/notifications";
 
 export const TopNavigationRoot = observer(function TopNavigationRoot() {
@@ -77,6 +78,7 @@ export const TopNavigationRoot = observer(function TopNavigationRoot() {
             }}
           />
         </Tooltip>
+        <AIAssistant />
         <HelpMenuRoot />
         <div className="flex size-8 items-center justify-center rounded-md hover:bg-layer-1-hover">
           <UserMenuRoot />

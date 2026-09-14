@@ -22,6 +22,7 @@ import { GiteaSettings } from "@/components/integration/gitea-settings";
 import { IssueGitCommits } from "@/components/issues/issue-detail/git-commits";
 import { AttachmentSlotsFixture } from "./attachment-slots";
 import { StageAssigneesFixture } from "./stage-assignees";
+import { AIAssistantFixture } from "./ai-assistant";
 import { GitCommitsMenuFixture } from "./git-commits-menu";
 
 function App() {
@@ -120,7 +121,9 @@ function GiteaSettingsFixture() {
 }
 
 createRoot(document.getElementById("root")!).render(
-  new URLSearchParams(window.location.search).has("gitea-settings") ? (
+  new URLSearchParams(window.location.search).has("ai-assistant") ? (
+    <AIAssistantFixture />
+  ) : new URLSearchParams(window.location.search).has("gitea-settings") ? (
     <GiteaSettingsFixture />
   ) : new URLSearchParams(window.location.search).has("git-commits-menu") ? (
     <GitCommitsMenuFixture />

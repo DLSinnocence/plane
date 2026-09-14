@@ -5,13 +5,16 @@
   "description": "UI components shared across multiple apps internally",
   "license": "AGPL-3.0",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "**/*.css"
+  ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./styles/chat-markdown.css": "./styles/chat-markdown.css"
   },
   "scripts": {
     "build": "tsdown",
@@ -20,6 +23,7 @@
     "build-storybook": "storybook build",
     "postcss": "postcss styles/globals.css -o styles/output.css --watch",
     "check:lint": "oxlint --max-warnings=66 .",
+    "test:chat-markdown": "tsx --test src/chat-markdown/chat-markdown.test.ts",
     "check:types": "tsc --noEmit",
     "check:format": "oxfmt --check .",
     "fix:lint": "oxlint --fix .",
@@ -39,10 +43,15 @@
     "@popperjs/core": "catalog:",
     "clsx": "catalog:",
     "lodash-es": "catalog:",
+    "lowlight": "catalog:",
     "lucide-react": "catalog:",
     "react-color": "catalog:",
     "react-day-picker": "catalog:",
+    "react-markdown": "catalog:",
     "react-popper": "catalog:",
+    "rehype-raw": "catalog:",
+    "rehype-sanitize": "catalog:",
+    "remark-gfm": "catalog:",
     "tailwind-merge": "catalog:",
     "use-font-face-observer": "catalog:"
   },
@@ -67,6 +76,7 @@
     "postcss-nested": "catalog:",
     "storybook": "catalog:",
     "tsdown": "catalog:",
+    "tsx": "catalog:",
     "typescript": "catalog:"
   },
   "peerDependencies": {
