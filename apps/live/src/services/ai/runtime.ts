@@ -1,7 +1,7 @@
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentOptions, AgentMessage } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, ImageContent, Model, TextContent } from "@mariozechner/pi-ai";
 import { connectPlaneMcp } from "./mcp";
 import type { AiMcpConnection } from "./mcp";
 import { CE_ACTIONS, createCeTools, createTextRedactor } from "./tools";
@@ -17,7 +17,7 @@ export function createChatModel(config: AiChatInput["model_config"]): Model<Api>
     provider: config.provider,
     baseUrl: config.base_url,
     reasoning: false,
-    input: ["text"],
+    input: config.supports_images ? ["text", "image"] : ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 4096,
@@ -34,12 +34,20 @@ export function createChatModel(config: AiChatInput["model_config"]): Model<Api>
   };
 }
 
+export function userMessageContent(message: AiChatInput["messages"][number]): string | (TextContent | ImageContent)[] {
+  if (!message.images?.length) return message.content;
+  return [
+    ...(message.content ? [{ type: "text" as const, text: message.content }] : []),
+    ...message.images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mime_type })),
+  ];
+}
+
 function historyMessages(input: AiChatInput, model: Model<Api>): AgentMessage[] {
   return input.messages.slice(0, -1).map((message) =>
     message.role === "user"
       ? {
           role: "user",
-          content: message.content,
+          content: userMessageContent(message),
           timestamp: Date.now(),
         }
       : {
@@ -247,7 +255,12 @@ export async function runAiChat(
           outcome.reason = "error";
       });
       control.signal.throwIfAborted();
-      await agent.prompt(input.messages.at(-1)!.content);
+      const latest = input.messages.at(-1)!;
+      if (latest.images?.length) {
+        await agent.prompt({ role: "user", content: userMessageContent(latest), timestamp: Date.now() });
+      } else {
+        await agent.prompt(latest.content);
+      }
     })();
     // abort() is propagated to provider + MCP. This race also bounds a stalled
     // adapter; inactive guards stop any late event from writing to the response.

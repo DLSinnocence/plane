@@ -4,8 +4,10 @@
 
 ## 用户设置
 
-- **OpenAI 兼容**：支持 OpenAI、DeepSeek、OpenRouter 等提供兼容 Chat Completions 接口的服务。填写其 API Base URL、支持工具调用的模型 ID 和 API Key。例如 DeepSeek 可使用 `https://api.deepseek.com/v1`。
-- **Anthropic**：填写 `https://api.anthropic.com`、当前可用的 Claude 模型 ID 和自己的 API Key。
+- **OpenAI 兼容**：支持 OpenAI、DeepSeek、OpenRouter 及任意提供兼容 Chat Completions 接口的自定义网关。填写 API Base URL 和 API Key，例如 `https://api.deepseek.com/v1`，然后点击“获取模型”，按名称或 ID 搜索并选择。Base URL 留空使用 OpenAI 默认地址。
+- **Anthropic**：填写 `https://api.anthropic.com`（或自己的兼容网关）和 API Key，再获取、搜索并选择模型。Base URL 留空使用 Anthropic 默认地址。
+- 获取模型使用 OpenAI 的 `<base>/models` 或 Anthropic 的 `<base>/v1/models`（已有 `/v1` 时不会重复添加）；接口需要提供标准 `data` 模型列表。目录仅用于本次选择，不保存到数据库。
+- 模型列表展示上游明确提供的图像输入和工具调用能力；未提供能力信息时标为未知，可自行开启“启用图像输入”。不要仅根据模型名字推断能力。
 - Key 在服务端加密保存，浏览器读取设置只能获得“是否已配置”。留空表示保留原 Key；修改提供商或 Base URL 时必须重新填写 Key。
 - 设置按登录用户隔离，独立于 God Mode 的实例级 AI 写作配置。
 
@@ -18,6 +20,12 @@
 助手通过官方 Plane MCP 操作当前工作区，沿用当前用户的权限。支持的工具范围由社区版兼容列表限定，包括项目和成员查询、工作项创建/查询/更新、负责人、标签、评论以及基础周期/模块操作。不开放 PQL、商业版专有接口或终端执行工具。
 
 对话只保存在当前页面的内存里。关闭、刷新或切换上下文会清除聊天并停止当前请求；已经完成的 Plane 修改仍然有效。遇到中断，应先检查操作结果，避免重复建单。正常的工作项活动记录和 API 审计仍按 Plane 的现有规则保留。
+
+## 图像识别
+
+选择支持视觉的模型并启用图像输入后，对话框可选择、拖入或粘贴 PNG、JPEG、WebP 图片，发送前可以预览和移除，也可只发图片不输入文字。每张最多 2 MiB，每个对话最多 3 张（含历史图片）。例如上传问题截图后说“根据截图创建一个 Bug”，助手会将图片传给当前用户的模型，再通过 Plane MCP 处理工作项。
+
+图片以真正的多模态图像块发送给模型；后续追问携带此前的图片上下文。图片与聊天记录只保存在本次页面内存中，不上传到 Plane 文件存储，也不写入聊天日志；清空、关闭或切换上下文后移除。模型本身必须支持图像输入及所需的工具调用。
 
 ## Agent 输出渲染
 
@@ -53,13 +61,13 @@
 
 此功能同时修改 **web、api、live**，必须部署三者的自定义构建；只更新网页或继续使用旧的官方 Live 镜像不能启用助手。
 
-1. API 应用迁移 `0133_user_ai_settings`（常规 migrator 会执行）。
+1. API 应用迁移 `0133_user_ai_settings` 和 `0134_user_ai_settings_supports_images`（常规 migrator 会执行）。
 2. 在 API 和 Live 环境中设置相同的随机 `LIVE_SERVER_SECRET_KEY`。
 3. API 的 `LIVE_BASE_URL` 和 `LIVE_BASE_PATH` 指向可从 API 容器访问的 Live 服务。Live 的 `API_BASE_URL` 指向 Plane API 根地址，不包含 `/api/v1`。
 4. 构建并部署 web、api、live；仓库根 `docker-compose.yml` 已接上容器内部地址。Live 镜像在构建阶段安装 `plane-mcp-server==0.3.2`，运行时不下载程序。
 5. 用户保存个人 AI 设置后，从工作区右上角打开 AI。
 
-默认允许 OpenAI、Anthropic、DeepSeek、OpenRouter 和 SiliconFlow 的官方 API origin。使用企业网关或私有模型时，由管理员把完整可信 origin（协议、主机及非默认端口，不带路径）添加到 API 的 `AI_MODEL_ALLOWED_ORIGINS`，然后重启 API。该变量是完整列表，配置时保留仍需使用的其它 origin。
+Base URL 可填写任意 HTTP(S) 模型服务地址，包括企业网关和局域网地址，无需配置域名白名单。模型发现由 API 服务访问，聊天由 Live 服务访问，因此这两个服务都需要能连接所填地址；URL 不能包含内嵌账号密码、查询参数或片段。已移除 `AI_MODEL_ALLOWED_ORIGINS` 配置。
 
 ## 本地开发
 

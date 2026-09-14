@@ -55,6 +55,21 @@ async function request(path: string, method: string, signal: AbortSignal, data?:
   }
   return response;
 }
+export type AIModelOption = {
+  id: string;
+  name: string;
+  vision: boolean | null;
+  tools: boolean | null;
+};
+export type AIModelsInput = Pick<AISettingsInput, "provider" | "base_url" | "api_key">;
+export type AIModelsResponse = { models: AIModelOption[]; truncated: boolean };
+
+export async function fetchAIModels(data: AIModelsInput, signal: AbortSignal): Promise<AIModelsResponse> {
+  const input: AIModelsInput = { provider: data.provider, base_url: data.base_url.trim() };
+  if (data.api_key?.trim()) input.api_key = data.api_key.trim();
+  return (await request("/api/users/me/ai-settings/models/", "POST", signal, input)).json();
+}
+
 export async function getAISettings(signal: AbortSignal): Promise<AISettings> {
   return (await request("/api/users/me/ai-settings/", "GET", signal)).json();
 }

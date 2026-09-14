@@ -30,7 +30,7 @@ def test_default_file_limit_is_one_gib_without_expanding_api_body_buffer(monkeyp
     monkeypatch.delenv("DATA_UPLOAD_MAX_MEMORY_SIZE", raising=False)
     defaults = runpy.run_path(str(Path(common_settings.__file__)))
     assert defaults["FILE_SIZE_LIMIT"] == GIB
-    assert defaults["DATA_UPLOAD_MAX_MEMORY_SIZE"] == 5 * 1024 * 1024
+    assert defaults["DATA_UPLOAD_MAX_MEMORY_SIZE"] == 10 * 1024 * 1024
 
 
 @pytest.mark.parametrize("limit", [GIB, 128 * 1024 * 1024])

@@ -252,6 +252,7 @@ def test_total_turn_deadline_cancels_stalled_upstream_and_revokes_token(stream_b
 @pytest.mark.parametrize(
     "endpoint,method,path,kwargs",
     [
+        (ai.PersonalAIModelsEndpoint, "post", "/api/users/me/ai-settings/models/", {}),
         (ai.PersonalAISettingsEndpoint, "patch", "/api/users/me/ai-settings/", {}),
         (ai.PersonalAISettingsEndpoint, "delete", "/api/users/me/ai-settings/", {}),
         (ai.WorkspaceAgentChatEndpoint, "post", "/api/workspaces/alpha/agent/chat/", {"slug": "alpha"}),
@@ -334,6 +335,8 @@ def test_cleanup_hard_deletes_only_issued_token(monkeypatch):
     [
         "/api/users/me/ai-settings",
         "/api/users/me/ai-settings/",
+        "/api/users/me/ai-settings/models",
+        "/api/users/me/ai-settings/models/",
         "/api/workspaces/team/agent/chat",
         "/api/workspaces/team/agent/chat/",
     ],

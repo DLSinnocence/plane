@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { aiMessageSchema, MAX_CHAT_IMAGES } from "./images";
 
 export const AI_LIMITS = {
   runMs: 120_000,
@@ -10,8 +11,8 @@ export const AI_LIMITS = {
   concurrentRuns: 8,
 } as const;
 
-// Django checks the exact model origin against the administrator's trusted list
-// before forwarding configuration. Browser credentials are never accepted here.
+// Django validates the user's chosen HTTP(S) model endpoint and credentials.
+// This internal endpoint accepts only service-authenticated requests.
 const modelUrl = z
   .string()
   .max(2048)
@@ -30,30 +31,25 @@ export const aiChatSchema = z
       .max(255)
       .regex(/^[a-zA-Z0-9_-]+$/),
     project_id: z.string().uuid().nullable(),
-    messages: z
-      .array(
-        z
-          .object({
-            role: z.enum(["user", "assistant"]),
-            content: z.string().min(1).max(20_000),
-          })
-          .strict()
-      )
-      .min(1)
-      .max(40),
+    messages: z.array(aiMessageSchema).min(1).max(40),
     model_config: z
       .object({
         provider: z.enum(["openai", "anthropic"]),
         base_url: modelUrl,
         model: z.string().trim().min(1).max(255),
         api_key: z.string().min(1).max(4096),
+        supports_images: z.boolean().optional(),
       })
       .strict(),
     plane_api_token: z.string().min(1).max(255),
   })
   .strict()
   .refine((value) => value.messages.at(-1)?.role === "user")
-  .refine((value) => value.messages.reduce((size, message) => size + message.content.length, 0) <= 60_000);
+  .refine((value) => value.messages.reduce((size, message) => size + message.content.length, 0) <= 60_000)
+  .refine(
+    (value) => value.messages.reduce((count, message) => count + (message.images?.length ?? 0), 0) <= MAX_CHAT_IMAGES
+  )
+  .refine((value) => value.model_config.supports_images || !value.messages.some((message) => message.images?.length));
 
 export type AiChatInput = z.infer<typeof aiChatSchema>;
 export type AiDoneReason = "complete" | "error" | "cancelled" | "limit";

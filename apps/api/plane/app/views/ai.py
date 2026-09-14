@@ -17,8 +17,14 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
+from plane.app.parsers import AIChatJSONParser
 from plane.app.permissions import ROLE, allow_permission
-from plane.app.serializers.ai import AISettingsInputSerializer, AgentChatInputSerializer
+from plane.app.serializers.ai import (
+    AIModelsInputSerializer,
+    AISettingsInputSerializer,
+    AgentChatInputSerializer,
+    PROVIDER_BASE_URLS,
+)
 from plane.app.views.base import BaseAPIView
 from plane.db.models import APIToken, ProjectMember, UserAISettings, Workspace
 from plane.utils.ai import (
@@ -28,6 +34,39 @@ from plane.utils.ai import (
     encrypt_model_key,
     validate_model_url,
 )
+
+
+from plane.utils.ai_models import DISCOVERY_ERROR, ModelDiscoveryError, discover_models
+
+
+class PersonalAIModelsEndpoint(BaseAPIView):
+    authentication_classes = [SessionAuthentication]
+
+    def post(self, request):
+        serializer = AIModelsInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        api_key = values.get("api_key", "")
+        if not api_key:
+            config = UserAISettings.objects.filter(user=request.user).first()
+            if (
+                config is None
+                or not config.api_key_encrypted
+                or config.provider != values["provider"]
+                or validate_model_url(config.base_url) != values["base_url"]
+            ):
+                raise ValidationError({"api_key": "Enter an API key for this provider and base URL."})
+            try:
+                api_key = decrypt_model_key(config.api_key_encrypted)
+            except (InvalidToken, ValueError):
+                raise ValidationError({"api_key": "Your saved model key cannot be read. Enter it again."})
+        try:
+            data = discover_models(values["provider"], values["base_url"], api_key)
+            response = Response(data)
+        except ModelDiscoveryError:
+            response = Response({"error": DISCOVERY_ERROR}, status=502)
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 class PersonalAISettingsEndpoint(BaseAPIView):
@@ -48,6 +87,7 @@ class PersonalAISettingsEndpoint(BaseAPIView):
             "base_url": config.base_url,
             "model": config.model,
             "has_api_key": bool(config.api_key_encrypted),
+            "supports_images": config.supports_images,
         }
 
     def patch(self, request):
@@ -56,16 +96,19 @@ class PersonalAISettingsEndpoint(BaseAPIView):
         values = serializer.validated_data
         config = UserAISettings.objects.filter(user=request.user).first() or UserAISettings(user=request.user)
         api_key = values.pop("api_key", "")
+        provider = values.get("provider", config.provider)
+        if values.get("base_url") == "" or ("base_url" not in values and provider != config.provider):
+            values["base_url"] = PROVIDER_BASE_URLS[provider]
         if (
             config.api_key_encrypted
             and not api_key
             and (
                 values.get("provider", config.provider) != config.provider
-                or values.get("base_url", config.base_url) != config.base_url
+                or values.get("base_url", validate_model_url(config.base_url)) != validate_model_url(config.base_url)
             )
         ):
             raise ValidationError({"api_key": "Enter an API key again when changing the provider or base URL."})
-        for field in ("provider", "base_url", "model"):
+        for field in ("provider", "base_url", "model", "supports_images"):
             if field in values:
                 setattr(config, field, values[field])
         validate_model_url(config.base_url)
@@ -180,6 +223,7 @@ async def stream_agent_turn(payload, workspace_id):
 
 class WorkspaceAgentChatEndpoint(BaseAPIView):
     authentication_classes = [SessionAuthentication]
+    parser_classes = [AIChatJSONParser]
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
     def post(self, request, slug):
@@ -192,6 +236,10 @@ class WorkspaceAgentChatEndpoint(BaseAPIView):
         if config is None or not config.api_key_encrypted:
             return Response({"error": "Configure your model in personal AI settings first."}, status=400)
         validate_model_url(config.base_url)
+        if not config.supports_images and any(message.get("images") for message in data["messages"]):
+            return Response(
+                {"error": "Enable image support for your selected model in personal AI settings first."}, status=400
+            )
         project_id = data.get("project_id")
         if (
             project_id
@@ -215,6 +263,7 @@ class WorkspaceAgentChatEndpoint(BaseAPIView):
                 "base_url": config.base_url,
                 "model": config.model,
                 "api_key": model_key,
+                "supports_images": config.supports_images,
             },
         }
         response = StreamingHttpResponse(stream_agent_turn(payload, workspace.id), content_type="application/x-ndjson")

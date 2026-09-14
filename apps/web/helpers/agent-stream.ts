@@ -1,6 +1,7 @@
 /** Copyright (c) 2023-present Plane Software, Inc. and contributors
  * SPDX-License-Identifier: AGPL-3.0-only */
-export type AgentMessage = { role: "user" | "assistant"; content: string };
+export type AgentImage = { data: string; mime_type: "image/png" | "image/jpeg" | "image/webp"; name?: string };
+export type AgentMessage = { role: "user" | "assistant"; content: string; images?: AgentImage[] };
 export type AgentWorkItem = { id: string; projectId: string; identifier?: string; name: string };
 export type AgentToolDetails = {
   input?: string;

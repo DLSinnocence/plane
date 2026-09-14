@@ -31,7 +31,6 @@ def chat_url(workspace):
 
 @pytest.fixture(autouse=True)
 def ai_environment(settings):
-    settings.AI_MODEL_ALLOWED_ORIGINS = ["https://api.openai.com", "https://api.anthropic.com"]
     settings.LIVE_URL = "http://live.internal"
     settings.LIVE_SERVER_SECRET_KEY = "test-internal-secret"
 
@@ -70,6 +69,7 @@ def test_settings_are_owned_by_session_user_even_with_injected_owner(session_cli
         "base_url": "https://api.openai.com/v1",
         "model": "test-model",
         "has_api_key": True,
+        "supports_images": False,
     }
     assert response["Cache-Control"] == "no-store"
     mine = UserAISettings.objects.get(user=create_user)
@@ -124,16 +124,15 @@ def test_first_save_without_key_does_not_create_config(session_client, create_us
     assert not UserAISettings.objects.filter(user=create_user).exists()
 
 
-def test_untrusted_origin_is_rejected_without_replacing_saved_key(session_client, create_user):
+def test_private_gateway_is_accepted_with_explicit_new_key(session_client, create_user):
     config = save_settings(create_user)
-    ciphertext = config.api_key_encrypted
     response = session_client.patch(
-        SETTINGS_URL, {"base_url": "http://169.254.169.254/metadata", "api_key": "new-secret"}, format="json"
+        SETTINGS_URL, {"base_url": "http://10.0.0.1:8000/v1", "api_key": "new-secret"}, format="json"
     )
-    assert response.status_code == 400
+    assert response.status_code == 200
     config.refresh_from_db()
-    assert config.base_url == "https://api.openai.com/v1"
-    assert config.api_key_encrypted == ciphertext
+    assert config.base_url == "http://10.0.0.1:8000/v1"
+    assert decrypt_model_key(config.api_key_encrypted) == "new-secret"
 
 
 def test_delete_only_removes_own_config_and_revokes_own_ai_tokens(session_client, create_user, other_user, workspace):
@@ -153,24 +152,36 @@ def test_delete_only_removes_own_config_and_revokes_own_ai_tokens(session_client
     assert other_ai.is_active and own_regular.is_active
 
 
-@pytest.mark.parametrize("operation", ["get", "patch", "delete", "chat"])
+@pytest.mark.parametrize("operation", ["get", "patch", "delete", "chat", "models"])
 def test_anonymous_and_api_key_only_requests_cannot_use_session_ai_endpoints(
     api_client, api_token, workspace, operation
 ):
-    url = chat_url(workspace) if operation == "chat" else SETTINGS_URL
-    method = "post" if operation == "chat" else operation
+    url = (
+        chat_url(workspace)
+        if operation == "chat"
+        else SETTINGS_URL + "models/"
+        if operation == "models"
+        else SETTINGS_URL
+    )
+    method = "post" if operation in ("chat", "models") else operation
     for headers in ({}, {"HTTP_X_API_KEY": api_token.token}):
         response = getattr(api_client, method)(url, **headers)
         assert response.status_code == 401
 
 
-@pytest.mark.parametrize("operation", ["patch", "delete", "chat"])
+@pytest.mark.parametrize("operation", ["patch", "delete", "chat", "models"])
 def test_real_session_mutations_require_csrf(create_user, workspace, operation):
     save_settings(create_user)
     client = APIClient(enforce_csrf_checks=True)
     client.force_login(create_user)
-    url = chat_url(workspace) if operation == "chat" else SETTINGS_URL
-    method = "post" if operation == "chat" else operation
+    url = (
+        chat_url(workspace)
+        if operation == "chat"
+        else SETTINGS_URL + "models/"
+        if operation == "models"
+        else SETTINGS_URL
+    )
+    method = "post" if operation in ("chat", "models") else operation
     response = getattr(client, method)(url, {}, format="json")
     assert response.status_code == 403
     assert "CSRF" in str(response.data)
@@ -268,7 +279,7 @@ def test_authorized_chat_uses_saved_config_and_session_identity_without_eager_to
     response.close()
 
 
-@pytest.mark.parametrize("problem", ["missing", "unreadable", "origin-disabled"])
+@pytest.mark.parametrize("problem", ["missing", "unreadable", "invalid-url"])
 def test_unusable_saved_settings_prevent_starting_chat(
     session_client, create_user, workspace, problem, settings, monkeypatch
 ):
@@ -278,7 +289,8 @@ def test_unusable_saved_settings_prevent_starting_chat(
             config.api_key_encrypted = "not-a-valid-ciphertext"
             config.save()
         else:
-            settings.AI_MODEL_ALLOWED_ORIGINS = []
+            config.base_url = "https://user:secret@gateway.test"
+            config.save()
     stream = Mock()
     monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
     response = session_client.post(
@@ -316,3 +328,112 @@ def test_temporary_api_token_authentication_rejects_invalid_authority(create_use
         APIKeyAuthentication().authenticate(request)
     token.refresh_from_db()
     assert token.last_used is None
+
+
+@pytest.mark.parametrize(
+    "provider,base,key,allowed",
+    [
+        ("openai", "https://API.OPENAI.COM:443/v1/", "", True),
+        ("openai", "", None, True),
+        ("openai", "http://localhost:11434/v1", "", False),
+        ("openai", "https://api.openai.com/other", None, False),
+        ("anthropic", "https://api.openai.com/v1", "", False),
+        ("openai", "http://10.0.0.1/v1", "explicit-new-key", True),
+    ],
+)
+def test_discovery_saved_key_destination_isolation_without_mutation(
+    session_client, create_user, other_user, monkeypatch, provider, base, key, allowed
+):
+    config = save_settings(create_user)
+    save_settings(other_user, "other-user-key")
+    before = (config.provider, config.base_url, config.api_key_encrypted, config.updated_at)
+    discover = Mock(
+        return_value={"models": [{"id": "custom", "name": "Custom", "vision": None, "tools": None}], "truncated": False}
+    )
+    monkeypatch.setattr("plane.app.views.ai.discover_models", discover)
+    body = {"provider": provider, "base_url": base, "user": str(other_user.id)}
+    if key is not None:
+        body["api_key"] = key
+    response = session_client.post(SETTINGS_URL + "models/", body, format="json")
+    assert response.status_code == (200 if allowed else 400)
+    if allowed:
+        assert discover.call_args.args[2] == (key or "model-secret")
+        assert response["Cache-Control"] == "no-store"
+    else:
+        discover.assert_not_called()
+    config.refresh_from_db()
+    assert (config.provider, config.base_url, config.api_key_encrypted, config.updated_at) == before
+
+
+def test_discovery_does_not_reuse_another_users_key(session_client, create_user, other_user, monkeypatch):
+    save_settings(other_user)
+    discover = Mock()
+    monkeypatch.setattr("plane.app.views.ai.discover_models", discover)
+    response = session_client.post(
+        SETTINGS_URL + "models/", {"provider": "openai", "base_url": "", "user_id": str(other_user.id)}, format="json"
+    )
+    assert response.status_code == 400
+    discover.assert_not_called()
+    assert not UserAISettings.objects.filter(user=create_user).exists()
+
+
+def test_discovery_with_new_key_and_valid_csrf_does_not_save(create_user, monkeypatch):
+    client = APIClient(enforce_csrf_checks=True)
+    client.force_login(create_user)
+    csrf = "a" * 32
+    client.cookies[django_settings.CSRF_COOKIE_NAME] = csrf
+    discover = Mock(
+        return_value={"models": [{"id": "custom", "name": "Custom", "vision": True, "tools": None}], "truncated": False}
+    )
+    monkeypatch.setattr("plane.app.views.ai.discover_models", discover)
+    response = client.post(
+        SETTINGS_URL + "models/",
+        {"provider": "anthropic", "base_url": "", "api_key": "new-key"},
+        format="json",
+        HTTP_X_CSRFTOKEN=csrf,
+    )
+    assert response.status_code == 200
+    discover.assert_called_once_with("anthropic", "https://api.anthropic.com", "new-key")
+    assert not UserAISettings.objects.filter(user=create_user).exists()
+
+
+def test_image_support_settings_and_forwarding(session_client, create_user, workspace, monkeypatch):
+    config = save_settings(create_user)
+    stream = Mock(return_value=iter([]))
+    monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
+    messages = [
+        {
+            "role": "user",
+            "content": "",
+            "images": [{"data": "iVBORw0KGgo=", "mime_type": "image/png", "name": "diagram.png"}],
+        }
+    ]
+    response = session_client.post(chat_url(workspace), {"messages": messages}, format="json")
+    assert response.status_code == 400
+    assert "image support" in response.json()["error"]
+    stream.assert_not_called()
+    response = session_client.patch(
+        SETTINGS_URL, {"supports_images": True, "model": "custom/not-in-catalogue"}, format="json"
+    )
+    assert response.status_code == 200
+    assert response.json()["supports_images"] is True
+    config.refresh_from_db()
+    assert config.supports_images is True
+    assert config.model == "custom/not-in-catalogue"
+    assert session_client.get(SETTINGS_URL).json()["supports_images"] is True
+    response = session_client.post(chat_url(workspace), {"messages": messages}, format="json")
+    assert response.status_code == 200
+    assert stream.call_args.args[0]["messages"] == messages
+    assert stream.call_args.args[0]["model_config"]["supports_images"] is True
+    response.close()
+
+
+@pytest.mark.parametrize(
+    "provider,expected", [("openai", "https://api.openai.com/v1"), ("anthropic", "https://api.anthropic.com")]
+)
+def test_settings_blank_base_uses_provider_default(session_client, provider, expected):
+    response = session_client.patch(
+        SETTINGS_URL, {"provider": provider, "base_url": "", "api_key": "new-key"}, format="json"
+    )
+    assert response.status_code == 200
+    assert response.json()["base_url"] == expected

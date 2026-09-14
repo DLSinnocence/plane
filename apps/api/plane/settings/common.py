@@ -366,7 +366,8 @@ ANALYTICS_BASE_API = os.environ.get("ANALYTICS_BASE_API", False)
 SKIP_ENV_VAR = os.environ.get("SKIP_ENV_VAR", "1") == "1"
 
 # File payloads upload directly to object storage; API requests only carry metadata.
-DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.environ.get("DATA_UPLOAD_MAX_MEMORY_SIZE", 5242880))
+# Three 2 MiB AI images encode to 8 MiB, plus bounded conversation history.
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.environ.get("DATA_UPLOAD_MAX_MEMORY_SIZE", 10 * 1024 * 1024))
 
 # Cookie Settings
 SESSION_COOKIE_SECURE = secure_origins
@@ -416,18 +417,6 @@ LIVE_BASE_PATH = os.environ.get("LIVE_BASE_PATH", "/live/")
 
 LIVE_URL = urljoin(LIVE_BASE_URL, LIVE_BASE_PATH) if LIVE_BASE_URL else None
 LIVE_SERVER_SECRET_KEY = os.environ.get("LIVE_SERVER_SECRET_KEY", "")
-
-# Explicitly trusted origins for user-configured models. Operators may add an
-# internal gateway; arbitrary users cannot route server requests to private hosts.
-AI_MODEL_ALLOWED_ORIGINS = {
-    origin.strip().rstrip("/")
-    for origin in os.environ.get(
-        "AI_MODEL_ALLOWED_ORIGINS",
-        "https://api.openai.com,https://api.anthropic.com,https://api.deepseek.com,"
-        "https://openrouter.ai,https://api.siliconflow.cn,https://api.siliconflow.com",
-    ).split(",")
-    if origin.strip()
-}
 
 # WEB URL
 WEB_URL = os.environ.get("WEB_URL")

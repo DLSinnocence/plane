@@ -93,7 +93,7 @@ class APITokenLogMiddleware:
         # request and response, even for malformed input or a supplied API key.
         if (
             "/integrations/gitea/" in request.path_info
-            or request.path_info.rstrip("/") == "/api/users/me/ai-settings"
+            or request.path_info.rstrip("/") in {"/api/users/me/ai-settings", "/api/users/me/ai-settings/models"}
             or re.fullmatch(r"/api/workspaces/[^/]+/agent/chat/?", request.path_info)
         ):
             return self.get_response(request)
@@ -141,7 +141,7 @@ class APITokenLogMiddleware:
     def process_request(self, request, response, request_body):
         if (
             "/integrations/gitea/" in request.path_info
-            or request.path_info.rstrip("/") == "/api/users/me/ai-settings"
+            or request.path_info.rstrip("/") in {"/api/users/me/ai-settings", "/api/users/me/ai-settings/models"}
             or re.fullmatch(r"/api/workspaces/[^/]+/agent/chat/?", request.path_info)
         ):
             return None

@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "@headlessui/react";
-import { ArrowDown, Sparkles, X } from "lucide-react";
+import { ArrowDown, ImagePlus, Sparkles, X } from "lucide-react";
 import { observer } from "mobx-react";
 import { useParams } from "next/navigation";
 import { useLocation } from "react-router";
@@ -16,7 +16,9 @@ import { readAgentStream } from "@/helpers/agent-stream";
 import { agentAnswerContent } from "@/helpers/agent-content";
 import { agentWorkItemHref, canSendAgentMessage, collectAgentWorkItems, updateAgentTools } from "@/helpers/agent-chat";
 import type { AgentToolProgress } from "@/helpers/agent-chat";
-import type { AgentMessage } from "@/helpers/agent-stream";
+import type { AgentImage, AgentMessage } from "@/helpers/agent-stream";
+import { canAddAgentImages, readAgentImage } from "@/helpers/agent-images";
+import { AgentImagePreviews } from "./agent-image-previews";
 import { AgentMessageContent, useAgentMarkdownLabels } from "./agent-message-content";
 import { AgentToolDetails } from "./agent-tool-details";
 
@@ -51,6 +53,13 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
   const [open, setOpen] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [history, setHistory] = useState<ChatMessage[]>([]);
+  const [supportsImages, setSupportsImages] = useState(false);
+  const [attachments, setAttachments] = useState<AgentImage[]>([]);
+  const [pendingImages, setPendingImages] = useState<AgentImage[]>([]);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const imageController = useRef<AbortController | null>(null);
+  const imagePicker = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState("");
   const [pendingUser, setPendingUser] = useState("");
   const [partial, setPartial] = useState("");
@@ -66,6 +75,12 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
   const conversationContent = useRef<HTMLDivElement | null>(null);
   const followLatest = useRef(true);
   const reset = () => {
+    imageController.current?.abort();
+    imageController.current = null;
+    setAttachments([]);
+    setPendingImages([]);
+    setImageLoading(false);
+    setImageError(null);
     setHistory([]);
     setDraft("");
     setPendingUser("");
@@ -84,7 +99,13 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
     setBusy(false);
     reset();
   };
-  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(
+    () => () => {
+      controller.current?.abort();
+      imageController.current?.abort();
+    },
+    []
+  );
   useEffect(() => {
     if (!open) return;
     const request = new AbortController();
@@ -93,7 +114,10 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
     setError(null);
     void getAISettings(request.signal)
       .then((settings) => {
-        if (!request.signal.aborted) setConfigured(settings.has_api_key);
+        if (!request.signal.aborted) {
+          setConfigured(settings.has_api_key);
+          setSupportsImages(Boolean(settings.supports_images));
+        }
         return settings;
       })
       .catch((requestError: unknown) => {
@@ -134,17 +158,57 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
     [history, tools, workspaceSlug]
   );
 
+  const addImages = async (files: File[]) => {
+    if (!files.length || busy || imageLoading || imageController.current || interrupted) return;
+    setImageError(null);
+    if (!supportsImages) {
+      setImageError(t("account_settings.ai.image_vision_required"));
+      return;
+    }
+    const previous = history.reduce((count, message) => count + (message.images?.length ?? 0), 0);
+    if (!canAddAgentImages(previous + attachments.length, files.length)) {
+      setImageError(t("account_settings.ai.image_limit"));
+      return;
+    }
+    const request = new AbortController();
+    imageController.current = request;
+    setImageLoading(true);
+    try {
+      const images = await Promise.all(files.map((file) => readAgentImage(file, request.signal)));
+      if (!request.signal.aborted) setAttachments((current) => [...current, ...images]);
+    } catch {
+      if (!request.signal.aborted) setImageError(t("account_settings.ai.image_invalid"));
+    } finally {
+      if (imageController.current === request) {
+        imageController.current = null;
+        setImageLoading(false);
+      }
+    }
+  };
+  const sendEnabled = canSendAgentMessage(
+    draft,
+    busy || imageLoading,
+    configured,
+    interrupted,
+    supportsImages ? attachments.length : 0
+  );
   const send = async () => {
-    if (!canSendAgentMessage(draft, busy, configured, interrupted)) return;
+    if (!sendEnabled || imageController.current) return;
     const content = draft.trim();
     const request = new AbortController();
     controller.current = request;
     // UI-only reasoning and tool details are not sent back as model history.
     const messages: AgentMessage[] = history.flatMap((message) => {
       const answer = message.role === "assistant" ? agentAnswerContent(message.content) : message.content;
-      return answer.trim() ? [{ role: message.role, content: answer }] : [];
+      return answer.trim() || message.images?.length
+        ? [{ role: message.role, content: answer, ...(message.images?.length ? { images: message.images } : {}) }]
+        : [];
     });
-    messages.push({ role: "user", content });
+    const sentImages = attachments;
+    messages.push({ role: "user", content, ...(sentImages.length ? { images: sentImages } : {}) });
+    setPendingImages(sentImages);
+    setAttachments([]);
+    setImageError(null);
     setBusy(true);
     setError(null);
     setDraft("");
@@ -182,13 +246,14 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
       if (!agentAnswerContent(text).trim()) throw new Error(t("account_settings.ai.empty_response"));
       setHistory([
         ...history,
-        { id: ++sequence.current, role: "user", content },
+        { id: ++sequence.current, role: "user", content, ...(sentImages.length ? { images: sentImages } : {}) },
         { id: ++sequence.current, role: "assistant", content: text, thinking: modelThinking, tools: turnTools },
       ]);
       setPartial("");
       setThinking("");
       setTools([]);
       setPendingUser("");
+      setPendingImages([]);
     } catch (requestError: unknown) {
       if (controller.current === request) {
         setInterrupted(true);
@@ -275,16 +340,20 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
                             <AgentToolDetails tools={message.tools ?? []} workspaceSlug={workspaceSlug} />
                           </>
                         ) : (
-                          <ChatMarkdown content={message.content} labels={markdownLabels} />
+                          <>
+                            <ChatMarkdown content={message.content} labels={markdownLabels} />
+                            <AgentImagePreviews images={message.images} />
+                          </>
                         )}
                       </div>
                     ))}
-                    {pendingUser && (
+                    {(pendingUser || pendingImages.length > 0) && (
                       <div className="agent-chat-message min-w-0 rounded-lg bg-layer-1 p-3">
                         <p className="mb-1 text-body-xs-medium">
                           {t(interrupted ? "account_settings.ai.interrupted_request" : "account_settings.ai.you")}
                         </p>
                         <ChatMarkdown content={pendingUser} labels={markdownLabels} />
+                        <AgentImagePreviews images={pendingImages} />
                       </div>
                     )}
                     {(partial || thinking || tools.length > 0 || busy) && (
@@ -318,12 +387,50 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
                 )}
                 <form
                   className="agent-chat-composer flex shrink-0 flex-col gap-3"
+                  onDragOver={(event) => {
+                    if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+                  }}
+                  onDrop={(event) => {
+                    if (!event.dataTransfer.files.length) return;
+                    event.preventDefault();
+                    void addImages(Array.from(event.dataTransfer.files));
+                  }}
                   onSubmit={(event) => {
                     event.preventDefault();
                     void send();
                   }}
                 >
+                  <AgentImagePreviews
+                    images={attachments}
+                    onRemove={(index) =>
+                      setAttachments((current) => current.filter((_image, position) => position !== index))
+                    }
+                  />
+                  <input
+                    ref={imagePicker}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    multiple
+                    className="hidden"
+                    aria-label={t("account_settings.ai.image_add")}
+                    disabled={!supportsImages || busy || imageLoading || interrupted}
+                    onChange={(event) => {
+                      const files = Array.from(event.currentTarget.files ?? []);
+                      event.currentTarget.value = "";
+                      void addImages(files);
+                    }}
+                  />
                   <textarea
+                    onPaste={(event) => {
+                      const files = Array.from(event.clipboardData.items)
+                        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+                        .map((item) => item.getAsFile())
+                        .filter((file): file is File => file !== null);
+                      if (files.length) {
+                        event.preventDefault();
+                        void addImages(files);
+                      }
+                    }}
                     className="min-h-24 w-full resize-y rounded border border-subtle bg-surface-1 p-3"
                     aria-label={t("account_settings.ai.message")}
                     aria-describedby={interrupted ? "ai-interrupted-guidance" : undefined}
@@ -332,8 +439,18 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
                     disabled={busy}
                     onChange={(event) => setDraft(event.target.value)}
                   />
+                  {imageLoading && (
+                    <p role="status" className="text-body-xs-regular text-secondary">
+                      {t("account_settings.ai.image_uploading")}
+                    </p>
+                  )}
+                  {imageError && (
+                    <p role="alert" className="text-body-xs-regular text-danger-primary">
+                      {imageError}
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-2">
-                    <Button type="submit" disabled={!canSendAgentMessage(draft, busy, configured, interrupted)}>
+                    <Button type="submit" disabled={!sendEnabled}>
                       {t("account_settings.ai.send")}
                     </Button>
                     {busy && (
@@ -341,6 +458,15 @@ function ScopedAssistant({ workspaceSlug, projectId }: { workspaceSlug: string; 
                         {t("account_settings.ai.cancel")}
                       </Button>
                     )}
+                    <Button
+                      variant="secondary"
+                      onClick={() => imagePicker.current?.click()}
+                      disabled={!supportsImages || busy || imageLoading || interrupted}
+                      title={!supportsImages ? t("account_settings.ai.image_vision_required") : undefined}
+                    >
+                      <ImagePlus className="size-4" />
+                      {t("account_settings.ai.image_add")}
+                    </Button>
                     <Button variant="secondary" disabled={busy} onClick={reset}>
                       {t("account_settings.ai.clear")}
                     </Button>

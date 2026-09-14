@@ -1,3 +1,6 @@
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent, AgentOptions } from "@mariozechner/pi-agent-core";
@@ -100,6 +103,107 @@ describe("ephemeral Pi runtime", () => {
     expect(options.initialState?.systemPrompt).not.toContain("model-secret");
     expect(h.connection.close).toHaveBeenCalledOnce();
     expect(h.agent.reset).toHaveBeenCalledOnce();
+  });
+
+  it("passes user images to Pi and retains prior visual context without leaking image bytes to browser events", async () => {
+    const h = harness();
+    const image = {
+      mime_type: "image/png" as const,
+      name: "screen.png",
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5WQAAAAASUVORK5CYII=",
+    };
+    const request = {
+      ...input,
+      model_config: { ...input.model_config, supports_images: true },
+      messages: [
+        { role: "user" as const, content: "Look at this", images: [image] },
+        { role: "assistant" as const, content: "I see the screen" },
+        { role: "user" as const, content: "", images: [image] },
+      ],
+    };
+    await runAiChat(request, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
+    const options = h.dependencies.createAgent.mock.calls[0][0];
+    expect(options.initialState?.model?.input).toEqual(["text", "image"]);
+    expect(options.initialState?.messages?.[0]).toMatchObject({
+      role: "user",
+      content: [
+        { type: "text", text: "Look at this" },
+        { type: "image", data: image.data, mimeType: "image/png" },
+      ],
+    });
+    expect(h.agent.prompt).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "user", content: [{ type: "image", data: image.data, mimeType: "image/png" }] })
+    );
+    expect(JSON.stringify(h.events)).not.toContain(image.data);
+    expect(createChatModel({ ...input.model_config, provider: "anthropic", supports_images: true }).input).toContain(
+      "image"
+    );
+  });
+
+  it("sends images through the actual OpenAI-compatible provider and streams its answer", async () => {
+    const h = harness();
+    const bodies: { messages: { role: string; content: unknown }[] }[] = [];
+    const server = createServer(async (req, res) => {
+      let body = "";
+      for await (const chunk of req) body += String(chunk);
+      bodies.push(JSON.parse(body));
+      const chunk = {
+        id: "chatcmpl-local",
+        object: "chat.completion.chunk",
+        created: 0,
+        model: "vision-custom",
+        choices: [{ index: 0, delta: { role: "assistant", content: "A red square." }, finish_reason: null }],
+      };
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.end(
+        `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`
+      );
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const image = {
+      mime_type: "image/png" as const,
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5WQAAAAASUVORK5CYII=",
+    };
+    try {
+      await runAiChat(
+        {
+          ...input,
+          model_config: {
+            ...input.model_config,
+            base_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
+            supports_images: true,
+          },
+          messages: [{ role: "user", content: "Describe it", images: [image] }],
+        },
+        "http://api:8000",
+        h.emit,
+        new AbortController().signal,
+        { ...h.dependencies, createAgent: (options) => new Agent(options) }
+      );
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0].messages.find((message) => message.role === "user")?.content).toEqual(
+        expect.arrayContaining([
+          { type: "text", text: "Describe it" },
+          expect.objectContaining({
+            type: "image_url",
+            image_url: expect.objectContaining({ url: `data:image/png;base64,${image.data}` }),
+          }),
+        ])
+      );
+      expect(h.events).toContainEqual({ type: "text", text: "A red square." });
+      expect(h.events.at(-1)).toEqual({ type: "done", reason: "complete" });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
   });
 
   it("reconstructs text-only history without accepting browser tools or system messages", async () => {

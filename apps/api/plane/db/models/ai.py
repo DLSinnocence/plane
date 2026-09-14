@@ -14,6 +14,7 @@ class UserAISettings(models.Model):
     provider = models.CharField(max_length=20, default="openai")
     base_url = models.URLField(max_length=500, default="https://api.openai.com/v1")
     model = models.CharField(max_length=200, default="gpt-4o-mini")
+    supports_images = models.BooleanField(default=False)
     api_key_encrypted = models.TextField(blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 

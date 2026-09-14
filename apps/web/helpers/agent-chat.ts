@@ -67,7 +67,8 @@ export function canSendAgentMessage(
   draft: string,
   busy: boolean,
   configured: boolean | null,
-  interrupted: boolean
+  interrupted: boolean,
+  imageCount = 0
 ): boolean {
-  return Boolean(draft.trim() && !busy && configured && !interrupted);
+  return Boolean((draft.trim() || imageCount > 0) && !busy && configured && !interrupted);
 }

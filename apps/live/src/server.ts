@@ -62,8 +62,8 @@ export class Server {
     this.app.use(compression({ level: env.COMPRESSION_LEVEL, threshold: env.COMPRESSION_THRESHOLD }));
     // Logging middleware
     this.app.use(omitAiRequestLogs(loggerMiddleware, env.LIVE_BASE_PATH));
-    // Chat requests can contain up to 60k Unicode characters of in-memory history.
-    this.app.use(`${env.LIVE_BASE_PATH.replace(/\/$/, "")}/ai/chat`, express.json({ limit: "256kb" }));
+    // Up to three 2 MiB images encoded as base64 plus bounded text history.
+    this.app.use(`${env.LIVE_BASE_PATH.replace(/\/$/, "")}/ai/chat`, express.json({ limit: "10mb" }));
     // Body parsing middleware
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));

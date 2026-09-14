@@ -11,7 +11,7 @@ const hooks = registerHooks({
     return nextResolve(specifier, context);
   },
 });
-const { getAISettings, saveAISettings, disconnectAISettings, startAgentChat } =
+const { getAISettings, saveAISettings, disconnectAISettings, startAgentChat, fetchAIModels } =
   await import("../core/services/agent.service.ts");
 hooks.deregister();
 test("blank keys are omitted and model fields trimmed", () => {
@@ -21,6 +21,51 @@ test("blank keys are omitted and model fields trimmed", () => {
     model: "model",
   });
   assert.equal(buildAISettingsInput("anthropic", "", "model", " new-key ").api_key, "new-key");
+});
+test("image settings preserve explicit true and false without changing legacy inputs", () => {
+  assert.equal(buildAISettingsInput("openai", "", "model", "", true).supports_images, true);
+  assert.equal(buildAISettingsInput("openai", "", "model", "", false).supports_images, false);
+  assert.equal("supports_images" in buildAISettingsInput("openai", "", "model", ""), false);
+});
+test("model discovery posts unsaved destinations with CSRF and preserves capability metadata", async (t) => {
+  const calls = [];
+  const result = {
+    models: [{ id: "opaque-1", name: "Enterprise model", vision: false, tools: null }],
+    truncated: true,
+  };
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    calls.push({ url, ...init });
+    return new Response(JSON.stringify(url.includes("get-csrf-token") ? { csrf_token: "fixture" } : result));
+  });
+  const signal = new AbortController().signal;
+  assert.deepEqual(
+    await fetchAIModels({ provider: "openai", base_url: " http://localhost:8000/v1 ", api_key: "  " }, signal),
+    result
+  );
+  assert.equal(calls[1].url, "/api/users/me/ai-settings/models/");
+  assert.equal(calls[1].method, "POST");
+  assert.equal(calls[1].headers["X-CSRFToken"], "fixture");
+  assert.equal(calls[1].credentials, "include");
+  assert.equal(calls[1].signal, signal);
+  assert.deepEqual(JSON.parse(calls[1].body), { provider: "openai", base_url: "http://localhost:8000/v1" });
+  await fetchAIModels({ provider: "anthropic", base_url: "", api_key: " new-key " }, signal);
+  assert.deepEqual(JSON.parse(calls[3].body), { provider: "anthropic", base_url: "", api_key: "new-key" });
+});
+test("model discovery forwards abort signals and does not retry failures", async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    calls++;
+    if (init.signal.aborted) throw new DOMException("Aborted", "AbortError");
+    return url.includes("get-csrf-token")
+      ? new Response('{"csrf_token":"fixture"}')
+      : new Response('{"detail":"Provider unavailable"}', { status: 502 });
+  });
+  const controller = new AbortController();
+  await assert.rejects(fetchAIModels({ provider: "openai", base_url: "" }, controller.signal), /Provider unavailable/);
+  assert.equal(calls, 2);
+  controller.abort();
+  await assert.rejects(fetchAIModels({ provider: "openai", base_url: "" }, controller.signal), { name: "AbortError" });
+  assert.equal(calls, 3);
 });
 test("settings and chat mutations obtain CSRF and include credentials without retry", async (t) => {
   const calls = [];

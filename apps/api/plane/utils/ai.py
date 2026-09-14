@@ -15,11 +15,14 @@ DEFAULT_AI_SETTINGS = {
     "base_url": "https://api.openai.com/v1",
     "model": "gpt-4o-mini",
     "has_api_key": False,
+    "supports_images": False,
 }
 
 
 def validate_model_url(value):
-    """Only operator-trusted model origins may receive a user's credentials."""
+    """Normalize a user-selected gateway, including local and enterprise origins."""
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValidationError("Enter a valid model API base URL.")
     value = value.strip().rstrip("/")
     try:
         parsed = urlsplit(value)
@@ -31,8 +34,8 @@ def validate_model_url(value):
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
+        or "?" in value
+        or "#" in value
         or "\\" in value
         or any(ord(char) < 33 for char in value)
     ):
@@ -42,11 +45,6 @@ def validate_model_url(value):
         host = f"[{host}]"
     default_port = 443 if parsed.scheme == "https" else 80
     origin = f"{parsed.scheme}://{host}" + (f":{port}" if port and port != default_port else "")
-    if origin not in settings.AI_MODEL_ALLOWED_ORIGINS:
-        raise ValidationError(
-            "This model API origin is not enabled. Ask your instance administrator "
-            "to add it to AI_MODEL_ALLOWED_ORIGINS."
-        )
     return origin + parsed.path.rstrip("/")
 
 

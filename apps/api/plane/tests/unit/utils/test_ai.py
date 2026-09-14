@@ -21,17 +21,15 @@ from plane.utils.ai import (
 pytestmark = pytest.mark.unit
 
 
-@pytest.fixture(autouse=True)
-def allowed_origins(settings):
-    settings.AI_MODEL_ALLOWED_ORIGINS = ["https://api.openai.com", "http://localhost:11434", "https://[::1]:8443"]
-
-
 @pytest.mark.parametrize(
     "value, expected",
     [
         (" https://API.OPENAI.COM:443/v1/ ", "https://api.openai.com/v1"),
         ("http://localhost:11434/v1/", "http://localhost:11434/v1"),
         ("https://[::1]:8443/v1", "https://[::1]:8443/v1"),
+        ("http://127.0.0.1/v1", "http://127.0.0.1/v1"),
+        ("https://enterprise.internal/gateway", "https://enterprise.internal/gateway"),
+        ("http://10.0.0.1:8000/v1", "http://10.0.0.1:8000/v1"),
     ],
 )
 def test_model_origin_canonicalization(value, expected):
@@ -41,12 +39,8 @@ def test_model_origin_canonicalization(value, expected):
 @pytest.mark.parametrize(
     "value",
     [
-        "https://api.openai.com.evil.example/v1",
         "https://api.openai.com@evil.example/v1",
         "https://user:secret@api.openai.com/v1",
-        "https://api.openai.com:8443/v1",
-        "http://api.openai.com/v1",
-        "https://127.0.0.1/v1",
         "file:///etc/passwd",
         "//api.openai.com/v1",
         "https://api.openai.com/v1?api_key=secret",
@@ -60,12 +54,6 @@ def test_model_origin_canonicalization(value, expected):
 def test_model_origin_rejects_untrusted_or_ambiguous_destinations(value):
     with pytest.raises(ValidationError):
         validate_model_url(value)
-
-
-def test_empty_operator_allowlist_fails_closed(settings):
-    settings.AI_MODEL_ALLOWED_ORIGINS = []
-    with pytest.raises(ValidationError):
-        validate_model_url("https://api.openai.com/v1")
 
 
 def test_encryption_round_trip_is_randomized_and_bound_to_secret_key(settings):

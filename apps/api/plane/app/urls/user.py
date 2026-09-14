@@ -21,9 +21,10 @@ from plane.app.views import (
     UserWorkSpacesEndpoint,
 )
 
-from plane.app.views.ai import PersonalAISettingsEndpoint
+from plane.app.views.ai import PersonalAIModelsEndpoint, PersonalAISettingsEndpoint
 
 urlpatterns = [
+    path("users/me/ai-settings/models/", PersonalAIModelsEndpoint.as_view(), name="personal-ai-models"),
     path("users/me/ai-settings/", PersonalAISettingsEndpoint.as_view(), name="personal-ai-settings"),
     # User Profile
     path(

@@ -2,8 +2,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only */
 import { expect, test, type Page } from "@playwright/test";
 
-async function mockSettings(page: Page, configured = true) {
-  let current = { provider: "openai", base_url: "", model: "fixture-model", has_api_key: configured };
+async function mockSettings(page: Page, configured = true, supportsImages = false) {
+  let current = {
+    provider: "openai",
+    base_url: "",
+    model: "fixture-model",
+    has_api_key: configured,
+    supports_images: supportsImages,
+  };
   const mutations: { method: string; body: unknown; csrf: string | undefined }[] = [];
   await page.route("**/auth/get-csrf-token/", (route) => route.fulfill({ json: { csrf_token: "fixture-csrf" } }));
   await page.route("**/api/users/me/ai-settings/", async (route) => {
@@ -11,7 +17,13 @@ async function mockSettings(page: Page, configured = true) {
     if (request.method() === "PATCH") {
       const data = request.postDataJSON();
       mutations.push({ method: "PATCH", body: data, csrf: request.headers()["x-csrftoken"] });
-      current = { provider: data.provider, base_url: data.base_url, model: data.model, has_api_key: true };
+      current = {
+        provider: data.provider,
+        base_url: data.base_url,
+        model: data.model,
+        has_api_key: true,
+        supports_images: data.supports_images ?? false,
+      };
     }
     await route.fulfill({ json: current });
   });
@@ -42,6 +54,11 @@ test.beforeEach(async ({ page }) => {
 
 test("opens real portal dialog and configures personal settings without repopulating the key", async ({ page }) => {
   const mutations = await mockSettings(page, false);
+  await page.route("**/api/users/me/ai-settings/models/", (route) =>
+    route.fulfill({
+      json: { models: [{ id: "fixture-model", name: "fixture-model", vision: null, tools: null }], truncated: false },
+    })
+  );
   await page.goto("/?ai-assistant");
   await expect(page.getByRole("button", { name: "AI assistant", exact: true })).toHaveText("AI");
   await open(page);
@@ -51,13 +68,23 @@ test("opens real portal dialog and configures personal settings without repopula
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByTestId("profile-options")).toContainText('"activeTab":"ai"');
   await page.getByLabel(/^API key/).fill("synthetic-fixture-key");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Fetch models", exact: true }).click();
+  await page.getByRole("button", { name: "Model Select a model", exact: true }).click();
+  await page.getByRole("listbox").getByRole("option").filter({ hasText: "fixture-model" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator("form").getByRole("status")).toHaveText("Settings updated.");
   await expect(page.getByLabel(/^API key/)).toHaveValue("");
   expect(mutations[0]).toEqual({
     method: "PATCH",
     csrf: "fixture-csrf",
-    body: { provider: "openai", base_url: "", model: "fixture-model", api_key: "synthetic-fixture-key" },
+    body: {
+      provider: "openai",
+      base_url: "",
+      model: "fixture-model",
+      api_key: "synthetic-fixture-key",
+      supports_images: false,
+    },
   });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => mutations.length).toBe(2);
@@ -65,6 +92,183 @@ test("opens real portal dialog and configures personal settings without repopula
   await page.getByRole("button", { name: "Close settings" }).click();
   await open(page);
   await expect(page.getByRole("textbox", { name: "Message the assistant" })).toBeVisible();
+});
+
+test("fetches models from an arbitrary gateway and searches by name or ID with capability selection", async ({
+  page,
+}) => {
+  const mutations = await mockSettings(page, false);
+  const discoveries: unknown[] = [];
+  await page.route("**/api/users/me/ai-settings/models/", async (route) => {
+    discoveries.push(route.request().postDataJSON());
+    expect(route.request().headers()["x-csrftoken"]).toBe("fixture-csrf");
+    await route.fulfill({
+      json: {
+        models: [
+          { id: "team-text", name: "Text model", vision: false, tools: true },
+          { id: "my-vision-v2", name: "Screenshot Reader", vision: true, tools: true },
+          { id: "private-model", name: "Unknown capability", vision: null, tools: null },
+        ],
+        truncated: false,
+      },
+    });
+  });
+  await page.goto("/?ai-assistant");
+  await open(page);
+  await page.getByRole("button", { name: "Configure AI", exact: true }).click();
+  await page.getByLabel(/^Base URL/).fill("http://model-gateway.internal:8080/custom/v1");
+  await page.getByLabel(/^API key/).fill("custom-test-key");
+  await expect(page.getByRole("textbox", { name: "Model", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Fetch models", exact: true }).click();
+  await page.getByRole("button", { name: "Model Select a model", exact: true }).click();
+  const search = page.getByRole("combobox", { name: "Search models by name or ID" });
+  await search.fill("VISION-v2");
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(1);
+  await expect(page.getByRole("listbox").getByRole("option")).toContainText("Screenshot Reader");
+  await search.press("ArrowDown");
+  await search.press("Enter");
+  await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeDisabled();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => mutations.length).toBe(1);
+  expect(mutations[0].body).toMatchObject({
+    base_url: "http://model-gateway.internal:8080/custom/v1",
+    model: "my-vision-v2",
+    supports_images: true,
+  });
+  expect(discoveries[0]).toEqual({
+    provider: "openai",
+    base_url: "http://model-gateway.internal:8080/custom/v1",
+    api_key: "custom-test-key",
+  });
+  await page.getByRole("button", { name: "Model Screenshot Reader", exact: true }).click();
+  await search.fill("Unknown");
+  await page.getByRole("listbox").getByRole("option").click();
+  await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeEnabled();
+  await page.getByRole("checkbox", { name: "Enable image input" }).check();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => mutations.length).toBe(2);
+  expect(mutations[1].body).toMatchObject({ model: "private-model", supports_images: true });
+});
+
+test("destination changes invalidate fetched models and ignore obsolete model responses", async ({ page }) => {
+  await mockSettings(page, false);
+  let firstResolve: (() => void) | undefined;
+  let calls = 0;
+  await page.route("**/api/users/me/ai-settings/models/", async (route) => {
+    const id = ++calls;
+    if (id === 1)
+      await new Promise<void>((resolve) => {
+        firstResolve = resolve;
+      });
+    await route
+      .fulfill({
+        json: {
+          models: [
+            {
+              id: id === 1 ? "obsolete-model" : "new-model",
+              name: id === 1 ? "Obsolete" : "Current",
+              vision: null,
+              tools: null,
+            },
+          ],
+          truncated: false,
+        },
+      })
+      .catch(() => undefined);
+  });
+  await page.goto("/?ai-assistant");
+  await open(page);
+  await page.getByRole("button", { name: "Configure AI", exact: true }).click();
+  await page.getByLabel(/^API key/).fill("key");
+  await page.getByRole("button", { name: "Fetch models", exact: true }).click();
+  await expect.poll(() => calls).toBe(1);
+  await page.getByLabel(/^Base URL/).fill("https://different.example/v1");
+  firstResolve?.();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Fetch models", exact: true }).click();
+  await page.getByRole("button", { name: "Model Select a model", exact: true }).click();
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(1);
+  await expect(page.getByRole("listbox").getByRole("option")).toContainText("Current");
+  await expect(page.getByRole("listbox").getByRole("option")).not.toContainText("Obsolete");
+});
+
+const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5WQAAAAASUVORK5CYII=";
+const imageFile = { name: "screen.png", mimeType: "image/png", buffer: Buffer.from(imageData, "base64") };
+
+test("attaches real image data, sends image-only prompts and preserves images for follow-ups without storage", async ({
+  page,
+}) => {
+  await mockSettings(page, true, true);
+  await page.goto("/?ai-assistant");
+  await open(page);
+  const storage = await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }));
+  const picker = page.locator('input[type="file"]');
+  await picker.setInputFiles(imageFile);
+  await expect(page.getByRole("dialog").getByRole("img", { name: "screen.png" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
+  await send(page, "");
+  const request = await page.evaluate(() => window.aiFixture.requests[0].body);
+  expect(request).toEqual({
+    messages: [
+      { role: "user", content: "", images: [{ data: imageData, mime_type: "image/png", name: "screen.png" }] },
+    ],
+    project_id: "fixture-project",
+  });
+  await frames(page, [{ type: "text", text: "I can see the screenshot." }, { type: "done" }]);
+  await expect(page.getByRole("dialog").getByRole("img", { name: "screen.png" })).toBeVisible();
+  await send(page, "Explain the highlighted part");
+  const followup = await page.evaluate(() => window.aiFixture.requests[1].body);
+  expect(followup).toMatchObject({
+    messages: [
+      { role: "user", content: "", images: [{ data: imageData, mime_type: "image/png", name: "screen.png" }] },
+      { role: "assistant", content: "I can see the screenshot." },
+      { role: "user", content: "Explain the highlighted part" },
+    ],
+  });
+  await frames(page, [{ type: "text", text: "The highlight is here." }, { type: "done" }]);
+  expect(await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }))).toEqual(storage);
+  await page.getByRole("button", { name: "Clear chat", exact: true }).click();
+  await expect(page.getByRole("dialog").locator(".agent-image-preview")).toHaveCount(0);
+});
+
+test("image upload rejects invalid files and excessive images and supports paste and removal", async ({ page }) => {
+  await mockSettings(page, true, true);
+  await page.goto("/?ai-assistant");
+  await open(page);
+  const picker = page.locator('input[type="file"]');
+  await picker.setInputFiles({ name: "unsafe.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg/>") });
+  await expect(page.getByRole("alert")).toContainText("Use PNG, JPEG or WebP");
+  await picker.setInputFiles([imageFile, imageFile, imageFile, imageFile]);
+  await expect(page.getByRole("alert")).toContainText("up to 3 images");
+  await picker.setInputFiles({ ...imageFile, buffer: Buffer.alloc(2 * 1024 * 1024 + 1) });
+  await expect(page.getByRole("alert")).toContainText("up to 2 MB");
+  await page.getByRole("textbox", { name: "Message the assistant" }).evaluate((element, base64) => {
+    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    const files = new DataTransfer();
+    files.items.add(new File([bytes], "pasted.png", { type: "image/png" }));
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: files, bubbles: true, cancelable: true }));
+  }, imageData);
+  await expect(page.getByRole("img", { name: "pasted.png" })).toBeVisible();
+  await page.getByRole("button", { name: "Remove image: pasted.png" }).click();
+  await expect(page.getByRole("dialog").locator(".agent-image-preview")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
+  await page.locator(".agent-chat-composer").evaluate((element, base64) => {
+    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    const files = new DataTransfer();
+    files.items.add(new File([bytes], "dropped.png", { type: "image/png" }));
+    element.dispatchEvent(new DragEvent("drop", { dataTransfer: files, bubbles: true, cancelable: true }));
+  }, imageData);
+  await expect(page.getByRole("img", { name: "dropped.png" })).toBeVisible();
+});
+
+test("text-only configuration disables image attachment with an actionable hint", async ({ page }) => {
+  await mockSettings(page, true, false);
+  await page.goto("/?ai-assistant");
+  await open(page);
+  const button = page.getByRole("button", { name: "Attach images", exact: true });
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveAttribute("title", "Enable image input in AI settings to attach images.");
 });
 
 test("streams safe Markdown, updates friendly tool progress and keeps only successful text history", async ({
