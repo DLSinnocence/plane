@@ -4,7 +4,9 @@
  * See the LICENSE file for details.
  */
 
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { EIssueServiceType } from "@plane/types";
+import { EmptyAttachmentActionButton } from "../../attachment/empty-action-button";
 import { observer } from "mobx-react";
 // plane imports
 import { Collapsible } from "@makeplane/propel/components/collapsible";
@@ -27,7 +29,14 @@ type Props = {
 export const AttachmentsCollapsible = observer(function AttachmentsCollapsible(props: Props) {
   const { workspaceSlug, projectId, issueId, disabled = false, issueServiceType } = props;
   // store hooks
-  const { openWidgets, toggleOpenWidget } = useIssueDetail(issueServiceType);
+  const issueDetail = useIssueDetail(issueServiceType);
+  const { openWidgets, toggleOpenWidget, attachment } = issueDetail;
+  const [focusSlotId, setFocusSlotId] = useState<string | null>(null);
+  useEffect(() => {
+    setFocusSlotId(null);
+    if (issueServiceType === EIssueServiceType.ISSUES)
+      void attachment.fetchAttachmentSlots(workspaceSlug, projectId, issueId).catch(() => undefined);
+  }, [attachment, workspaceSlug, projectId, issueId, issueServiceType]);
 
   // derived values
   const isCollapsibleOpen = openWidgets.includes("attachments");
@@ -38,7 +47,18 @@ export const AttachmentsCollapsible = observer(function AttachmentsCollapsible(p
       onOpenChange={() => toggleOpenWidget("attachments")}
       trigger={<IssueAttachmentsCollapsibleTitle issueId={issueId} issueServiceType={issueServiceType} />}
       trailing={
-        isCollapsibleOpen && !disabled ? (
+        !disabled && issueServiceType === EIssueServiceType.ISSUES ? (
+          <EmptyAttachmentActionButton
+            key={issueId}
+            workspaceSlug={workspaceSlug}
+            projectId={projectId}
+            issueId={issueId}
+            onCreated={(id) => {
+              if (!issueDetail.openWidgets.includes("attachments")) toggleOpenWidget("attachments");
+              setFocusSlotId(id);
+            }}
+          />
+        ) : isCollapsibleOpen && !disabled ? (
           <IssueAttachmentActionButton
             workspaceSlug={workspaceSlug}
             projectId={projectId}
@@ -50,6 +70,8 @@ export const AttachmentsCollapsible = observer(function AttachmentsCollapsible(p
       }
     >
       <IssueAttachmentsCollapsibleContent
+        focusSlotId={focusSlotId}
+        onFocusHandled={() => setFocusSlotId(null)}
         workspaceSlug={workspaceSlug}
         projectId={projectId}
         issueId={issueId}

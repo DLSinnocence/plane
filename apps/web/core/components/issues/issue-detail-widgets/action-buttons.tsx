@@ -5,6 +5,8 @@
  */
 
 import React from "react";
+import { EIssueServiceType } from "@plane/types";
+import { AttachmentTemplateLibraryButton } from "../attachment/template-library-button";
 import { AttachOutline, LinkOutline, RelationsOutline, ViewsOutline } from "@makeplane/propel/icons";
 import { useTranslation } from "@plane/i18n";
 // plane imports
@@ -87,6 +89,15 @@ export function IssueDetailWidgetActionButtons(props: Props) {
           }
           disabled={disabled}
           issueServiceType={issueServiceType}
+        />
+      )}
+      {!hideWidgets?.includes("attachments") && issueServiceType === EIssueServiceType.ISSUES && (
+        <AttachmentTemplateLibraryButton
+          key={`${workspaceSlug}:${projectId}:${issueId}`}
+          workspaceSlug={workspaceSlug}
+          projectId={projectId}
+          issueId={issueId}
+          disabled={disabled}
         />
       )}
     </div>

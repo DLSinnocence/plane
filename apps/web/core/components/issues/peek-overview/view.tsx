@@ -99,18 +99,27 @@ export const IssueView = observer(function IssueView(props: IIssueView) {
     ["main-sidebar"]
   );
 
-  const handleKeyDown = () => {
+  const handleKeyDown = (event: KeyboardEvent) => {
+    // Portalled dialogs handle their own dismissal and must retain the underlying peek.
+    if (event.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
     const editorImageFullScreenModalElement = document.querySelector(".editor-image-full-screen-modal");
     const dropdownElement = document.activeElement?.tagName === "INPUT";
     const isAnyDropbarOpen = editorRef.current?.isAnyDropbarOpen();
-    if (!isAnyModalOpen && !dropdownElement && !isAnyDropbarOpen && !editorImageFullScreenModalElement) {
+    if (
+      !isAnyModalOpen &&
+      !isAnyEpicModalOpen &&
+      !isAnyLocalModalOpen &&
+      !dropdownElement &&
+      !isAnyDropbarOpen &&
+      !editorImageFullScreenModalElement
+    ) {
       removeRoutePeekId();
       const issueElement = document.getElementById(`issue-${issueId}`);
       if (issueElement) issueElement?.focus();
     }
   };
 
-  useKeypress("Escape", () => !embedIssue && handleKeyDown());
+  useKeypress("Escape", (event) => !embedIssue && handleKeyDown(event));
 
   const handleRestore = async () => {
     if (!issueOperations.restore) return;

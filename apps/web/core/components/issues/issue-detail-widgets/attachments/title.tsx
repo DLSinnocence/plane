@@ -4,6 +4,7 @@
  * See the LICENSE file for details.
  */
 
+import { countAttachments } from "../../attachment/slot-helpers";
 import React from "react";
 import { observer } from "mobx-react";
 import { useTranslation } from "@plane/i18n";
@@ -23,11 +24,15 @@ export const IssueAttachmentsCollapsibleTitle = observer(function IssueAttachmen
   // store hooks
   const {
     issue: { getIssueById },
+    attachment,
   } = useIssueDetail(issueServiceType);
 
   // derived values
   const issue = getIssueById(issueId);
-  const attachmentCount = issue?.attachment_count ?? 0;
+  const attachmentCount = countAttachments(
+    issue?.attachment_count ?? 0,
+    issueServiceType === EIssueServiceType.ISSUES ? (attachment.getAttachmentSlotsByIssueId(issueId) ?? []) : []
+  );
 
   return (
     <span className="inline-flex items-center gap-2">

@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react";
+import { Paperclip } from "lucide-react";
 import { EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
 import { Button } from "@plane/propel/button";
@@ -17,9 +18,10 @@ import { useUser, useUserPermissions } from "@/hooks/store/user";
 import { getAttachmentUploadErrorKey, getAttachmentUploadErrorDetails } from "@/helpers/attachment-upload";
 import { useFileSize } from "@/hooks/use-file-size";
 import type { TAttachmentHelpers } from "../issue-detail-widgets/attachments/helper";
-import { AttachmentConfirm, AttachmentNameForm } from "./slot-dialogs";
-import { AttachmentTemplateLibrary } from "./template-library";
+import { AttachmentConfirm } from "./slot-dialogs";
 import { validateSlotNames } from "./slot-helpers";
+
+const EMPTY_SLOTS: TIssueAttachmentSlot[] = [];
 
 export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
   workspaceSlug,
@@ -27,22 +29,23 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
   issueId,
   disabled,
   attachmentHelpers,
+  focusSlotId,
+  onFocusHandled,
 }: {
   workspaceSlug: string;
   projectId: string;
   issueId: string;
   disabled: boolean;
   attachmentHelpers: TAttachmentHelpers;
+  focusSlotId?: string | null;
+  onFocusHandled?: () => void;
 }) {
   const { t } = useTranslation();
   const { attachment } = useIssueDetail(EIssueServiceType.ISSUES);
   const { allowPermissions } = useUserPermissions();
-  const canConfigure = allowPermissions(
-    [EUserPermissions.ADMIN, EUserPermissions.MEMBER],
-    EUserPermissionsLevel.WORKSPACE,
-    workspaceSlug
-  );
-  const editable = canConfigure && !disabled;
+  const editable =
+    !disabled &&
+    allowPermissions([EUserPermissions.ADMIN, EUserPermissions.MEMBER], EUserPermissionsLevel.WORKSPACE, workspaceSlug);
   const { data: currentUser } = useUser();
   const isProjectAdmin = allowPermissions(
     [EUserPermissions.ADMIN],
@@ -61,10 +64,11 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
   const [errorFileSize, setErrorFileSize] = useState<number | null>(null);
   const [retry, setRetry] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
-  const [editor, setEditor] = useState<{ id?: string; name: string } | null>(null);
+  const lock = useRef(false);
+  const [editor, setEditor] = useState<{ id: string; name: string; error?: string } | null>(null);
   const [deleting, setDeleting] = useState<{ slot: TIssueAttachmentSlot; file: boolean } | null>(null);
-  const [library, setLibrary] = useState<"browse" | "save" | null>(null);
   const fileInputs = useRef(new Map<string, HTMLInputElement>());
+  const nameInput = useRef<HTMLInputElement>(null);
   const active = useRef(true);
   useEffect(() => {
     active.current = true;
@@ -76,8 +80,6 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
     let cancelled = false;
     setReady(false);
     setError(null);
-    setErrorDetails("");
-    setErrorFileSize(null);
     attachment
       .fetchAttachmentSlots(workspaceSlug, projectId, issueId)
       .then(() => {
@@ -94,32 +96,60 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
       cancelled = true;
     };
   }, [attachment, workspaceSlug, projectId, issueId, retry]);
-  const slots = ready ? (attachment.getAttachmentSlotsByIssueId(issueId) ?? []) : [];
+  const slots = attachment.getAttachmentSlotsByIssueId(issueId) ?? EMPTY_SLOTS;
+  useEffect(() => {
+    if (!focusSlotId || !editable) return;
+    const slot = slots.find((item) => item.id === focusSlotId);
+    if (slot) {
+      setEditor({ id: slot.id, name: slot.name });
+      onFocusHandled?.();
+    }
+  }, [focusSlotId, editable, slots, onFocusHandled]);
+  useEffect(() => {
+    if (editor?.id && busy === null) {
+      nameInput.current?.focus();
+      nameInput.current?.select();
+    }
+  }, [editor?.id, busy]);
+  const saveName = async () => {
+    if (!editor || lock.current || !editable) return;
+    const current = slots.find((slot) => slot.id === editor.id);
+    if (!current) return;
+    const name = editor.name.trim();
+    const validation = validateSlotNames([
+      ...slots.filter((slot) => slot.id !== editor.id).map((slot) => slot.name),
+      name,
+    ]);
+    if (validation) {
+      setEditor({ ...editor, error: `attachment.slots.${validation === "duplicate" ? "duplicate" : "invalid_name"}` });
+      return;
+    }
+    if (name === current.name) {
+      setEditor(null);
+      return;
+    }
+    lock.current = true;
+    setBusy(editor.id);
+    try {
+      await attachment.updateAttachmentSlot(workspaceSlug, projectId, issueId, editor.id, name);
+      if (active.current)
+        setEditor((currentEditor) =>
+          currentEditor?.id === editor.id && currentEditor.name === editor.name ? null : currentEditor
+        );
+    } catch {
+      if (active.current)
+        setEditor((currentEditor) =>
+          currentEditor?.id === editor.id && currentEditor.name === editor.name
+            ? { ...currentEditor, error: "attachment.slots.error" }
+            : currentEditor
+        );
+    } finally {
+      lock.current = false;
+      if (active.current) setBusy(null);
+    }
+  };
   return (
-    <div className="space-y-3 px-3 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h4 className="mr-auto text-13 font-medium">{t("attachment.slots.title")}</h4>
-        {editable && (
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!ready || slots.length >= 50 || busy !== null}
-            onClick={() => setEditor({ name: "" })}
-          >
-            {t("attachment.slots.add")}
-          </Button>
-        )}
-        {canConfigure && (
-          <Button variant="secondary" size="sm" disabled={!ready} onClick={() => setLibrary("browse")}>
-            {t("attachment.slots.library")}
-          </Button>
-        )}
-        {canConfigure && slots.length > 0 && (
-          <Button variant="secondary" size="sm" onClick={() => setLibrary("save")}>
-            {t("attachment.slots.save_template")}
-          </Button>
-        )}
-      </div>
+    <div className="space-y-2 px-3 py-2">
       {!ready && !error && (
         <p role="status" className="text-13 text-tertiary">
           {t("attachment.slots.loading")}
@@ -140,71 +170,84 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
           )}
         </div>
       )}
-      {ready && !slots.length && <p className="text-13 text-tertiary">{t("attachment.slots.empty")}</p>}
-      {slots.length > 0 && <p className="text-13 text-tertiary">{t("attachment.slots.preserve_help")}</p>}
       {slots.map((slot) => (
-        <div key={slot.id} className="space-y-2 rounded-md border border-subtle p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-auto text-13 font-medium break-words">{slot.name}</span>
-            {editable && (
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={busy !== null}
+        <div
+          key={slot.id}
+          data-testid={`attachment-slot-${slot.id}`}
+          className="rounded-md border border-subtle px-3 py-2"
+        >
+          <div className="flex items-center gap-2">
+            <Paperclip className="size-4 shrink-0 text-tertiary" />
+            <div className="min-w-0 flex-1 text-center">
+              {editor?.id === slot.id ? (
+                <>
+                  <input
+                    ref={nameInput}
+                    data-testid={`attachment-slot-name-input-${slot.id}`}
+                    aria-label={t("attachment.slots.name")}
+                    aria-invalid={Boolean(editor.error)}
+                    className="w-full rounded border border-subtle bg-transparent px-2 py-1 text-center text-13"
+                    value={editor.name}
+                    disabled={busy !== null}
+                    onChange={(event) => setEditor({ id: slot.id, name: event.target.value })}
+                    onBlur={() => void saveName()}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setEditor(null);
+                      } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void saveName();
+                      }
+                    }}
+                  />
+                  {editor.error && (
+                    <p role="alert" className="text-13 text-danger-primary">
+                      {t(editor.error)}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  data-testid={`attachment-slot-name-${slot.id}`}
+                  className="w-full text-center text-13 font-medium break-words"
+                  disabled={!editable || busy !== null}
                   onClick={() => setEditor({ id: slot.id, name: slot.name })}
                 >
-                  {t("attachment.slots.rename")}
-                </Button>
+                  {slot.name}
+                </button>
+              )}
+            </div>
+            {editable && (
+              <div className="flex shrink-0 items-center gap-1">
                 <Button
                   variant="secondary"
                   size="sm"
-                  disabled={busy !== null}
-                  onClick={() => setDeleting({ slot, file: false })}
+                  disabled={busy !== null || editor !== null}
+                  onClick={() => fileInputs.current.get(slot.id)?.click()}
                 >
-                  {t("attachment.slots.delete_slot")}
+                  {t(slot.attachment ? "attachment.slots.replace" : "attachment.slots.upload")}
                 </Button>
-              </>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {slot.attachment ? (
-              <>
-                <a
-                  className="mr-auto text-13 break-all text-accent-primary"
-                  href={getFileURL(slot.attachment.asset_url)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download={slot.attachment.attributes.name}
-                >
-                  {slot.attachment.attributes.name} · {t("attachment.slots.download")}
-                </a>
                 {canDeleteFile(slot) && (
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={busy !== null}
+                    disabled={busy !== null || editor !== null}
                     onClick={() => setDeleting({ slot, file: true })}
                   >
                     {t("attachment.slots.delete_file")}
                   </Button>
                 )}
-              </>
-            ) : (
-              <span className="mr-auto text-13 text-tertiary">{t("attachment.slots.empty_slot")}</span>
-            )}
-            {editable && (
-              <div>
                 <Button
                   variant="secondary"
                   size="sm"
-                  disabled={busy !== null}
-                  loading={busy === slot.id}
-                  onClick={() => fileInputs.current.get(slot.id)?.click()}
+                  disabled={busy !== null || editor !== null}
+                  onClick={() => setDeleting({ slot, file: false })}
                 >
-                  {busy === slot.id
-                    ? t("attachment.slots.uploading")
-                    : t(slot.attachment ? "attachment.slots.replace" : "attachment.slots.upload")}
+                  {t("attachment.slots.delete_slot")}
                 </Button>
                 <input
                   ref={(element) => {
@@ -214,11 +257,11 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
                   type="file"
                   aria-label={`${slot.name}: ${t(slot.attachment ? "attachment.slots.replace" : "attachment.slots.upload")}`}
                   className="hidden"
-                  disabled={busy !== null}
+                  disabled={busy !== null || editor !== null}
                   onChange={async (event) => {
                     const file = event.target.files?.[0];
                     event.target.value = "";
-                    if (!file || busy !== null) return;
+                    if (!file || lock.current || editor) return;
                     setErrorFileSize(file.size);
                     setErrorDetails("");
                     if (file.size > maxFileSize) {
@@ -226,6 +269,7 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
                       setErrorDetails("file-too-large");
                       return;
                     }
+                    lock.current = true;
                     setBusy(slot.id);
                     setError(null);
                     try {
@@ -236,6 +280,7 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
                         setErrorDetails(getAttachmentUploadErrorDetails(cause));
                       }
                     } finally {
+                      lock.current = false;
                       if (active.current) setBusy(null);
                     }
                   }}
@@ -243,21 +288,19 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
               </div>
             )}
           </div>
+          {slot.attachment && (
+            <a
+              className="mt-1 block text-center text-11 break-all text-accent-primary"
+              href={getFileURL(slot.attachment.asset_url)}
+              target="_blank"
+              rel="noopener noreferrer"
+              download={slot.attachment.attributes.name}
+            >
+              {slot.attachment.attributes.name} · {t("attachment.slots.download")}
+            </a>
+          )}
         </div>
       ))}
-      {editor && editable && (
-        <AttachmentNameForm
-          title={t(editor.id ? "attachment.slots.rename" : "attachment.slots.add")}
-          initialName={editor.name}
-          onClose={() => setEditor(null)}
-          onSave={async (name) => {
-            if (validateSlotNames([...slots.filter((slot) => slot.id !== editor.id).map((slot) => slot.name), name]))
-              throw new Error("Invalid slot name");
-            if (editor.id) await attachment.updateAttachmentSlot(workspaceSlug, projectId, issueId, editor.id, name);
-            else await attachment.createAttachmentSlot(workspaceSlug, projectId, issueId, name);
-          }}
-        />
-      )}
       {deleting && editable && (!deleting.file || canDeleteFile(deleting.slot)) && (
         <AttachmentConfirm
           title={t(deleting.file ? "attachment.slots.delete_file" : "attachment.slots.delete_slot")}
@@ -272,17 +315,6 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
               await attachment.removeAttachment(workspaceSlug, projectId, issueId, deleting.slot.attachment.id);
             else await attachment.removeAttachmentSlot(workspaceSlug, projectId, issueId, deleting.slot.id);
           }}
-        />
-      )}
-      {library && canConfigure && (
-        <AttachmentTemplateLibrary
-          key={workspaceSlug}
-          workspaceSlug={workspaceSlug}
-          slotNames={slots.map((slot) => slot.name)}
-          canApply={editable && busy === null}
-          saveCurrent={library === "save"}
-          onClose={() => setLibrary(null)}
-          onApply={(id) => attachment.applyAttachmentTemplate(workspaceSlug, projectId, issueId, id)}
         />
       )}
     </div>
