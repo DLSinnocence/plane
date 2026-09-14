@@ -95,6 +95,20 @@
           "message": "Evaluatorii regulii de schimbare a stării nu au putut fi modificați. Te rugăm să încerci din nou."
         }
       }
+    },
+    "state_assignees": {
+      "title": "Owners by stage",
+      "description": "Each stage defaults to the creator. Choose owners for the working stages; backlog, completed, and cancelled stages stay with the creator. Current assignees change automatically with the stage.",
+      "permission_hint": "Only the current state's owners or project managers can change the state.",
+      "configuration_permission_hint": "Only the work item's creator or an administrator can change stage owners.",
+      "creator": "Creator",
+      "unassigned": "Unassigned",
+      "reset": "Set to creator",
+      "reset_label": "{state}: assign to creator",
+      "current": "Current",
+      "loading": "Loading states…",
+      "load_error": "Unable to load states. Please try again.",
+      "retry": "Retry"
     }
   }
 }

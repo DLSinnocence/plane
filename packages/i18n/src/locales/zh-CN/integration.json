@@ -3,7 +3,6 @@
     "description": "校验工作项并关联当前工作区多个代码仓库的 Git 提交。",
     "steps": "启用集成 → 生成 Hook 代码 → 分别复制到 Gitea Git 钩子编辑器",
     "generation_help": "每个工作区生成一次，多仓库复用；代码运行时自动识别仓库，无需填写仓库或 API 地址。",
-    "commit_format": "提交信息中填写真实工作项编号，例如 PROJ-123 或 OTHER-456，系统按当前工作区的真实项目解析编号。",
     "repository": "仓库",
     "reset": "清除脚本",
     "enabled": "已启用",

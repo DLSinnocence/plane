@@ -64,8 +64,6 @@
           "invited_to": "You have been invited to {name}",
           "signin_email": "Sign in or register with {email} to accept this invitation.",
           "signin_invited": "Sign in or register with the email address that was invited to accept this invitation.",
-          "signin": "Sign in to continue",
-          "signup": "Create an account",
           "wrong_email": "You are signed in as {currentEmail}. Sign out and reopen this invitation with {invitedEmail}.",
           "saving": "Saving your response…",
           "accept": "Accept",

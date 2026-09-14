@@ -63,6 +63,33 @@
             "required": "Eine E-Mail-Adresse ist erforderlich.",
             "invalid": "E-Mail ist ungültig"
           }
+        },
+        "invitation_flow": {
+          "created": "Invitations created",
+          "create_failed": "Unable to create invitations",
+          "not_configured": "Invitations created. Email is not configured. Copy the invitation links and share them with your teammates.",
+          "failed": "Invitations created, but email could not be queued. Copy the invitation links to share them.",
+          "queued": "Invitations created and emails queued for delivery.",
+          "pending": "Invitations created. Email dispatch is pending. You can also share the invitation links.",
+          "created_default": "Invitations created. You can copy invitation links from the pending invitations list.",
+          "error_fallback": "Unable to complete the invitation request. Please try again.",
+          "recipient_guidance": "Teammates can register after receiving the link. They must sign in with the invited email before accepting.",
+          "link_copied": "Invitation link copied",
+          "copy_failed": "Unable to copy link",
+          "copy_fallback": "Please select and copy the link below.",
+          "copy_link": "Copy invitation link",
+          "link_for_email": "Invitation link for {email}",
+          "invalid_link": "This invitation link is invalid or no longer active.",
+          "request_new_link": "Ask the workspace administrator for a new invitation link.",
+          "home": "Continue to home",
+          "invited_to": "You have been invited to {name}",
+          "signin_email": "Sign in or register with {email} to accept this invitation.",
+          "signin_invited": "Sign in or register with the email address that was invited to accept this invitation.",
+          "wrong_email": "You are signed in as {currentEmail}. Sign out and reopen this invitation with {invitedEmail}.",
+          "saving": "Saving your response…",
+          "accept": "Accept",
+          "ignore": "Ignore",
+          "continue": "Continue"
         }
       },
       "billing_and_plans": {

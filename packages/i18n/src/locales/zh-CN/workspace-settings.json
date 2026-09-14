@@ -64,8 +64,6 @@
           "invited_to": "您已受邀加入 {name}",
           "signin_email": "请使用 {email} 登录或注册，然后接受此邀请。",
           "signin_invited": "请使用被邀请的邮箱登录或注册，然后接受此邀请。",
-          "signin": "登录以继续",
-          "signup": "创建账户",
           "wrong_email": "您当前使用 {currentEmail} 登录。请退出登录，再使用 {invitedEmail} 重新打开此邀请。",
           "saving": "正在保存您的选择…",
           "accept": "接受邀请",

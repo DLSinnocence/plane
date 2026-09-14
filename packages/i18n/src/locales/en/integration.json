@@ -3,7 +3,6 @@
     "description": "Validate work items and link Git commits across repositories in this workspace.",
     "steps": "Enable the integration → Generate Hook code → Copy into the Gitea Git Hooks editors",
     "generation_help": "Generate once per workspace and reuse across repositories. The code detects the repository at runtime; no repository or API addresses to enter.",
-    "commit_format": "Include real work item identifiers in commit messages, for example PROJ-123 or OTHER-456. Identifiers are resolved against the actual projects in this workspace.",
     "repository": "Repository",
     "reset": "Clear scripts",
     "enabled": "Enabled",
