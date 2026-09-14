@@ -7,15 +7,15 @@
 import { expect, type Page } from "@playwright/test";
 import type { GiteaConfig, GiteaHooks } from "@plane/types";
 
-// Inert transport fixtures; production Python/Git generation is covered by API tests.
+// Inert transport fixtures; production shell/Git generation is covered by API tests.
 export const generatedHooks: GiteaHooks = {
   pre_receive: {
     filename: "pre-receive",
-    content: "#!/usr/bin/env python3\n# pre-receive fixture\nSECRET = 'fixture-hook-secret'\n",
+    content: "#!/bin/sh\n# pre-receive fixture\nSECRET='fixture-hook-secret'\n",
   },
   post_receive: {
     filename: "post-receive",
-    content: "#!/usr/bin/env python3\n# post-receive fixture\nSECRET = 'fixture-hook-secret'\n",
+    content: "#!/bin/sh\n# post-receive fixture\nSECRET='fixture-hook-secret'\n",
   },
 };
 export const config: GiteaConfig = {

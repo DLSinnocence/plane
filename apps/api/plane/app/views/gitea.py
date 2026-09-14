@@ -9,7 +9,8 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.authentication import BaseAuthentication
-from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, Throttled, ValidationError
+from rest_framework.exceptions import AuthenticationFailed, ParseError, PermissionDenied, Throttled, ValidationError
+from rest_framework.parsers import FormParser, JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
@@ -37,6 +38,7 @@ from plane.utils.gitea import (
     normalize_url,
     validate_commits,
 )
+from plane.utils.gitea_hook_payload import HookMultipartParser
 
 
 class StrictInput(serializers.Serializer):
@@ -276,19 +278,40 @@ class WorkspaceBearerAuthentication(BaseAuthentication):
 
 
 class GiteaBearerAPIView(GiteaAPIView):
+    parser_classes = [JSONParser, FormParser, HookMultipartParser]
     authentication_classes = [WorkspaceBearerAuthentication]
     permission_classes = [AllowAny]
     throttle_classes = [GiteaThrottle]
 
+    def shell_request(self):
+        return self.request.content_type.split(";", 1)[0].lower() == "multipart/form-data"
+
     def handle_exception(self, exc):
+        if self.shell_request() and isinstance(exc, (ValidationError, ParseError, GiteaError)):
+            from plane.utils.gitea_hook_payload import shell_error
+
+            return shell_error(exc.reason if isinstance(exc, GiteaError) else exc.detail)
         if isinstance(exc, ValidationError):
             return Response({"valid": False, "errors": exc.detail}, status=400)
         return super().handle_exception(exc)
 
+    def commit_response(self, result, commits, status=200, report=False):
+        if self.shell_request():
+            from plane.utils.gitea_hook_payload import shell_result
+
+            return shell_result(result, commits, report=report)
+        return Response(result, status=status)
+
     def commit_input(self, request, serializer):
-        if len(request.body) > 8 * 1024 * 1024:
-            raise ValidationError({"commits": "Payload exceeds 8 MiB."})
-        data = serializer(data=request.data)
+        if self.shell_request():
+            from plane.utils.gitea_hook_payload import multipart_commits
+
+            payload = multipart_commits(request, report=serializer is ReportInput)
+        else:
+            if len(request.body) > 8 * 1024 * 1024:
+                raise ValidationError({"commits": "Payload exceeds 8 MiB."})
+            payload = request.data
+        data = serializer(data=payload)
         data.is_valid(raise_exception=True)
         return data.validated_data["commits"]
 
@@ -296,7 +319,7 @@ class GiteaBearerAPIView(GiteaAPIView):
 class GiteaValidateEndpoint(GiteaBearerAPIView):
     def post(self, request, slug):
         commits = self.commit_input(request, ValidationInput)
-        return Response(validate_commits(request.gitea_integration.workspace, commits))
+        return self.commit_response(validate_commits(request.gitea_integration.workspace, commits), commits)
 
 
 class GiteaCommitsEndpoint(GiteaBearerAPIView):
@@ -313,7 +336,7 @@ class GiteaCommitsEndpoint(GiteaBearerAPIView):
                 raise AuthenticationFailed("Workspace credentials changed.")
             validation = validate_commits(workspace, commits)
             if not validation["valid"]:
-                return Response(validation, status=400)
+                return self.commit_response(validation, commits, status=400, report=True)
             existing = {
                 c.url: c
                 for c in GiteaCommit.all_objects.filter(workspace=workspace, url__in=[c["url"] for c in commits])
@@ -328,7 +351,7 @@ class GiteaCommitsEndpoint(GiteaBearerAPIView):
                     }
                     validation["valid"] = False
             if not validation["valid"]:
-                return Response(validation, status=400)
+                return self.commit_response(validation, commits, status=400, report=True)
             linked_count = 0
             for payload, row in zip(commits, validation["results"]):
                 commit, _ = GiteaCommit.all_objects.update_or_create(
@@ -346,7 +369,7 @@ class GiteaCommitsEndpoint(GiteaBearerAPIView):
                     defaults={"deleted_at": None},
                 )
                 linked_count += 1
-        return Response({**validation, "linked_count": linked_count})
+        return self.commit_response({**validation, "linked_count": linked_count}, commits, report=True)
 
 
 class GiteaWorkItemEndpoint(GiteaBearerAPIView):

@@ -9,7 +9,7 @@
 3. 点击 **复制 post-receive**，粘贴到同一仓库的 **post-receive** 编辑框并保存。
 4. 同一工作区的其它仓库使用相同两份代码即可，无需手填 API/仓库地址，也无需逐仓库重新生成。
 
-Gitea 运行环境需要 **Python 3 + Git** 并允许自定义 Git Hooks。已有其它自定义钩子逻辑时应保留并串联。
+生成的代码使用 **`/bin/sh`、Git、curl 和 POSIX/BusyBox 标准工具（含 timeout）**，并要求 Gitea 允许自定义 Git Hooks。官方 Gitea Docker 镜像已包含这些工具，无需额外安装 Python 或 jq。已有其它自定义钩子逻辑时应保留并串联。
 
 pre-receive 在接收推送前校验工作项编号；post-receive 在推送成功后自动识别当前仓库并上报提交链接。
 
@@ -37,6 +37,16 @@ Authorization: Bearer <workspace-integration-secret>
 密钥自动生成、加密保存，管理员主动生成钩子时才嵌入返回的脚本。它具有该工作空间的单号查询及提交关联写入权限，不是 Gitea 访问令牌。
 
 旋转密钥后，需要重新生成并替换该工作空间已安装的两份钩子。停用后，旧 pre-receive 会校验失败并拒绝 push；停用前应安排移除或替换钩子。
+
+## 旧 Hook 提示找不到 python3
+
+`env: can't execute 'python3': No such file or directory` 表示旧版 Hook 的 Python 解释器在 **Gitea 容器内**不存在，脚本还没运行到工作项校验；本地开发电脑安装 Python 不会改变远端环境。
+
+更新 Plane API/前端后，在集成页面重新点击 **生成 Hook 代码**，将新的两份完整代码分别替换 Gitea 仓库中的 pre-receive 与 post-receive 并保存，然后重新推送。新代码第一行是 `#!/bin/sh`，不再启动 Python。
+
+必须先更新 Plane API，再替换 Hook，因为新代码使用下面说明的 multipart/纯文本协议；旧的 JSON API 继续兼容，仍装有 Python 的旧 Hook 也可继续使用。不要仅改旧脚本第一行：Python 代码不能直接交给 sh 执行。
+
+如果必须立即恢复旧 Hook，管理员可在现有 **Alpine 官方 Gitea 容器**内临时安装 Python 3，例如 `docker compose exec --user root gitea apk add --no-cache python3`（`gitea` 替换为实际服务名）。容器重建后临时安装会丢失；推荐更新并复制新版 shell Hook。
 
 ## 校验 API
 
@@ -127,6 +137,12 @@ Content-Type: application/json
 
 此接口信任持有工作空间密钥的调用方仅上报已成功推送的提交。它无法仅通过提交 URL 证明远端 push 已发生，也不会调用 Gitea REST 验证。生成的 post-receive 由 Git 在成功推送后触发，负责保证正常接入流程中的调用顺序。
 
+## 生成的 shell Hook 协议
+
+生成的代码调用同样的校验和上报地址，使用 `multipart/form-data`，无需在 Gitea 内拼接或解析 JSON。每个重复 `commits` 文件字段以完整 SHA 为文件名，内容是 `git cat-file commit <SHA>` 输出的原始提交对象；上报时另带 Gitea 站点、所有者、仓库名或显式仓库 URL。Plane 校验原件哈希、提取完整提交说明、作者和时间后复用现有工作项校验与原子关联逻辑。
+
+成功响应为 `text/plain`，依次包含 `PLANE-HOOK-OK`、按请求顺序的全部 SHA、`PLANE-HOOK-END`，上报成功还包含工作项链接。Hook 同时校验 HTTP 状态、首尾标记和每个 SHA，无法把登录 HTML、重定向或不完整响应误当成成功。校验失败返回 HTTP 400、`PLANE-HOOK-ERROR` 和安全的具体原因；旧 JSON API 的行为保持兼容。
+
 ## 双向查询和跳转
 
 Git 调用方查询工作项：
@@ -180,11 +196,11 @@ hooks 响应包含 `pre_receive`、`post_receive` 两个对象，各有 `filenam
 - 在 Gitea **设置 → Git 钩子** 编辑器中分别粘贴两份完整代码并保存。实例需允许自定义 Git Hooks；默认关闭时，管理员需设置 `[security] DISABLE_GIT_HOOKS = false` 并按 Gitea 要求赋予编辑权限。已有自定义逻辑应保留并串联，pre-receive 必须保留任何失败的非零退出状态。
 - pre-receive 从 Git 隔离区读取本次新引入仓库的所有提交；已有历史作为基线。包括新分支、Merge 和指向提交的标签。删除引用不调用校验 API。
 - post-receive 从旧引用和未受本次推送影响的引用恢复基线，避免使用已经更新后的 `--all` 漏掉新提交。
-- 两份钩子按最多 100 条及 512 KiB 编码后大小分批；单条说明最多 64 KiB，每次最多 10,000 个提交、1,000 个更新引用，总处理时间有上限。超限会明确提示，不静默跳过。
-- pre-receive 失败时拒绝 push。post-receive 失败时 push 已成功，不会撤销；终端明确提示关联尚未完整上报，并给出带 `--commits <完整SHA...>` 的重试命令。自动识别成功后，命令也会通过 `PLANE_GITEA_REPOSITORY_URL` 携带公开仓库地址，复制到新的 shell 后仍可重试，不包含工作区密钥。
+- 两份钩子按最多 100 条及 512 KiB 原始提交对象分批；单条提交对象最多 128 KiB、说明最多 64 KiB，每次最多 10,000 个提交、1,000 个更新引用，总处理时间为 120 秒上限。超限会明确提示，不静默跳过。
+- pre-receive 失败时拒绝 push。post-receive 失败时 push 已成功，不会撤销；终端明确提示关联尚未完整上报，并给出带 `sh <hook> --commits <完整SHA...>` 的重试命令。命令会保留经本地检查的 Gitea 仓库环境变量，或 `PLANE_GITEA_REPOSITORY_URL`，复制到新的 shell 后仍可重试，不包含工作区密钥。
 - 正常代码仓库推送自动使用 Gitea 的站点、所有者及仓库名环境变量，不猜测裸仓库的 `origin`。直接调用 Git 或使用自定义 wrapper 时，如果这些变量缺失，需要显式设置 `PLANE_GITEA_REPOSITORY_URL`；缺失或非法信息会明确报错，不会上报虚假的仓库地址。这两份代码用于普通代码仓库。
 - 已成功上报的批次再次发送保持幂等。相同 URL 的冲突内容需要调用方修正，不能当作重试成功。
-- 脚本不跟随 API 重定向、不把密钥交给环境代理，HTTPS 使用系统证书信任链。密钥不写日志、不会出现在重试命令中。
+- 脚本不跟随 API 重定向、不读取 curl 默认配置、不把密钥交给环境代理，HTTPS 使用系统证书信任链。密钥通过私有临时 header 文件传给 curl，不写进 curl 进程参数或日志，也不会出现在重试命令中；临时目录在退出时清理。
 - 不改变工作项状态，不按提交中的 `fixes` / `closes` 自动关闭工作项；本集成不涉及 PR。
 
 ## 部署与验证

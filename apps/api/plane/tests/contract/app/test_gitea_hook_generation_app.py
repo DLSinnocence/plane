@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
+import subprocess
+
 import pytest
 from django.core.cache import cache
 from rest_framework.test import APIClient
@@ -39,12 +41,13 @@ def test_generate_copyable_workspace_hooks_without_repository_input(session_clie
     ):
         hook = response.data[field]
         assert hook["filename"] == name
-        assert hook["content"].startswith("#!/usr/bin/env python3")
+        assert hook["content"].startswith("#!/bin/sh\n")
         assert TOKEN in hook["content"]
         assert (
             f"https://plane.example.test/subpath/api/integrations/gitea/{workspace.slug}/{action}/" in hook["content"]
         )
-        compile(hook["content"], name, "exec")
+        result = subprocess.run(["sh", "-n"], input=hook["content"], text=True, capture_output=True, timeout=5)
+        assert result.returncode == 0, result.stderr
     for variable in ("GITEA_ROOT_URL", "GITEA_REPO_USER_NAME", "GITEA_REPO_NAME"):
         assert variable in response.data["post_receive"]["content"]
     integration.refresh_from_db()

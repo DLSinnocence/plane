@@ -10,7 +10,7 @@
     "disabled": "Disabled",
     "get_hooks": "Generate Hook code",
     "hook_ready": "Both hooks generated.",
-    "hook_requirements": "The Gitea runtime needs Python 3 and Git.",
+    "hook_requirements": "Uses sh, Git, curl and standard tools included in official Gitea images. No Python or jq installation is needed.",
     "hook_installation": "Copy each script into its matching editor under Gitea repository Settings → Git Hooks, then save.",
     "pre_receive_help": "Validates work item identifiers before accepting a push; failed validation rejects it.",
     "post_receive_help": "Reports commits after a successful push to link work items automatically.",
