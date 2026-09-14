@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -35,7 +36,7 @@ class GiteaGeneratedHookTests(unittest.TestCase):
         self.token = "workspace-secret-never-log-this"
         self.report_mode = None
         self.env = {
-            **os.environ,
+            **{key: value for key, value in os.environ.items() if not key.startswith(("GITEA_", "PLANE_GITEA_"))},
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_TERMINAL_PROMPT": "0",
@@ -241,6 +242,122 @@ class GiteaGeneratedHookTests(unittest.TestCase):
         self.post_hook.write_text(hooks["post_receive"]["content"])
         self.post_hook.chmod(0o700)
         return self.post_hook
+
+    def gitea_environment(self, root="https://git.example/", owner="team", name="shared-code"):
+        self.env.update(GITEA_ROOT_URL=root, GITEA_REPO_USER_NAME=owner, GITEA_REPO_NAME=name)
+
+    def test_automatic_bundle_is_reused_in_two_repositories(self):
+        hooks = generate_hooks(self.url, self.url.replace("validate", "commits"), self.token)
+        original = self.remote
+        other = self.root / "other.git"
+        other.mkdir()
+        self.git(other, "init", "--bare", "--initial-branch=main")
+        self.git(self.local, "push", str(other), self.legacy + ":refs/heads/main")
+        oid = self.commit("PROJ-12 shared workspace", self.legacy)
+        for remote, root, owner, name in (
+            (original, "https://git.example/", "team", "first"),
+            (other, "https://another.example/gitea/", "组织", "code'quoted"),
+        ):
+            self.remote = remote
+            for hook in hooks.values():
+                target = remote / "hooks" / hook["filename"]
+                target.write_text(hook["content"])
+                target.chmod(0o700)
+            self.gitea_environment(root, owner, name)
+            self.push(oid, "refs/heads/main", allowed=True)
+        reports = [body["commits"][0] for path, _, body in self.requests if path == "/commits/"]
+        self.assertEqual(
+            [item["url"] for item in reports],
+            [
+                "https://git.example/team/first/commit/" + oid,
+                "https://another.example/gitea/%E7%BB%84%E7%BB%87/code%27quoted/commit/" + oid,
+            ],
+        )
+        self.assertEqual([item["repository_name"] for item in reports], ["team/first", "组织/code'quoted"])
+        self.assertEqual([path for path, _, _ in self.requests], ["/validate/", "/commits/"] * 2)
+        self.assertTrue(all(auth == "Bearer " + self.token for _, auth, _ in self.requests))
+
+    def test_automatic_report_ignores_deletions_without_environment(self):
+        self.install_post_hook("")
+        self.push(self.legacy, "refs/heads/removable", allowed=True)
+        self.push("", "refs/heads/removable", allowed=True)
+        self.push(self.tree, "refs/tags/tree", allowed=True)
+        self.assertEqual(self.requests, [])
+
+    def test_automatic_report_rejects_missing_or_invalid_environment(self):
+        self.install_post_hook("")
+        cases = [
+            ("GITEA_ROOT_URL", ""),
+            ("GITEA_REPO_USER_NAME", ""),
+            ("GITEA_REPO_NAME", ""),
+            ("GITEA_ROOT_URL", "javascript:alert(1)"),
+            ("GITEA_ROOT_URL", "https://user:" + self.token + "@git.example/"),
+            ("GITEA_ROOT_URL", "https://git.example/?"),
+            ("GITEA_ROOT_URL", "https://git.example/#"),
+            ("GITEA_ROOT_URL", "https://git.example/\n"),
+            ("GITEA_ROOT_URL", "https://git.example/\x7f"),
+            ("GITEA_ROOT_URL", "https://git.example/\\path"),
+            ("GITEA_ROOT_URL", "https://git.example:invalid/"),
+            ("GITEA_ROOT_URL", "https://[broken/"),
+            ("GITEA_REPO_USER_NAME", "../team"),
+            ("GITEA_REPO_USER_NAME", "."),
+            ("GITEA_REPO_NAME", ".."),
+            ("GITEA_REPO_NAME", "bad\\name"),
+            ("GITEA_REPO_NAME", "bad\nname"),
+        ]
+        tip = self.legacy
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                self.gitea_environment()
+                self.env[key] = value
+                self.requests.clear()
+                tip = self.commit("PROJ-12 case " + str(cases.index((key, value))), tip)
+                result = self.push(tip, "refs/heads/main", allowed=True)
+                self.assertIn("[Plane: REPORT FAILED]", result.stderr)
+                self.assertIn("GITEA_ROOT_URL", result.stderr)
+                self.assertIn("PLANE_GITEA_REPOSITORY_URL", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual([path for path, _, _ in self.requests], ["/validate/"])
+                self.assertEqual(self.git(self.remote, "rev-parse", "main").stdout.strip(), tip)
+
+    def test_automatic_report_supports_explicit_environment_override(self):
+        self.install_post_hook("")
+        self.env["PLANE_GITEA_REPOSITORY_URL"] = "https://override.example/git/team/repo"
+        oid = self.commit("PROJ-12 explicit override", self.legacy)
+        self.push(oid, "refs/heads/main", allowed=True)
+        self.assertEqual(
+            self.requests[-1][2]["commits"][0]["url"],
+            "https://override.example/git/team/repo/commit/" + oid,
+        )
+        self.env["PLANE_GITEA_REPOSITORY_URL"] = "https://user:" + self.token + "@override.example/"
+        self.requests.clear()
+        result = self.push(self.commit("PROJ-12 unsafe override", oid), "refs/heads/main", allowed=True)
+        self.assertIn("Invalid repository URL configuration", result.stderr)
+        self.assertEqual([path for path, _, _ in self.requests], ["/validate/"])
+
+    def test_automatic_retry_restores_url_without_gitea_environment(self):
+        self.install_post_hook("")
+        # Quote-bearing public paths must survive copying the shell retry command.
+        self.gitea_environment("https://git.example/gitea'quoted/", "team", "repo")
+        self.report_mode = "http_error"
+        oid = self.commit("PROJ-12 accepted automatic report", self.legacy)
+        result = self.push(oid, "refs/heads/main", allowed=True)
+        marker = "Retry in this bare repository after fixing the error: "
+        retry = next(line.split(marker, 1)[1] for line in result.stderr.splitlines() if marker in line)
+        command = shlex.split(retry)
+        self.assertEqual(command[:2], ["env", "PLANE_GITEA_REPOSITORY_URL=https://git.example/gitea'quoted/team/repo"])
+        self.assertNotIn(self.token, retry)
+        self.env = {key: value for key, value in self.env.items() if not key.startswith("GITEA_")}
+        self.report_mode = "valid"
+        replay = subprocess.run(command, cwd=self.remote, env=self.env, capture_output=True, text=True, timeout=20)
+        self.assertEqual(replay.returncode, 0, replay.stderr)
+        self.assertIn("Reported", replay.stdout)
+        self.assertNotIn(self.token, replay.stdout + replay.stderr)
+        self.assertEqual(self.requests[-1][2]["commits"], self.requests[-2][2]["commits"])
+        self.assertEqual(
+            self.requests[-1][2]["commits"][0]["url"],
+            "https://git.example/gitea'quoted/team/repo/commit/" + oid,
+        )
 
     def test_one_repository_reports_work_items_from_multiple_projects(self):
         self.install_post_hook()

@@ -4,10 +4,16 @@
 
 ## 接入流程
 
-1. 在 **工作空间设置 → 集成 → Gitea** 中启用集成，系统生成一个工作空间级密钥。
-2. 填写代码仓库的浏览地址（如 `https://git.example/team/shared-code`），生成 `pre-receive` 和 `post-receive` 两份钩子。该地址只用来生成提交链接，不保存为仓库配置，也不绑定项目。
-3. 在 Gitea 仓库的 **设置 → Git 钩子** 中安装到各自对应的钩子。Gitea 运行环境需要 **Python 3 + Git**，不需要额外 Python 包、curl、jq 或 Gitea PAT。
-4. 开发者推送时，pre-receive 读取所有新提交并调用校验 API；推送成功后，post-receive 上报提交说明与提交 URL，API 据单号建立关联。
+1. 在 **工作空间设置 → 集成 → Gitea** 中启用集成，点击 **生成 Hook 代码**。
+2. 页面直接显示两份完整代码。点击 **复制 pre-receive**，粘贴到 Gitea 仓库 **设置 → Git 钩子 → pre-receive** 编辑框并保存。
+3. 点击 **复制 post-receive**，粘贴到同一仓库的 **post-receive** 编辑框并保存。
+4. 同一工作区的其它仓库使用相同两份代码即可，无需手填 API/仓库地址，也无需逐仓库重新生成。
+
+Gitea 运行环境需要 **Python 3 + Git** 并允许自定义 Git Hooks。已有其它自定义钩子逻辑时应保留并串联。
+
+pre-receive 在接收推送前校验工作项编号；post-receive 在推送成功后自动识别当前仓库并上报提交链接。
+
+Gitea 的 HTTP 和 SSH 推送会提供 `GITEA_ROOT_URL`、`GITEA_REPO_USER_NAME` 和 `GITEA_REPO_NAME`。脚本利用这些变量拼接仓库首页及提交链接，保留部署子路径。例如站点地址 `https://git.example/gitea/`、所有者 `team`、仓库 `shared-code` 对应仓库浏览地址 `https://git.example/gitea/team/shared-code`。这个地址只用于跳转，不参与项目绑定或工作项定位。
 
 也可以直接调用下面的 API，无需使用生成的钩子。上报端只要提供提交 URL，即可来自不同仓库；不需要先登记仓库，也不需要 `repository_id`。
 
@@ -155,31 +161,37 @@ GET /api/workspaces/{workspace_slug}/projects/{project_id}/issues/{issue_id}/git
 
 以下接口仅允许当前工作空间的有效管理员通过登录会话访问：
 
-| 方法和路径                                                     | 用途                                                                      |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `GET /api/workspaces/{slug}/integrations/gitea/`               | 获取启用状态、密钥是否已配置及 API 地址                                   |
-| `PATCH /api/workspaces/{slug}/integrations/gitea/`             | 以 `{ "enabled": true }` 启用，首次自动生成密钥；false 停用               |
-| `POST /api/workspaces/{slug}/integrations/gitea/rotate-token/` | 旋转工作空间集成密钥                                                      |
-| `POST /api/workspaces/{slug}/integrations/gitea/hooks/`        | 根据 `{ "repository_url": "https://git.example/team/repo" }` 生成两份钩子 |
+| 方法和路径                                                     | 用途                                                        |
+| -------------------------------------------------------------- | ----------------------------------------------------------- |
+| `GET /api/workspaces/{slug}/integrations/gitea/`               | 获取启用状态、密钥是否已配置及 API 地址                     |
+| `PATCH /api/workspaces/{slug}/integrations/gitea/`             | 以 `{ "enabled": true }` 启用，首次自动生成密钥；false 停用 |
+| `POST /api/workspaces/{slug}/integrations/gitea/rotate-token/` | 旋转工作空间集成密钥                                        |
+| `POST /api/workspaces/{slug}/integrations/gitea/hooks/`        | 以 `{}` 生成当前工作区的通用两份钩子 JSON                   |
 
-配置响应为 `enabled`、`has_secret`、`validation_url`、`commits_url`、`lookup_url` 和 `issue_url_template`，不包含仓库 ID、项目绑定或密钥明文。hooks 响应包含 `pre_receive`、`post_receive` 两个对象，各有 `filename`、`content`，禁止缓存。仓库 URL 只在该生成请求内使用，输入不同 URL 可为不同仓库生成脚本，工作空间配置保持不变。
+配置响应为 `enabled`、`has_secret`、`validation_url`、`commits_url`、`lookup_url` 和 `issue_url_template`，不包含仓库 ID、项目绑定或密钥明文。设置页面不再逐项展示这些地址，生成的代码会自动包含所需配置。
+
+hooks 响应包含 `pre_receive`、`post_receive` 两个对象，各有 `filename`、`content`。页面直接展示 `content` 并提供复制按钮。响应禁止缓存，只有启用集成的工作区管理员能访问。
+
+既有 API 客户端仍可显式传入 `{ "repository_url": "https://git.example/team/repo" }`，用于无法提供 Gitea 标准环境变量的特殊环境。该地址只在本次生成请求中使用，不保存为工作区配置；正常页面生成代码无需传入。
 
 ## 钩子运行和故障处理
 
 - Plane 的 `APP_BASE_URL` 或 `WEB_URL` 应为 Git 服务器实际可访问的地址。Git 服务器调用 Plane，Plane 不需要访问 Git 服务器。
-- Gitea 需允许自定义 Git Hooks；使用 Gitea 的 **设置 → Git 钩子** 编辑器分别安装两份脚本。实例默认关闭时，管理员需设置 `[security] DISABLE_GIT_HOOKS = false` 并按 Gitea 要求赋予编辑权限。
-- 不覆盖已有业务校验：已有自定义钩子由管理员保留并串联，pre-receive 必须保留任何失败的非零退出状态。
+- 在 Gitea **设置 → Git 钩子** 编辑器中分别粘贴两份完整代码并保存。实例需允许自定义 Git Hooks；默认关闭时，管理员需设置 `[security] DISABLE_GIT_HOOKS = false` 并按 Gitea 要求赋予编辑权限。已有自定义逻辑应保留并串联，pre-receive 必须保留任何失败的非零退出状态。
 - pre-receive 从 Git 隔离区读取本次新引入仓库的所有提交；已有历史作为基线。包括新分支、Merge 和指向提交的标签。删除引用不调用校验 API。
 - post-receive 从旧引用和未受本次推送影响的引用恢复基线，避免使用已经更新后的 `--all` 漏掉新提交。
 - 两份钩子按最多 100 条及 512 KiB 编码后大小分批；单条说明最多 64 KiB，每次最多 10,000 个提交、1,000 个更新引用，总处理时间有上限。超限会明确提示，不静默跳过。
-- pre-receive 失败时拒绝 push。post-receive 失败时 push 已成功，不会撤销；终端明确提示关联尚未完整上报，并给出带 `--commits <完整SHA...>` 的重试命令。修复后在对应 bare 仓库内执行该命令可重投未完成批次。
+- pre-receive 失败时拒绝 push。post-receive 失败时 push 已成功，不会撤销；终端明确提示关联尚未完整上报，并给出带 `--commits <完整SHA...>` 的重试命令。自动识别成功后，命令也会通过 `PLANE_GITEA_REPOSITORY_URL` 携带公开仓库地址，复制到新的 shell 后仍可重试，不包含工作区密钥。
+- 正常代码仓库推送自动使用 Gitea 的站点、所有者及仓库名环境变量，不猜测裸仓库的 `origin`。直接调用 Git 或使用自定义 wrapper 时，如果这些变量缺失，需要显式设置 `PLANE_GITEA_REPOSITORY_URL`；缺失或非法信息会明确报错，不会上报虚假的仓库地址。这两份代码用于普通代码仓库。
 - 已成功上报的批次再次发送保持幂等。相同 URL 的冲突内容需要调用方修正，不能当作重试成功。
 - 脚本不跟随 API 重定向、不把密钥交给环境代理，HTTPS 使用系统证书信任链。密钥不写日志、不会出现在重试命令中。
 - 不改变工作项状态，不按提交中的 `fixes` / `closes` 自动关闭工作项；本集成不涉及 PR。
 
 ## 部署与验证
 
-这批 Gitea 代码尚未部署，因此 `0130_gitea_integration.py` 已直接调整为工作空间集成、提交和关联三张表，没有保留原仓库绑定模型。部署需包含该迁移以及 API 和前端构建。仓库的 AIO 启动流程会自动执行数据库迁移。
+部署时需更新 API 和前端，并执行仓库现有数据库迁移；AIO 启动流程会自动执行迁移。本次通用 hook 代码生成使用已有工作区集成配置。
+
+自动识别依据 Gitea 官方的[环境变量定义](https://github.com/go-gitea/gitea/blob/v1.24.6/modules/repository/env.go#L16-L80)、[SSH 推送注入](https://github.com/go-gitea/gitea/blob/v1.24.6/cmd/serv.go#L339-L351)及 [HTTP 推送注入](https://github.com/go-gitea/gitea/blob/v1.24.6/routers/web/repo/githttp.go#L175-L181)。Gitea 会通过自己的[钩子分派机制](https://github.com/go-gitea/gitea/blob/v1.24.6/modules/gitrepo/hooks.go#L17-L74)执行仓库设置中的自定义钩子。
 
 独立钩子回归不依赖 Django、Celery 或数据库：
 
@@ -187,4 +199,4 @@ GET /api/workspaces/{workspace_slug}/projects/{project_id}/issues/{issue_id}/git
 python3 -m unittest discover -s apps/api/plane/tests/unit/utils -p test_gitea_hook.py -v
 ```
 
-相关 API 单元、数据库合同及浏览器回归覆盖跨项目、多个仓库 URL、同 URL 幂等/冲突、无效批次、权限、密钥轮换、双钩子复制下载、工作项提交分页和安全跳转。
+相关 API 单元、数据库合同及浏览器回归覆盖跨项目、多个仓库 URL、同 URL 幂等/冲突、无效批次、权限、密钥轮换、双钩子代码生成和复制、工作项提交分页和安全跳转。
