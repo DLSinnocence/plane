@@ -36,8 +36,19 @@ export type TIssueAttachmentSlot = {
   attachment: TIssueAttachment | null;
 };
 
+export type TIssueAttachmentSlotDeleteResponse = {
+  slot_id: string;
+  deleted_attachment_ids: string[];
+};
+
+export type TIssueAttachmentUploadResult = TIssueAttachment & {
+  deleted_attachment_ids?: string[];
+  attachment_slot?: TIssueAttachmentSlot;
+};
+
 export type TIssueAttachmentUploadResponse = TFileSignedURLResponse & {
   attachment: TIssueAttachment;
+  attachment_slot?: Omit<TIssueAttachmentSlot, "attachment">;
 };
 
 export type TIssueAttachmentMap = {

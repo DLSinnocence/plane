@@ -5,7 +5,7 @@
  */
 
 import { API_BASE_URL } from "@plane/constants";
-import type { TAttachmentTemplate, TIssueAttachmentSlot } from "@plane/types";
+import type { TAttachmentTemplate, TIssueAttachmentSlot, TIssueAttachmentSlotDeleteResponse } from "@plane/types";
 import { APIService } from "@/services/api.service";
 
 type TTemplateInput = Pick<TAttachmentTemplate, "name" | "slots">;
@@ -88,10 +88,17 @@ export class AttachmentTemplateService extends APIService {
       });
   }
 
-  async deleteSlot(workspaceSlug: string, projectId: string, issueId: string, slotId: string): Promise<void> {
-    await this.delete(`${this.slotsPath(workspaceSlug, projectId, issueId)}${slotId}/`).catch((error) => {
-      throw error?.response?.data ?? error;
-    });
+  async deleteSlot(
+    workspaceSlug: string,
+    projectId: string,
+    issueId: string,
+    slotId: string
+  ): Promise<TIssueAttachmentSlotDeleteResponse> {
+    return this.delete(`${this.slotsPath(workspaceSlug, projectId, issueId)}${slotId}/`)
+      .then((response) => response.data)
+      .catch((error) => {
+        throw error?.response?.data ?? error;
+      });
   }
 
   async applyTemplate(

@@ -24,17 +24,17 @@ const attachment = { id: "file", attributes: { name: "archive.zip", size: 3 }, i
 const signed = { asset_id: "file", attachment, upload_data: { url: "/storage", fields: {} } };
 const archive = new File(["zip"], "archive.zip", { type: "application/zip" });
 
-function fixture(upload) {
+function fixture(upload, completion, signedResponse = signed) {
   const posts = [];
   const confirmations = [];
   class APIService {
     post(...args) {
       posts.push(args);
-      return Promise.resolve({ data: signed });
+      return Promise.resolve({ data: signedResponse });
     }
     patch(...args) {
       confirmations.push(args);
-      return Promise.resolve({});
+      return Promise.resolve({ data: completion });
     }
   }
   const { IssueAttachmentService } = load("./issue_attachment.service.ts", {
@@ -72,17 +72,34 @@ test("slot uploads send slot metadata and confirm only after storage upload succ
   assert.deepEqual(f.posts[0][1], { name: "archive.zip", size: 3, type: "application/zip", slot_id: "slot" });
   assert.deepEqual(f.confirmations, []);
   finishUpload();
-  assert.deepEqual(await request, attachment);
+  assert.deepEqual(await request, { ...attachment, deleted_attachment_ids: [] });
   assert.deepEqual(f.confirmations, [
     ["/api/assets/v2/workspaces/workspace/projects/project/issues/issue/attachments/file/"],
   ]);
 });
 
-test("ordinary attachments keep their existing metadata payload", async () => {
+test("direct uploads let the server assign their named attachment row", async () => {
   const f = fixture(async () => undefined);
   await f.service.uploadIssueAttachment("workspace", "project", "issue", archive);
   assert.equal(Object.hasOwn(f.posts[0][1], "slot_id"), false);
   assert.equal(f.confirmations.length, 1);
+});
+
+test("confirmation returns the latest row name and actual replaced file IDs", async () => {
+  const row = { id: "slot", name: "Renamed during upload", sort_order: 9 };
+  const f = fixture(
+    async () => undefined,
+    {
+      attachment_slot_id: "slot",
+      attachment_slot: row,
+      deleted_attachment_ids: ["replaced"],
+    },
+    { ...signed, attachment_slot: { ...row, name: "附件", sort_order: 1 } }
+  );
+  const result = await f.service.uploadIssueAttachment("workspace", "project", "issue", archive);
+  assert.deepEqual(result.attachment_slot, { ...row, attachment: { ...attachment, attachment_slot_id: "slot" } });
+  assert.deepEqual(result.deleted_attachment_ids, ["replaced"]);
+  assert.equal(result.attachment_slot_id, "slot");
 });
 
 test("storage errors propagate unchanged and never confirm the pending slot attachment", async () => {

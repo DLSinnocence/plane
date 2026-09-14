@@ -28,41 +28,76 @@ const zip39KiB = Buffer.alloc(39 * 1024);
 // Valid empty ZIP archive padded by its ZIP comment to exactly 39 KiB.
 zip39KiB.writeUInt32LE(0x06054b50, 0);
 zip39KiB.writeUInt16LE(zip39KiB.length - 22, 20);
-for (const role of ["admin", "member"]) {
-  test(`${role} uploads the same 39KiB ZIP through the real ordinary quick action at a 5MiB limit`, async ({
-    page,
-  }) => {
+for (const role of ["admin", "member", "guest"]) {
+  test(`${role} uploads the same 39KiB ZIP through Attach into one named row at a 5MiB limit`, async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`/?attachment-slots&empty&limit-5mb&role=${role}`);
-    const quickUpload = page.getByTestId("ordinary-quick-upload");
-    const uploadButton = quickUpload.getByRole("button", { name: /Upload ordinary/ });
+    const uploadButton = page
+      .getByTestId("top-attachment-actions")
+      .getByRole("button", { name: "common.attach", exact: true });
     await expect(uploadButton).toBeEnabled();
     const chooserPromise = page.waitForEvent("filechooser");
     await uploadButton.click();
-    const chooser = await chooserPromise;
-    await chooser.setFiles({ name: "same-39kb.zip", mimeType: "application/zip", buffer: zip39KiB });
-    await expect(page.getByTestId("ordinary")).toContainText("same-39kb.zip");
+    await (await chooserPromise).setFiles({ name: "same-39kb.zip", mimeType: "application/zip", buffer: zip39KiB });
+    const row = page.getByTestId("attachment-slot-slot-1");
+    await expect(row.getByRole("link")).toHaveText("same-39kb.zip");
+    await expect(page.getByTestId("attachment-slot-name-slot-1")).toHaveText("附件");
+    await expect(page.getByTestId("slots").getByRole("link", { name: "same-39kb.zip", exact: true })).toHaveCount(1);
+    await expect(page.getByTestId("slots").getByRole("button", { name: /common.attachments/ })).toContainText("1");
     await expect
       .poll(async () =>
         (await state(page)).files.map((item: { attributes: { name: string; size: number } }) => item.attributes)
       )
       .toEqual([{ name: "same-39kb.zip", size: 39 * 1024 }]);
     await expect
+      .poll(async () => (await state(page)).slots.map((item: { name: string }) => item.name))
+      .toEqual(["附件"]);
+    await expect
       .poll(async () => (await state(page)).calls.filter((item: string) => item.startsWith("upload:")))
-      .toEqual(["upload:same-39kb.zip:ordinary"]);
-    await expect.poll(async () => (await state(page)).slots).toEqual([]);
+      .toEqual(["upload:same-39kb.zip:auto"]);
+    if (role === "guest") {
+      await expect(page.getByTestId("attachment-slot-name-slot-1")).toBeDisabled();
+      await expect(row.locator('button[aria-haspopup="menu"]')).toHaveCount(0);
+    }
     expect(errors).toEqual([]);
   });
 }
 
-for (const entry of ["slots", "ordinary-upload-dropzone"]) {
+test("member fills an empty row and direct Attach provisions a second unique named row", async ({ page }) => {
+  await page.goto("/?attachment-slots&empty&role=member");
+  await addEmpty(page).click();
+  await nameInput(page).press("Escape");
+  await page.getByTestId("attachment-slot-slot-1").locator('input[type="file"]').setInputFiles(upload);
+  await expect(page.getByTestId("attachment-slot-file-slot-1")).toHaveText("replacement.txt");
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByTestId("top-attachment-actions").getByRole("button", { name: "common.attach", exact: true }).click();
+  await (await chooserPromise).setFiles({ ...upload, name: "second.txt" });
+  await expect
+    .poll(async () => (await state(page)).slots.map((slot: { name: string }) => slot.name))
+    .toEqual(["附件", "附件2"]);
+  await expect(page.getByTestId("slots").getByRole("link")).toHaveCount(2);
+  await expect(page.getByTestId("slots").getByRole("button", { name: /common.attachments/ })).toContainText("2");
+  await expect.poll(async () => (await state(page)).files.length).toBe(2);
+});
+
+test("unified content renders a pending upload once and counts only its loaded row", async ({ page }) => {
+  await page.goto("/?attachment-slots&empty-slot&uploading");
+  const section = page.getByTestId("slots");
+  await expect(section.getByText("pending.txt", { exact: true })).toHaveCount(1);
+  await expect(section.getByText("25% done", { exact: true })).toHaveCount(1);
+  await expect(section.getByRole("button", { name: /common.attachments/ })).toContainText("1");
+  await expect(page.getByTestId("attachment-slot-design")).toBeVisible();
+  await expect.poll(async () => (await state(page)).files).toEqual([]);
+});
+
+for (const entry of ["slots"]) {
   test(`${entry} shows HTTP 403 and the actual permission reason, then provider reason without size misclassification`, async ({
     page,
   }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    await page.goto("/?attachment-slots&role=member&limit-5mb");
+    await page.goto("/?attachment-slots&role=member&own-file&limit-5mb");
     const section = page.getByTestId(entry);
     const picker = (entry === "slots" ? slotRow(page, "Design") : section).locator('input[type="file"]');
     await picker.setInputFiles({ ...upload, name: "forbidden.txt" });
@@ -128,38 +163,46 @@ test("adds slots, saves a template, and applies missing names idempotently", asy
     .poll(async () => (await state(page)).slots.map((item: { name: string }) => item.name))
     .toEqual(["Design", "Approval"]);
   await expect
+    .poll(async () => (await state(page)).slots.every((slot: { attachment: unknown }) => slot.attachment === null))
+    .toBe(true);
+  await expect.poll(async () => (await state(page)).files).toEqual([]);
+  await expect(page.getByTestId("slots").getByRole("button", { name: /common.attachments/ })).toContainText("2");
+  await expect
     .poll(async () => (await state(page)).calls.filter((item: string) => item === "applyTemplate").length)
     .toBe(2);
 });
 
-test("replacement failure retains the old file, success releases it to ordinary attachments", async ({ page }) => {
+test("replacement failure retains the old file and success leaves only the new file", async ({ page }) => {
   await page.goto("/?attachment-slots");
   const design = slotRow(page, "Design");
   await expect(design.getByRole("link")).toContainText("old.txt");
-  await expect(page.getByTestId("ordinary")).not.toContainText("old.txt");
   await design.locator('input[type="file"]').setInputFiles({ ...upload, name: "fail.txt" });
   await expect(page.getByTestId("slots").getByRole("alert")).toContainText("Upload rejected");
   await expect(design.getByRole("link")).toContainText("old.txt");
-  await expect(page.getByTestId("ordinary")).not.toContainText("old.txt");
+  await expect.poll(async () => (await state(page)).files.map((item: { id: string }) => item.id)).toEqual(["old"]);
   await design.locator('input[type="file"]').setInputFiles(upload);
   await expect(design.getByRole("link")).toContainText("replacement.txt");
-  await expect(page.getByTestId("ordinary")).toContainText("old.txt");
-  await expect(page.getByTestId("ordinary")).not.toContainText("replacement.txt");
+  await expect(page.getByTestId("slots").getByRole("link")).toHaveCount(1);
+  await expect(page.getByTestId("slots")).not.toContainText("old.txt");
+  await expect
+    .poll(async () => (await state(page)).files.map((item: { attributes: { name: string } }) => item.attributes.name))
+    .toEqual(["replacement.txt"]);
 });
 
-test("deleting a slot requires confirmation and keeps its file in the ordinary list", async ({ page }) => {
+test("deleting a row confirms file deletion while cancellation preserves both", async ({ page }) => {
   await page.goto("/?attachment-slots");
   await openSlotMenu(page);
   await menuItem(page, "delete_slot").click();
-  await expect(dialog(page)).toContainText("attachment.slots.delete_slot_help");
+  await expect(dialog(page)).toContainText("Design");
+  await expect(dialog(page)).not.toContainText(/ordinary|普通/i);
   await dialog(page).getByRole("button", { name: "attachment.slots.close", exact: true }).click();
-  await expect(slotRow(page, "Design")).toBeVisible();
+  await expect(slotRow(page, "Design").getByRole("link")).toHaveText("old.txt");
+  await expect.poll(async () => [(await state(page)).slots.length, (await state(page)).files.length]).toEqual([1, 1]);
   await openSlotMenu(page);
   await menuItem(page, "delete_slot").click();
   await dialog(page).getByRole("button", { name: "attachment.slots.confirm_delete", exact: true }).click();
   await expect(page.getByTestId("attachment-slot-design")).toHaveCount(0);
-  await expect(page.getByTestId("ordinary")).toContainText("old.txt");
-  await expect.poll(async () => (await state(page)).slots).toEqual([]);
+  await expect.poll(async () => [(await state(page)).slots.length, (await state(page)).files.length]).toEqual([0, 0]);
 });
 
 test("rename failure keeps the inline input and Escape cancels without closing peek", async ({ page }) => {
@@ -174,22 +217,35 @@ test("rename failure keeps the inline input and Escape cancels without closing p
   await expect(page.getByTestId("attachment-peek")).toBeVisible();
 });
 
-test("members can replace another member's file but only owner or admin can delete it", async ({ page }) => {
+test("only file owners or admins can replace files or delete populated rows", async ({ page }) => {
   await page.goto("/?attachment-slots&role=member");
   await expect(slotRow(page, "Design")).toBeVisible();
-  await openSlotMenu(page);
-  await expect(menuItem(page, "delete_file")).toHaveCount(0);
-  await expect(menuItem(page, "replace")).toBeEnabled();
-  await page.goto("/?attachment-slots&role=member&own-file");
-  await openSlotMenu(page);
-  await expect(menuItem(page, "delete_file")).toBeVisible();
-  await menuItem(page, "delete_file").click();
-  await dialog(page).getByRole("button", { name: "attachment.slots.confirm_delete", exact: true }).click();
-  await expect(slotRow(page, "Design").getByRole("link")).toHaveCount(0);
-  await page.goto("/?attachment-slots");
-  await openSlotMenu(page);
-  await expect(menuItem(page, "delete_file")).toBeVisible();
+  await expect(slotRow(page, "Design").locator('input[type="file"]')).toHaveCount(0);
+  const trigger = page.getByTestId("attachment-slot-actions-design").locator('button[aria-haspopup="menu"]');
+  await expect(trigger).toHaveCount(0);
+  await page.getByTestId("attachment-slot-name-design").click();
+  await nameInput(page).fill("Member renamed");
+  await nameInput(page).press("Enter");
+  await expect(slotRow(page, "Member renamed")).toBeVisible();
+  await Promise.all(
+    ["delete_file", "delete_slot", "replace"].map((name) => expect(menuItem(page, name)).toHaveCount(0))
+  );
 });
+
+for (const query of ["role=member&own-file", "role=admin"]) {
+  test(`${query} can replace a file and delete its whole row`, async ({ page }) => {
+    await page.goto(`/?attachment-slots&${query}`);
+    await openSlotMenu(page);
+    await Promise.all(["delete_slot", "replace"].map((name) => expect(menuItem(page, name)).toBeVisible()));
+    await expect(menuItem(page, "delete_file")).toHaveCount(0);
+    await expect(page.getByRole("menuitem")).toHaveCount(2);
+    await menuItem(page, "delete_slot").click();
+    await dialog(page).getByRole("button", { name: "attachment.slots.confirm_delete", exact: true }).click();
+    await expect(page.getByTestId("attachment-slot-design")).toHaveCount(0);
+    await expect.poll(async () => [(await state(page)).slots.length, (await state(page)).files.length]).toEqual([0, 0]);
+    await expect(page.getByTestId("slots").getByRole("button", { name: /common.attachments/ })).toContainText("0");
+  });
+}
 
 test("guest sees slot files but cannot configure slots or templates", async ({ page }) => {
   await page.goto("/?attachment-slots&role=guest");
@@ -230,7 +286,7 @@ for (const collapsed of [false, true]) {
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
     await expect(trigger).toContainText("1");
     const initial = await nameInput(page).inputValue();
-    expect(initial).toMatch(/ 1$/);
+    expect(initial).toBe("附件");
     await expect
       .poll(async () =>
         (await state(page)).slots.map((slot: { name: string; attachment: unknown }) => ({
@@ -402,9 +458,8 @@ test("compact row hides actions until the real menu opens and replacement uses i
     ])
   );
   await openSlotMenu(page);
-  await Promise.all(
-    ["replace", "delete_file", "delete_slot"].map((name) => expect(menuItem(page, name)).toBeVisible())
-  );
+  await Promise.all(["replace", "delete_slot"].map((name) => expect(menuItem(page, name)).toBeVisible()));
+  await expect(menuItem(page, "delete_file")).toHaveCount(0);
   await openSlotMenu(page);
   await expect(menuItem(page, "replace")).not.toBeVisible();
   await expect(page.getByTestId("attachment-peek")).toBeVisible();
@@ -413,7 +468,8 @@ test("compact row hides actions until the real menu opens and replacement uses i
   await menuItem(page, "replace").click();
   await (await chooserPromise).setFiles(upload);
   await expect(center).toHaveText("replacement.txt");
-  await expect(page.getByTestId("ordinary")).toContainText("old.txt");
+  await expect(page.getByTestId("slots")).not.toContainText("old.txt");
+  await expect.poll(async () => (await state(page)).files.length).toBe(1);
   await expect(menuItem(page, "replace")).not.toBeVisible();
 });
 

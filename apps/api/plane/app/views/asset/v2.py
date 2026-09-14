@@ -9,7 +9,13 @@ import uuid
 from django.conf import settings
 from django.http import HttpResponseRedirect
 from django.utils import timezone
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
+from django.shortcuts import get_object_or_404
+from plane.utils.attachment_rows import (
+    create_attachment_asset, complete_attachment_asset, presign_attachment_upload, attachment_completion_data,
+)
+from plane.app.views.attachment import require_slot_role
+from plane.db.models import Issue
 from django.db.models import Q
 
 # Third party imports
@@ -146,7 +152,7 @@ class UserAssetsV2Endpoint(BaseAPIView):
         asset_key = f"{uuid.uuid4().hex}-{name}"
 
         # Create a File Asset
-        asset = FileAsset.objects.create(
+        asset = create_attachment_asset(
             attributes={"name": name, "type": type, "size": size_limit},
             asset=asset_key,
             size=size_limit,
@@ -158,12 +164,13 @@ class UserAssetsV2Endpoint(BaseAPIView):
         # Get the presigned URL
         storage = S3Storage(request=request)
         # Generate a presigned URL to share an S3 object
-        presigned_url = storage.generate_presigned_post(object_name=asset_key, file_type=type, file_size=size_limit)
+        presigned_url = presign_attachment_upload(storage, asset, type, size_limit)
         # Return the presigned URL
         return Response(
             {
                 "upload_data": presigned_url,
                 "asset_id": str(asset.id),
+                "attachment_slot_id": str(asset.attachment_slot_id) if asset.attachment_slot_id else None,
                 "asset_url": asset.asset_url,
             },
             status=status.HTTP_200_OK,
@@ -173,8 +180,13 @@ class UserAssetsV2Endpoint(BaseAPIView):
         # get the asset id
         asset = FileAsset.objects.get(id=asset_id, user_id=request.user.id)
         # Slot completion must use the issue endpoint's transactional replacement.
-        if asset.attachment_slot_id:
-            return Response({"error": "Complete slot uploads through the issue attachment endpoint."}, status=400)
+        if asset.attachment_slot_id or (
+            asset.issue_id and asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT
+        ):
+            asset, completed = complete_attachment_asset(asset, request.user)
+            if completed and not asset.storage_metadata:
+                transaction.on_commit(lambda: get_asset_object_metadata.delay(str(asset.id)), robust=True)
+            return Response(attachment_completion_data(asset), status=status.HTTP_200_OK)
         # get the storage metadata
         asset.is_uploaded = True
         # get the storage metadata
@@ -341,6 +353,7 @@ class WorkspaceFileAssetEndpoint(BaseAPIView):
         ).exists()
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
+    @transaction.atomic
     def post(self, request, slug):
         name = sanitize_filename(request.data.get("name")) or "unnamed"
         type = request.data.get("type", "image/jpeg")
@@ -392,26 +405,32 @@ class WorkspaceFileAssetEndpoint(BaseAPIView):
         # asset key
         asset_key = f"{workspace.id}/{uuid.uuid4().hex}-{name}"
 
+        entity_fields = self.get_entity_id_field(entity_type=entity_type, entity_id=entity_identifier)
+        if entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT and entity_identifier:
+            issue = get_object_or_404(Issue.objects, pk=entity_identifier, workspace=workspace)
+            require_slot_role(request, slug, issue.project_id)
+            entity_fields["project_id"] = issue.project_id
         # Create a File Asset
-        asset = FileAsset.objects.create(
+        asset = create_attachment_asset(
             attributes={"name": name, "type": type, "size": size_limit},
             asset=asset_key,
             size=size_limit,
             workspace=workspace,
             created_by=request.user,
             entity_type=entity_type,
-            **self.get_entity_id_field(entity_type=entity_type, entity_id=entity_identifier),
+            **entity_fields,
         )
 
         # Get the presigned URL
         storage = S3Storage(request=request)
         # Generate a presigned URL to share an S3 object
-        presigned_url = storage.generate_presigned_post(object_name=asset_key, file_type=type, file_size=size_limit)
+        presigned_url = presign_attachment_upload(storage, asset, type, size_limit)
         # Return the presigned URL
         return Response(
             {
                 "upload_data": presigned_url,
                 "asset_id": str(asset.id),
+                "attachment_slot_id": str(asset.attachment_slot_id) if asset.attachment_slot_id else None,
                 "asset_url": asset.asset_url,
             },
             status=status.HTTP_200_OK,
@@ -428,8 +447,13 @@ class WorkspaceFileAssetEndpoint(BaseAPIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         # Slot completion must use the issue endpoint's transactional replacement.
-        if asset.attachment_slot_id:
-            return Response({"error": "Complete slot uploads through the issue attachment endpoint."}, status=400)
+        if asset.attachment_slot_id or (
+            asset.issue_id and asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT
+        ):
+            asset, completed = complete_attachment_asset(asset, request.user)
+            if completed and not asset.storage_metadata:
+                transaction.on_commit(lambda: get_asset_object_metadata.delay(str(asset.id)), robust=True)
+            return Response(attachment_completion_data(asset), status=status.HTTP_200_OK)
         # get the storage metadata
         asset.is_uploaded = True
         # get the storage metadata
@@ -545,6 +569,8 @@ class AssetRestoreEndpoint(BaseAPIView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
     def post(self, request, slug, asset_id):
         asset = FileAsset.all_objects.get(id=asset_id, workspace__slug=slug)
+        if asset.attachment_slot_id or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
+            return Response({"error": "Deleted work item attachments cannot be restored."}, status=400)
         asset.is_deleted = False
         asset.deleted_at = None
         asset.save(update_fields=["is_deleted", "deleted_at"])
@@ -584,6 +610,7 @@ class ProjectAssetEndpoint(BaseAPIView):
         return {}
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
+    @transaction.atomic
     def post(self, request, slug, project_id):
         name = sanitize_filename(request.data.get("name")) or "unnamed"
         type = request.data.get("type", "image/jpeg")
@@ -625,7 +652,7 @@ class ProjectAssetEndpoint(BaseAPIView):
         asset_key = f"{workspace.id}/{uuid.uuid4().hex}-{name}"
 
         # Create a File Asset
-        asset = FileAsset.objects.create(
+        asset = create_attachment_asset(
             attributes={"name": name, "type": type, "size": size_limit},
             asset=asset_key,
             size=size_limit,
@@ -639,12 +666,13 @@ class ProjectAssetEndpoint(BaseAPIView):
         # Get the presigned URL
         storage = S3Storage(request=request)
         # Generate a presigned URL to share an S3 object
-        presigned_url = storage.generate_presigned_post(object_name=asset_key, file_type=type, file_size=size_limit)
+        presigned_url = presign_attachment_upload(storage, asset, type, size_limit)
         # Return the presigned URL
         return Response(
             {
                 "upload_data": presigned_url,
                 "asset_id": str(asset.id),
+                "attachment_slot_id": str(asset.attachment_slot_id) if asset.attachment_slot_id else None,
                 "asset_url": asset.asset_url,
             },
             status=status.HTTP_200_OK,
@@ -655,8 +683,13 @@ class ProjectAssetEndpoint(BaseAPIView):
         # get the asset id
         asset = FileAsset.objects.get(id=pk, workspace__slug=slug, project_id=project_id)
         # Slot completion must use the issue endpoint's transactional replacement.
-        if asset.attachment_slot_id:
-            return Response({"error": "Complete slot uploads through the issue attachment endpoint."}, status=400)
+        if asset.attachment_slot_id or (
+            asset.issue_id and asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT
+        ):
+            asset, completed = complete_attachment_asset(asset, request.user)
+            if completed and not asset.storage_metadata:
+                transaction.on_commit(lambda: get_asset_object_metadata.delay(str(asset.id)), robust=True)
+            return Response(attachment_completion_data(asset), status=status.HTTP_200_OK)
         # get the storage metadata
         asset.is_uploaded = True
         # get the storage metadata
@@ -822,6 +855,7 @@ class DuplicateAssetEndpoint(BaseAPIView):
         return {}
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
+    @transaction.atomic
     def post(self, request, slug, asset_id):
         project_id = request.data.get("project_id", None)
         entity_id = request.data.get("entity_id", None)
@@ -850,9 +884,12 @@ class DuplicateAssetEndpoint(BaseAPIView):
         if not original_asset:
             return Response({"error": "Asset not found"}, status=status.HTTP_404_NOT_FOUND)
 
+        if entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
+            require_slot_role(request, slug, project_id)
         sanitized_name = sanitize_filename(original_asset.attributes.get("name")) or "unnamed"
         destination_key = f"{workspace.id}/{uuid.uuid4().hex}-{sanitized_name}"
-        duplicated_asset = FileAsset.objects.create(
+        duplicated_asset = create_attachment_asset(
+            reuse_pending=False,
             attributes={
                 "name": original_asset.attributes.get("name"),
                 "type": original_asset.attributes.get("type"),
@@ -867,11 +904,16 @@ class DuplicateAssetEndpoint(BaseAPIView):
             storage_metadata=original_asset.storage_metadata,
             **self.get_entity_id_field(entity_type=entity_type, entity_id=entity_id),
         )
-        storage.copy_object(original_asset.asset, destination_key)
+        storage.copy_object(original_asset.asset, duplicated_asset.asset.name)
         # Update the is_uploaded field for all newly created assets
         FileAsset.objects.filter(id=duplicated_asset.id).update(is_uploaded=True)
 
-        return Response({"asset_id": str(duplicated_asset.id)}, status=status.HTTP_200_OK)
+        return Response({
+            "asset_id": str(duplicated_asset.id),
+            "attachment_slot_id": (
+                str(duplicated_asset.attachment_slot_id) if duplicated_asset.attachment_slot_id else None
+            ),
+        }, status=status.HTTP_200_OK)
 
 
 class WorkspaceAssetDownloadEndpoint(BaseAPIView):

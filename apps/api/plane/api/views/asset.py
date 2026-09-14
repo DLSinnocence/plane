@@ -8,6 +8,7 @@ import uuid
 # Django Imports
 from django.utils import timezone
 from django.conf import settings
+from django.db import transaction
 
 # Third party imports
 from rest_framework import status
@@ -20,6 +21,8 @@ from plane.settings.storage import S3Storage
 from plane.utils.path_validator import sanitize_filename
 from plane.db.models import FileAsset, User, Workspace
 from plane.app.permissions import WorkspaceUserPermission
+from plane.app.views.attachment import require_slot_role
+from plane.utils.attachment_rows import complete_attachment_asset, attachment_completion_data
 from plane.api.views.base import BaseAPIView
 from plane.api.serializers import (
     UserAssetUploadSerializer,
@@ -620,9 +623,14 @@ class GenericAssetEndpoint(BaseAPIView):
         try:
             asset = FileAsset.objects.get(id=asset_id, workspace__slug=slug, is_deleted=False)
 
-            # Slot completion requires the scoped transactional issue endpoint.
-            if asset.attachment_slot_id:
-                return Response({"error": "Complete slot uploads through the issue attachment endpoint."}, status=400)
+            if asset.attachment_slot_id or (
+                asset.issue_id and asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT
+            ):
+                require_slot_role(request, slug, asset.project_id)
+                asset, completed = complete_attachment_asset(asset, request.user)
+                if completed and not asset.storage_metadata:
+                    transaction.on_commit(lambda: get_asset_object_metadata.delay(str(asset.id)), robust=True)
+                return Response(attachment_completion_data(asset), status=status.HTTP_200_OK)
             # Update is_uploaded status
             asset.is_uploaded = request.data.get("is_uploaded", asset.is_uploaded)
 

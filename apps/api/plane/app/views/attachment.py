@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
+from functools import partial
+
 from django.db import transaction
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
@@ -24,6 +26,8 @@ from plane.db.models import (
     ProjectMember,
     WorkspaceMember,
 )
+from plane.bgtasks.issue_activities_task import issue_activity
+from plane.utils.host import base_host
 from .base import BaseAPIView
 
 
@@ -180,11 +184,47 @@ class IssueAttachmentSlotEndpoint(BaseAPIView):
         require_slot_role(request, slug, project_id, write=True)
         issue = scoped_issue(slug, project_id, issue_id, lock=True)
         slot = get_object_or_404(scoped_slots(issue).select_for_update(), pk=slot_id)
-        # Soft deletion does not execute SET_NULL. Unlink even pending/deleted assets
-        # before marking the slot deleted, preserving them as ordinary attachments.
-        FileAsset.all_objects.filter(attachment_slot=slot).update(attachment_slot=None)
-        IssueAttachmentSlot.objects.filter(pk=slot.pk).update(deleted_at=timezone.now())
-        return Response(status=204)
+        attachments = FileAsset.objects.select_for_update().filter(
+            attachment_slot=slot,
+            workspace_id=issue.workspace_id,
+            project_id=issue.project_id,
+            issue_id=issue.id,
+            entity_type=FileAsset.EntityTypeContext.ISSUE_ATTACHMENT,
+            is_deleted=False,
+        )
+        # Include pending uploads, and authorize every file before changing either
+        # files or slot. Keeping the FK makes late completion fail closed as well.
+        files = list(attachments)
+        if any(asset.created_by_id != request.user.id for asset in files):
+            if not ProjectMember.objects.filter(
+                workspace_id=issue.workspace_id,
+                project_id=issue.project_id,
+                member=request.user,
+                is_active=True,
+                role=ROLE.ADMIN.value,
+            ).exists():
+                raise PermissionDenied("Only the uploader or a project admin can delete these attachments.")
+        deleted_ids = [str(asset.id) for asset in files]
+        deleted_at = timezone.now()
+        attachments.filter(pk__in=deleted_ids).update(is_deleted=True, deleted_at=deleted_at)
+        IssueAttachmentSlot.objects.filter(pk=slot.pk).update(deleted_at=deleted_at)
+        for _ in files:
+            transaction.on_commit(
+                partial(
+                    issue_activity.delay,
+                    type="attachment.activity.deleted",
+                    requested_data=None,
+                    actor_id=str(request.user.id),
+                    issue_id=str(issue.id),
+                    project_id=str(issue.project_id),
+                    current_instance=None,
+                    epoch=int(deleted_at.timestamp()),
+                    notification=True,
+                    origin=base_host(request=request, is_app=True),
+                ),
+                robust=True,
+            )
+        return Response({"slot_id": str(slot.id), "deleted_attachment_ids": deleted_ids})
 
 
 class ApplyAttachmentTemplateEndpoint(BaseAPIView):

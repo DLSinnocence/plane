@@ -27,28 +27,25 @@ export const IssueAttachmentsCollapsibleContent = observer(function IssueAttachm
   const { workspaceSlug, projectId, issueId, disabled, issueServiceType = EIssueServiceType.ISSUES } = props;
   // helper
   const attachmentHelpers = useAttachmentOperations(workspaceSlug, projectId, issueId, issueServiceType);
-  return (
-    <>
-      {issueServiceType === EIssueServiceType.ISSUES && (
-        <IssueAttachmentSlots
-          focusSlotId={props.focusSlotId}
-          onFocusHandled={props.onFocusHandled}
-          key={`${workspaceSlug}:${projectId}:${issueId}`}
-          workspaceSlug={workspaceSlug}
-          projectId={projectId}
-          issueId={issueId}
-          disabled={disabled}
-          attachmentHelpers={attachmentHelpers}
-        />
-      )}
-      <IssueAttachmentItemList
-        workspaceSlug={workspaceSlug}
-        projectId={projectId}
-        issueId={issueId}
-        disabled={disabled}
-        attachmentHelpers={attachmentHelpers}
-        issueServiceType={issueServiceType}
-      />
-    </>
+  return issueServiceType === EIssueServiceType.ISSUES ? (
+    <IssueAttachmentSlots
+      focusSlotId={props.focusSlotId}
+      onFocusHandled={props.onFocusHandled}
+      key={`${workspaceSlug}:${projectId}:${issueId}`}
+      workspaceSlug={workspaceSlug}
+      projectId={projectId}
+      issueId={issueId}
+      disabled={disabled}
+      attachmentHelpers={attachmentHelpers}
+    />
+  ) : (
+    <IssueAttachmentItemList
+      workspaceSlug={workspaceSlug}
+      projectId={projectId}
+      issueId={issueId}
+      disabled={disabled}
+      attachmentHelpers={attachmentHelpers}
+      issueServiceType={issueServiceType}
+    />
   );
 });

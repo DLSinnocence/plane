@@ -36,7 +36,11 @@ function fixture(attachmentApi = {}, slotApi = {}) {
     deleteIssueAttachment: async () => undefined,
     ...attachmentApi,
   };
-  const slots = { fetchSlots: async () => [], deleteSlot: async () => undefined, ...slotApi };
+  const slots = {
+    fetchSlots: async () => [],
+    deleteSlot: async () => ({ slot_id: "slot", deleted_attachment_ids: ["old"] }),
+    ...slotApi,
+  };
   const imports = (specifier) => {
     if (specifier === "@/services/issue")
       return {
@@ -60,15 +64,15 @@ function fixture(attachmentApi = {}, slotApi = {}) {
   return { store: new exports.IssueAttachmentStore(root, "issues"), updates };
 }
 
-test("slot fetches populate attachment lists and preserve replaced files as ordinary attachments", async () => {
+test("slot fetches reconcile replacement as one row with one current file", async () => {
   let current = file("old");
   const { store } = fixture({}, { fetchSlots: async () => [slot({ ...current, attachment_slot_id: "slot" })] });
   await store.fetchAttachmentSlots("workspace", "project", "issue");
   assert.equal(store.getAttachmentById("old").attributes.name, "old.zip");
   current = file("new");
   await store.fetchAttachmentSlots("workspace", "project", "issue");
-  assert.deepEqual([...store.getAttachmentsByIssueId("issue")], ["old", "new"]);
-  assert.equal(store.getAttachmentById("old").attachment_slot_id, null);
+  assert.deepEqual([...store.getAttachmentsByIssueId("issue")], ["new"]);
+  assert.equal(store.getAttachmentById("old"), undefined);
   assert.equal(store.getAttachmentSlotsByIssueId("issue")[0].attachment.id, "new");
 });
 
@@ -124,16 +128,17 @@ test("a successful upload stays successful when refreshing slots fails", async (
   const result = await store.createAttachment("workspace", "project", "issue", new File(["zip"], "new.zip"), "slot");
   assert.equal(result.id, "new");
   assert.equal(store.getAttachmentSlotsByIssueId("issue")[0].attachment.id, "new");
-  assert.deepEqual([...store.getAttachmentsByIssueId("issue")], ["old", "new"]);
+  assert.deepEqual([...store.getAttachmentsByIssueId("issue")], ["new"]);
 });
 
-test("deleting a slot keeps its file, while deleting a file empties its slot", async () => {
+test("deleting a row removes its file from every displayed collection", async () => {
   const first = fixture({}, { fetchSlots: async () => [slot(file("old"))] });
   await first.store.fetchAttachmentSlots("workspace", "project", "issue");
   await first.store.removeAttachmentSlot("workspace", "project", "issue", "slot");
   assert.deepEqual(first.store.getAttachmentSlotsByIssueId("issue"), []);
-  assert.deepEqual([...first.store.getAttachmentsByIssueId("issue")], ["old"]);
-  assert.equal(first.store.getAttachmentById("old").attachment_slot_id, null);
+  assert.deepEqual([...first.store.getAttachmentsByIssueId("issue")], []);
+  assert.equal(first.store.getAttachmentById("old"), undefined);
+  assert.equal(first.store.getAttachmentsCountByIssueId("issue"), 0);
 
   const second = fixture({}, { fetchSlots: async () => [slot(file("old"))] });
   await second.store.fetchAttachmentSlots("workspace", "project", "issue");
@@ -160,6 +165,67 @@ test("a late rename response cannot restore a file replaced during the request",
   await renaming;
   assert.equal(store.getAttachmentSlotsByIssueId("issue")[0].name, "Release");
   assert.equal(store.getAttachmentSlotsByIssueId("issue")[0].attachment.id, "new");
+});
+
+test("direct uploads immediately use the server's named row even if refresh fails", async () => {
+  const attached = { ...file("new"), attachment_slot_id: "auto-row" };
+  const row = { id: "auto-row", name: "附件2", sort_order: 4, attachment: attached };
+  const { store } = fixture(
+    { uploadIssueAttachment: async () => ({ ...attached, attachment_slot: row, deleted_attachment_ids: [] }) },
+    {
+      fetchSlots: async () => {
+        throw new Error("refresh unavailable");
+      },
+    }
+  );
+  await store.createAttachment("workspace", "project", "issue", new File(["zip"], "new.zip"));
+  assert.deepEqual(
+    store.getAttachmentSlotsByIssueId("issue").map((entry) => entry.name),
+    ["附件2"]
+  );
+  assert.deepEqual([...store.getAttachmentsByIssueId("issue")], ["new"]);
+});
+
+test("failed row deletion preserves the row and its file", async () => {
+  const { store } = fixture(
+    {},
+    {
+      fetchSlots: async () => [slot(file("old"))],
+      deleteSlot: async () => {
+        throw new Error("permission denied");
+      },
+    }
+  );
+  await store.fetchAttachmentSlots("workspace", "project", "issue");
+  await assert.rejects(store.removeAttachmentSlot("workspace", "project", "issue", "slot"), /permission denied/);
+  assert.equal(store.getAttachmentSlotsByIssueId("issue")[0].attachment.id, "old");
+  assert.deepEqual([...store.getAttachmentsByIssueId("issue")], ["old"]);
+});
+
+test("late file fetch and upload cannot restore files deleted with their row", async () => {
+  const uploading = deferred();
+  const fetching = deferred();
+  const { store } = fixture(
+    {
+      uploadIssueAttachment: () => uploading.promise,
+      getIssueAttachments: () => fetching.promise,
+    },
+    {
+      fetchSlots: async () => [slot(file("old"))],
+      deleteSlot: async () => ({ slot_id: "slot", deleted_attachment_ids: ["old", "pending"] }),
+    }
+  );
+  await store.fetchAttachmentSlots("workspace", "project", "issue");
+  const upload = store.createAttachment("workspace", "project", "issue", new File(["zip"], "pending.zip"), "slot");
+  const fetch = store.fetchAttachments("workspace", "project", "issue");
+  await store.removeAttachmentSlot("workspace", "project", "issue", "slot");
+  uploading.resolve({ ...file("pending"), attachment_slot_id: "slot" });
+  fetching.resolve([file("old"), file("pending")]);
+  await Promise.all([upload, fetch]);
+  assert.deepEqual(store.getAttachmentSlotsByIssueId("issue"), []);
+  assert.deepEqual([...store.getAttachmentsByIssueId("issue")], []);
+  assert.equal(store.getAttachmentById("old"), undefined);
+  assert.equal(store.getAttachmentById("pending"), undefined);
 });
 
 test("late debounced progress does not recreate a completed upload", async () => {

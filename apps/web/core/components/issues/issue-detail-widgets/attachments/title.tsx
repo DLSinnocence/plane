@@ -31,7 +31,7 @@ export const IssueAttachmentsCollapsibleTitle = observer(function IssueAttachmen
   const issue = getIssueById(issueId);
   const attachmentCount = countAttachments(
     issue?.attachment_count ?? 0,
-    issueServiceType === EIssueServiceType.ISSUES ? (attachment.getAttachmentSlotsByIssueId(issueId) ?? []) : []
+    issueServiceType === EIssueServiceType.ISSUES ? attachment.getAttachmentSlotsByIssueId(issueId) : undefined
   );
 
   return (

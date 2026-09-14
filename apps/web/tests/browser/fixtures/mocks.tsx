@@ -13,6 +13,8 @@ import {
   useNavigate,
   useParams as useRouteParams,
 } from "react-router";
+import attachmentMessages from "../../../../../packages/i18n/src/locales/en/common.json";
+import chineseAttachmentMessages from "../../../../../packages/i18n/src/locales/zh-CN/common.json";
 import { authFixtureEnabled, invitationAuthState } from "./invitation-auth-state";
 import { workflowStates } from "./stage-data";
 
@@ -104,9 +106,13 @@ export default function Link({ href, children, ...props }: React.AnchorHTMLAttri
 }
 export const useTranslation = () => ({
   t: (key: string, values?: Record<string, unknown>) =>
-    key === "attachment.selection_details"
-      ? `${key}: size=${values?.size}; limit=${values?.limit}; reason=${values?.reason}`
-      : key,
+    key === "attachment.slots.default_name"
+      ? chineseAttachmentMessages.attachment.slots.default_name
+      : key === "attachment.slots.delete_slot_help"
+        ? attachmentMessages.attachment.slots.delete_slot_help.replace("{name}", String(values?.name ?? ""))
+        : key === "attachment.selection_details"
+          ? `${key}: size=${values?.size}; limit=${values?.limit}; reason=${values?.reason}`
+          : key,
 });
 export const StateOption = ({ option }: { option: { value: string; content: React.ReactNode } }) => (
   <Combobox.Option value={option.value}>{option.content}</Combobox.Option>

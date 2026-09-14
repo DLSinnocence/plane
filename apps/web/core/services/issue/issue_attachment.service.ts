@@ -8,7 +8,13 @@ import type { AxiosRequestConfig } from "axios";
 import { API_BASE_URL } from "@plane/constants";
 // plane types
 import { getFileMetaDataForUpload, generateFileUploadPayload } from "@plane/services";
-import type { TIssueAttachment, TIssueAttachmentUploadResponse, TIssueServiceType } from "@plane/types";
+import type {
+  TIssueAttachment,
+  TIssueAttachmentSlot,
+  TIssueAttachmentUploadResponse,
+  TIssueAttachmentUploadResult,
+  TIssueServiceType,
+} from "@plane/types";
 import { EIssueServiceType } from "@plane/types";
 // services
 import { APIService } from "@/services/api.service";
@@ -30,7 +36,14 @@ export class IssueAttachmentService extends APIService {
     projectId: string,
     issueId: string,
     attachmentId: string
-  ): Promise<void> {
+  ): Promise<
+    | {
+        attachment_slot_id?: string | null;
+        attachment_slot?: Omit<TIssueAttachmentSlot, "attachment">;
+        deleted_attachment_ids?: string[];
+      }
+    | undefined
+  > {
     return this.patch(
       `/api/assets/v2/workspaces/${workspaceSlug}/projects/${projectId}/${this.serviceType}/${issueId}/attachments/${attachmentId}/`
     ).then((response) => response?.data);
@@ -43,7 +56,7 @@ export class IssueAttachmentService extends APIService {
     file: File,
     uploadProgressHandler?: AxiosRequestConfig["onUploadProgress"],
     slotId?: string
-  ): Promise<TIssueAttachment> {
+  ): Promise<TIssueAttachmentUploadResult> {
     const fileMetaData = await getFileMetaDataForUpload(file);
     return this.post(
       `/api/assets/v2/workspaces/${workspaceSlug}/projects/${projectId}/${this.serviceType}/${issueId}/attachments/`,
@@ -56,8 +69,22 @@ export class IssueAttachmentService extends APIService {
         fileUploadPayload,
         uploadProgressHandler
       );
-      await this.updateIssueAttachmentUploadStatus(workspaceSlug, projectId, issueId, signedURLResponse.asset_id);
-      return signedURLResponse.attachment;
+      const completion = await this.updateIssueAttachmentUploadStatus(
+        workspaceSlug,
+        projectId,
+        issueId,
+        signedURLResponse.asset_id
+      );
+      const attachment = {
+        ...signedURLResponse.attachment,
+        ...(completion?.attachment_slot_id ? { attachment_slot_id: completion.attachment_slot_id } : {}),
+      };
+      const row = completion?.attachment_slot ?? signedURLResponse.attachment_slot;
+      return {
+        ...attachment,
+        deleted_attachment_ids: completion?.deleted_attachment_ids ?? [],
+        ...(row ? { attachment_slot: { ...row, attachment } } : {}),
+      };
     });
   }
 

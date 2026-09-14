@@ -4,9 +4,10 @@
  * See the LICENSE file for details.
  */
 
-import { uniq, pull, set, debounce, update, concat, sortBy } from "lodash-es";
+import { uniq, set, debounce, update, concat, sortBy } from "lodash-es";
 import { action, computed, makeObservable, observable, runInAction } from "mobx";
 import { computedFn } from "mobx-utils";
+import { EIssueServiceType } from "@plane/types";
 import { v4 as uuidv4 } from "uuid";
 // types
 import type {
@@ -92,6 +93,10 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
   attachmentMap: TIssueAttachmentMap = {};
   attachmentSlots: Record<string, TIssueAttachmentSlot[]> = {};
   private slotRequestVersions: Record<string, number> = {};
+  private attachmentRequestVersions: Record<string, number> = {};
+  private deletedAttachmentIds = new Set<string>();
+  private deletedSlotIds = new Set<string>();
+  private serviceType: TIssueServiceType;
   attachmentsUploadStatusMap: Record<string, Record<string, TAttachmentUploadStatus>> = {};
   // root store
   rootIssueStore: IIssueRootStore;
@@ -101,6 +106,7 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
   private attachmentTemplateService = new AttachmentTemplateService();
 
   constructor(rootStore: IIssueRootStore, serviceType: TIssueServiceType) {
+    this.serviceType = serviceType;
     makeObservable(this, {
       // observables
       attachments: observable,
@@ -151,19 +157,37 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
 
   private setAttachmentSlots(issueId: string, slots: TIssueAttachmentSlot[]) {
     this.nextSlotRequest(issueId);
+    const currentSlots = slots
+      .filter((slot) => !this.deletedSlotIds.has(slot.id))
+      .map((slot) =>
+        slot.attachment && this.deletedAttachmentIds.has(slot.attachment.id)
+          ? Object.assign({}, slot, { attachment: null })
+          : slot
+      );
     runInAction(() => {
-      const currentAttachmentIds = new Set(slots.map((slot) => slot.attachment?.id).filter(Boolean));
-      for (const previous of this.attachmentSlots[issueId] ?? []) {
-        if (previous.attachment && !currentAttachmentIds.has(previous.attachment.id)) {
-          const attachment = this.attachmentMap[previous.attachment.id];
-          if (attachment) attachment.attachment_slot_id = null;
-        }
-      }
-      this.attachmentSlots[issueId] = sortBy(slots, "sort_order");
+      const currentIds = new Set(currentSlots.flatMap((slot) => (slot.attachment ? [slot.attachment.id] : [])));
+      const removedIds = (this.attachmentSlots[issueId] ?? []).flatMap((slot) =>
+        slot.attachment && !currentIds.has(slot.attachment.id) ? [slot.attachment.id] : []
+      );
+      if (removedIds.length) this.removeCachedAttachments(issueId, removedIds);
+      this.attachmentSlots[issueId] = sortBy(currentSlots, "sort_order");
       this.addAttachments(
         issueId,
-        slots.flatMap((slot) => (slot.attachment ? [slot.attachment] : []))
+        currentSlots.flatMap((slot) => (slot.attachment ? [slot.attachment] : []))
       );
+      this.rootIssueStore.issues.updateIssue(issueId, {
+        attachment_count: currentSlots.filter((slot) => slot.attachment).length,
+      });
+    });
+  }
+
+  private removeCachedAttachments(issueId: string, attachmentIds: string[]) {
+    this.attachmentRequestVersions[issueId] = (this.attachmentRequestVersions[issueId] ?? 0) + 1;
+    for (const id of attachmentIds) this.deletedAttachmentIds.add(id);
+    runInAction(() => {
+      for (const id of attachmentIds) delete this.attachmentMap[id];
+      this.attachments[issueId] = (this.attachments[issueId] ?? []).filter((id) => !this.deletedAttachmentIds.has(id));
+      this.rootIssueStore.issues.updateIssue(issueId, { attachment_count: this.getAttachmentsCountByIssueId(issueId) });
     });
   }
 
@@ -204,11 +228,15 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
 
   removeAttachmentSlot = async (workspaceSlug: string, projectId: string, issueId: string, slotId: string) => {
     this.nextSlotRequest(issueId);
-    await this.attachmentTemplateService.deleteSlot(workspaceSlug, projectId, issueId, slotId);
-    this.setAttachmentSlots(
-      issueId,
-      (this.attachmentSlots[issueId] ?? []).filter((slot) => slot.id !== slotId)
-    );
+    const result = await this.attachmentTemplateService.deleteSlot(workspaceSlug, projectId, issueId, slotId);
+    runInAction(() => {
+      this.deletedSlotIds.add(slotId);
+      this.removeCachedAttachments(issueId, result.deleted_attachment_ids);
+      this.setAttachmentSlots(
+        issueId,
+        (this.attachmentSlots[issueId] ?? []).filter((slot) => slot.id !== slotId)
+      );
+    });
   };
 
   applyAttachmentTemplate = async (workspaceSlug: string, projectId: string, issueId: string, templateId: string) => {
@@ -230,18 +258,29 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
 
   // actions
   addAttachments = (issueId: string, attachments: TIssueAttachment[]) => {
-    if (attachments && attachments.length > 0) {
-      const newAttachmentIds = attachments.map((attachment) => attachment.id);
+    const current = attachments.filter((attachment) => !this.deletedAttachmentIds.has(attachment.id));
+    if (current.length > 0) {
+      this.attachmentRequestVersions[issueId] = (this.attachmentRequestVersions[issueId] ?? 0) + 1;
+      const newAttachmentIds = current.map((attachment) => attachment.id);
       runInAction(() => {
         update(this.attachments, [issueId], (attachmentIds = []) => uniq(concat(attachmentIds, newAttachmentIds)));
-        attachments.forEach((attachment) => set(this.attachmentMap, attachment.id, attachment));
+        current.forEach((attachment) => set(this.attachmentMap, attachment.id, attachment));
       });
     }
   };
 
   fetchAttachments = async (workspaceSlug: string, projectId: string, issueId: string) => {
+    const version = (this.attachmentRequestVersions[issueId] ?? 0) + 1;
+    this.attachmentRequestVersions[issueId] = version;
     const response = await this.issueAttachmentService.getIssueAttachments(workspaceSlug, projectId, issueId);
-    this.addAttachments(issueId, response);
+    if (this.attachmentRequestVersions[issueId] === version) {
+      const current = response.filter((attachment) => !this.deletedAttachmentIds.has(attachment.id));
+      runInAction(() => {
+        this.attachments[issueId] = current.map((attachment) => attachment.id);
+        this.addAttachments(issueId, current);
+        this.rootIssueStore.issues.updateIssue(issueId, { attachment_count: current.length });
+      });
+    }
     return response;
   };
 
@@ -277,30 +316,45 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
         slotId
       );
 
-      if (response && response.id) {
+      if (response && response.id && !this.deletedAttachmentIds.has(response.id)) {
+        const assignedSlotId = response.attachment_slot_id ?? slotId;
+        if (assignedSlotId && this.deletedSlotIds.has(assignedSlotId)) {
+          this.removeCachedAttachments(issueId, [response.id]);
+          return response;
+        }
         runInAction(() => {
-          update(this.attachments, [issueId], (attachmentIds = []) => uniq(concat(attachmentIds, [response.id])));
-          set(this.attachmentMap, response.id, response);
+          this.removeCachedAttachments(issueId, response.deleted_attachment_ids ?? []);
+          this.addAttachments(issueId, [response]);
+          if (response.attachment_slot) {
+            this.setAttachmentSlots(issueId, [
+              ...(this.attachmentSlots[issueId] ?? []).filter((slot) => slot.id !== response.attachment_slot?.id),
+              response.attachment_slot,
+            ]);
+          } else if (assignedSlotId) {
+            this.setAttachmentSlots(
+              issueId,
+              (this.attachmentSlots[issueId] ?? []).map((slot) =>
+                slot.id === assignedSlotId ? Object.assign({}, slot, { attachment: response }) : slot
+              )
+            );
+          }
           this.rootIssueStore.issues.updateIssue(issueId, {
             attachment_count: this.getAttachmentsCountByIssueId(issueId),
           });
         });
-        if (slotId) {
-          this.setAttachmentSlots(
-            issueId,
-            (this.attachmentSlots[issueId] ?? []).map((slot) =>
-              slot.id === slotId ? Object.assign({}, slot, { attachment: response }) : slot
-            )
-          );
-          // The file is already committed; a refresh failure must not invite a duplicate upload.
+        if (this.serviceType === EIssueServiceType.ISSUES) {
+          // The committed row already exists locally; refresh failures must not invite another upload.
           await this.fetchAttachmentSlots(workspaceSlug, projectId, issueId).catch((error) => {
-            console.error("Error refreshing attachment slots after upload:", error);
+            console.error("Error refreshing attachment rows after upload:", error);
           });
         }
       }
 
       return response;
     } catch (error) {
+      if (this.serviceType === EIssueServiceType.ISSUES) {
+        await this.fetchAttachmentSlots(workspaceSlug, projectId, issueId).catch(() => undefined);
+      }
       console.error("Error in uploading issue attachment:", error);
       throw error;
     } finally {
@@ -319,11 +373,7 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
     );
 
     runInAction(() => {
-      update(this.attachments, [issueId], (attachmentIds = []) => {
-        if (attachmentIds.includes(attachmentId)) pull(attachmentIds, attachmentId);
-        return attachmentIds;
-      });
-      delete this.attachmentMap[attachmentId];
+      this.removeCachedAttachments(issueId, [attachmentId]);
       if (this.attachmentSlots[issueId]) {
         this.setAttachmentSlots(
           issueId,

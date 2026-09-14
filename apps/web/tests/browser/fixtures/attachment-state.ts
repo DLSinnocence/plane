@@ -22,6 +22,7 @@ const file = (id: string, name: string): TIssueAttachment => ({
   attributes: { name, size: 4 },
   asset_url: `/files/${name}`,
   issue_id: "issue",
+  attachment_slot_id: "design",
   created_by: params.has("own-file") ? "developer" : "",
   updated_by: "",
   updated_at: "2026-01-01",
@@ -44,7 +45,7 @@ class AttachmentFixtureState {
               ),
         },
       ];
-  files: TIssueAttachment[] = params.has("empty") ? [] : [file("old", "old.txt")];
+  files: TIssueAttachment[] = this.slots.flatMap((slot) => (slot.attachment ? [slot.attachment] : []));
   templates: TAttachmentTemplate[] = [
     {
       id: "review",
@@ -86,7 +87,7 @@ class AttachmentFixtureState {
       throw httpError(400, { name: ["A slot with this name already exists."] });
     const slot = { id: `slot-${++this.serial}`, name, sort_order: this.slots.length, attachment: null };
     this.slots.push(slot);
-    return slot;
+    return this.slots[this.slots.length - 1];
   }
   async updateAttachmentSlot(_workspace: string, _project: string, _issue: string, id: string, name: string) {
     this.calls.push("renameSlot");
@@ -99,7 +100,10 @@ class AttachmentFixtureState {
   }
   async removeAttachmentSlot(_workspace: string, _project: string, _issue: string, id: string) {
     this.calls.push("deleteSlot");
+    const deletedAttachmentIds = this.files.filter((item) => item.attachment_slot_id === id).map((item) => item.id);
+    this.files = this.files.filter((item) => !deletedAttachmentIds.includes(item.id));
     this.slots = this.slots.filter((item) => item.id !== id);
+    return { slot_id: id, deleted_attachment_ids: deletedAttachmentIds };
   }
   async removeAttachment(_workspace: string, _project: string, _issue: string, id: string) {
     this.calls.push("deleteFile");
@@ -107,13 +111,13 @@ class AttachmentFixtureState {
     for (const slot of this.slots) if (slot.attachment?.id === id) slot.attachment = null;
   }
   getAttachmentsUploadStatusByIssueId() {
-    return [];
+    return params.has("uploading") ? [{ id: "pending-upload", name: "pending.txt", progress: 25 }] : [];
   }
   async createAttachment(_workspace: string, _project: string, _issue: string, upload: File, slotId?: string) {
     return this.upload(upload, slotId);
   }
   async upload(upload: File, slotId?: string) {
-    this.calls.push(`upload:${upload.name}:${slotId ?? "ordinary"}`);
+    this.calls.push(`upload:${upload.name}:${slotId ?? "auto"}`);
     if (upload.name === "forbidden.txt") throw httpError(403, { detail: "Uploads denied by project policy" });
     if (upload.name === "provider.txt")
       throw httpError(
@@ -121,11 +125,20 @@ class AttachmentFixtureState {
         "<Error><Code>StorageUnavailable</Code><Message>Bucket temporarily unavailable</Message><RequestId>private-request-id</RequestId></Error>"
       );
     if (upload.name === "fail.txt") throw new Error("Upload rejected");
+    let slot = this.slots.find((item) => item.id === slotId);
+    if (!slot) {
+      let name = "附件";
+      let suffix = 2;
+      while (this.slots.some((item) => item.name.toLowerCase() === name.toLowerCase())) name = `附件${suffix++}`;
+      slot = await this.createAttachmentSlot("workspace", "project", "issue", name);
+    }
     const uploaded = file(`file-${++this.serial}`, upload.name);
+    uploaded.created_by = "developer";
+    uploaded.attachment_slot_id = slot.id;
     uploaded.attributes.size = upload.size;
+    this.files = this.files.filter((item) => item.attachment_slot_id !== slot.id);
     this.files.push(uploaded);
-    const slot = this.slots.find((item) => item.id === slotId);
-    if (slot) slot.attachment = uploaded;
+    slot.attachment = uploaded;
   }
   async applyAttachmentTemplate(_workspace: string, _project: string, _issue: string, id: string) {
     this.calls.push("applyTemplate");

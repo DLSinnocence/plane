@@ -2,6 +2,15 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
+from plane.utils.attachment_rows import (
+    create_attachment_asset, complete_attachment_asset, presign_attachment_upload, require_replacement_permission,
+    attachment_completion_data,
+)
+from plane.app.serializers.attachment import AttachmentSlotUploadSerializer
+from plane.app.views.attachment import require_slot_role, scoped_issue
+from plane.db.models import IssueAttachmentSlot
+from django.shortcuts import get_object_or_404
+
 # Python imports
 import json
 from functools import partial
@@ -1904,6 +1913,7 @@ class IssueAttachmentListCreateAPIEndpoint(BaseAPIView):
             ),
         },
     )
+    @transaction.atomic
     def post(self, request, slug, project_id, issue_id):
         """Create work item attachment
 
@@ -1979,8 +1989,21 @@ class IssueAttachmentListCreateAPIEndpoint(BaseAPIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
+        slot_data = AttachmentSlotUploadSerializer(data=request.data)
+        slot_data.is_valid(raise_exception=True)
+        issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        slot = None
+        if "slot_id" in slot_data.validated_data:
+            require_slot_role(request, slug, project_id, write=True)
+            slot = get_object_or_404(
+                IssueAttachmentSlot.objects.select_for_update(),
+                pk=slot_data.validated_data["slot_id"],
+                workspace_id=issue.workspace_id, project_id=project_id, issue_id=issue_id,
+            )
+            require_replacement_permission(slot, request.user)
         # Create a File Asset
-        asset = FileAsset.objects.create(
+        asset = create_attachment_asset(
+            attachment_slot=slot,
             attributes={"name": name, "type": type, "size": size_limit},
             asset=asset_key,
             size=size_limit,
@@ -1996,12 +2019,13 @@ class IssueAttachmentListCreateAPIEndpoint(BaseAPIView):
         # Get the presigned URL
         storage = S3Storage(request=request)
         # Generate a presigned URL to share an S3 object
-        presigned_url = storage.generate_presigned_post(object_name=asset_key, file_type=type, file_size=size_limit)
+        presigned_url = presign_attachment_upload(storage, asset, type, size_limit)
         # Return the presigned URL
         return Response(
             {
                 "upload_data": presigned_url,
                 "asset_id": str(asset.id),
+                "attachment_slot_id": str(asset.attachment_slot_id),
                 "attachment": IssueAttachmentSerializer(asset).data,
                 "asset_url": asset.asset_url,
             },
@@ -2192,7 +2216,24 @@ class IssueAttachmentDetailAPIEndpoint(BaseAPIView):
             examples=[ATTACHMENT_UPLOAD_CONFIRM_EXAMPLE],
         ),
         responses={
-            204: OpenApiResponse(description="Work item attachment uploaded successfully"),
+            200: OpenApiResponse(
+                description="Work item attachment uploaded successfully; returns the row and replaced file IDs.",
+                response={
+                    "type": "object",
+                    "properties": {
+                        "attachment_slot_id": {"type": "string", "format": "uuid"},
+                        "attachment_slot": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string", "format": "uuid"},
+                                "name": {"type": "string"},
+                                "sort_order": {"type": "integer"},
+                            },
+                        },
+                        "deleted_attachment_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}},
+                    },
+                },
+            ),
             400: INVALID_REQUEST_RESPONSE,
             404: ATTACHMENT_NOT_FOUND_RESPONSE,
         },
@@ -2218,34 +2259,33 @@ class IssueAttachmentDetailAPIEndpoint(BaseAPIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        issue_attachment = FileAsset.objects.get(pk=pk, workspace__slug=slug, project_id=project_id)
-        if issue_attachment.attachment_slot_id:
-            return Response({"error": "Complete slot uploads through the app issue attachment endpoint."}, status=400)
+        issue_attachment = FileAsset.objects.get(
+            pk=pk, workspace__slug=slug, project_id=project_id, issue_id=issue_id, is_deleted=False,
+        )
+        issue_attachment, completed = complete_attachment_asset(issue_attachment, request.user)
+        if not completed:
+            return Response(attachment_completion_data(issue_attachment), status=status.HTTP_200_OK)
         serializer = IssueAttachmentSerializer(issue_attachment)
 
-        # Send this activity only if the attachment is not uploaded before
-        if not issue_attachment.is_uploaded:
-            issue_activity.delay(
+        transaction.on_commit(
+            lambda: issue_activity.delay(
                 type="attachment.activity.created",
                 requested_data=None,
-                actor_id=str(self.request.user.id),
-                issue_id=str(self.kwargs.get("issue_id", None)),
-                project_id=str(self.kwargs.get("project_id", None)),
+                actor_id=str(request.user.id),
+                issue_id=str(issue_id),
+                project_id=str(project_id),
                 current_instance=json.dumps(serializer.data, cls=DjangoJSONEncoder),
                 epoch=int(timezone.now().timestamp()),
                 notification=True,
                 origin=base_host(request=request, is_app=True),
-            )
-
-            # Update the attachment
-            issue_attachment.is_uploaded = True
-            issue_attachment.created_by = request.user
-
-        # Get the storage metadata
+            ),
+            robust=True,
+        )
         if not issue_attachment.storage_metadata:
-            get_asset_object_metadata.delay(str(issue_attachment.id))
-        issue_attachment.save()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+            transaction.on_commit(
+                lambda: get_asset_object_metadata.delay(str(issue_attachment.id)), robust=True,
+            )
+        return Response(attachment_completion_data(issue_attachment), status=status.HTTP_200_OK)
 
 
 class IssueSearchEndpoint(BaseAPIView):

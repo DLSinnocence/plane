@@ -6,14 +6,21 @@
 
 export function nextEmptyAttachmentName(names: string[], label: string): string {
   const existing = new Set(names.map((name) => name.trim().toLowerCase()));
-  const prefix = [...label.trim()].slice(0, 90).join("") || "Empty attachment";
-  let index = 1;
-  while (existing.has(`${prefix} ${index}`.toLowerCase())) index += 1;
-  return `${prefix} ${index}`;
+  const prefix = [...label.trim()].slice(0, 90).join("") || "附件";
+  if (!existing.has(prefix.toLowerCase())) return prefix;
+  let index = 2;
+  while (existing.has(`${prefix}${index}`.toLowerCase())) index += 1;
+  return `${prefix}${index}`;
 }
 
-export function countAttachments(fileCount: number, slots: { attachment: unknown }[]): number {
-  return fileCount + slots.filter((slot) => !slot.attachment).length;
+export function countAttachments(fileCount: number, slots?: { attachment: unknown }[]): number {
+  return slots ? slots.length : fileCount;
+}
+
+export function validateAttachmentName(name: string, otherNames: string[]): "name" | "duplicate" | null {
+  const value = name.trim();
+  if (!value || [...value].length > 100) return "name";
+  return otherNames.some((other) => other.trim().toLowerCase() === value.toLowerCase()) ? "duplicate" : null;
 }
 
 export function validateSlotNames(names: string[]): "name" | "count" | "duplicate" | null {

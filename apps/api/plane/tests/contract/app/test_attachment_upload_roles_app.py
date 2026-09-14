@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
-"""Ordinary attachment permissions for the reported 39 KiB ZIP upload.
+"""Named attachment row permissions for the reported 39 KiB ZIP upload.
 
 Exercise the real Django metadata/upload-completion endpoints and permission
 checks. Object-storage transfers and Celery publication stay mocked; these
@@ -62,7 +62,7 @@ def zip_upload_context(workspace, create_user, settings):
 
 
 def zip_payload():
-    # Intentionally omit slot_id: this reproduces the ordinary-attachment path.
+    # Omitting slot_id provisions a named row as part of the authorized upload.
     return {"name": ZIP_NAME, "type": ZIP_TYPE, "size": ZIP_SIZE}
 
 
@@ -87,11 +87,19 @@ def test_39k_zip_upload_and_complete_on_another_users_issue(
     assert asset.project_id == context["project"].id
     assert asset.workspace_id == context["workspace"].id
     assert asset.created_by_id == context["uploader"].id
-    assert asset.attachment_slot_id is None
+    assert asset.attachment_slot_id is not None
+    assert asset.attachment_slot.name == "附件"
+    assert asset.attachment_slot.issue_id == context["issue"].id
+    assert asset.attachment_slot.project_id == context["project"].id
+    assert asset.attachment_slot.workspace_id == context["workspace"].id
     assert not asset.is_uploaded
     assert asset.size == ZIP_SIZE
     assert asset.attributes == {"name": ZIP_NAME, "type": ZIP_TYPE, "size": ZIP_SIZE}
-    assert response.data["attachment"]["attachment_slot_id"] is None
+    slot_id = str(asset.attachment_slot_id)
+    assert str(response.data["attachment"]["attachment_slot_id"]) == slot_id
+    assert response.data["attachment_slot_id"] == slot_id
+    row_data = {"id": slot_id, "name": asset.attachment_slot.name, "sort_order": asset.attachment_slot.sort_order}
+    assert response.data["attachment_slot"] == row_data
     assert response.data["upload_data"]["url"] == "https://storage.example.test/upload"
     context["storage"].return_value.generate_presigned_post.assert_called_once_with(
         object_name=asset.asset.name, file_type=ZIP_TYPE, file_size=ZIP_SIZE
@@ -101,11 +109,18 @@ def test_39k_zip_upload_and_complete_on_another_users_issue(
     detail = url + str(asset.id) + "/"
     with django_capture_on_commit_callbacks(execute=True):
         completed = client.patch(detail, {}, format="json")
-    assert completed.status_code == 204, completed.data
+    assert completed.status_code == 200, completed.data
+    assert completed.data == {
+        "attachment_slot_id": slot_id, "deleted_attachment_ids": [], "attachment_slot": row_data,
+    }
     asset.refresh_from_db()
     assert asset.is_uploaded
     assert asset.created_by_id == context["uploader"].id
-    assert asset.attachment_slot_id is None
+    assert asset.attachment_slot_id is not None
+    assert asset.attachment_slot.name == "附件"
+    assert asset.attachment_slot.issue_id == context["issue"].id
+    assert asset.attachment_slot.project_id == context["project"].id
+    assert asset.attachment_slot.workspace_id == context["workspace"].id
     listed = client.get(url)
     assert listed.status_code == 200, listed.data
     assert [str(row["id"]) for row in listed.data] == [str(asset.id)]
@@ -115,7 +130,16 @@ def test_39k_zip_upload_and_complete_on_another_users_issue(
 
     with django_capture_on_commit_callbacks(execute=True):
         repeated = client.patch(detail, {}, format="json")
-    assert repeated.status_code == 204, repeated.data
+    assert repeated.status_code == 200, repeated.data
+    assert repeated.data == {
+        "attachment_slot_id": slot_id, "deleted_attachment_ids": [], "attachment_slot": row_data,
+    }
+    if role == 5:
+        slots_url = url.replace("/api/assets/v2/", "/api/").replace("/attachments/", "/attachment-slots/")
+        slot_detail = slots_url + slot_id + "/"
+        assert client.patch(slot_detail, {"name": "Changed"}, format="json").status_code == 403
+        assert client.delete(slot_detail).status_code == 403
+        assert client.post(url, {**zip_payload(), "slot_id": slot_id}, format="json").status_code == 403
     context["activity"].assert_called_once()
     context["metadata"].assert_called_once()
 

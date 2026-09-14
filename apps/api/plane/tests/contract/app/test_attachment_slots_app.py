@@ -192,7 +192,9 @@ def test_slots_rename_apply_append_and_scope(attachment_context):
     )
     mismatched_url = slots.replace(str(issue.id), str(uuid4()))
     assert client.get(mismatched_url).status_code == 404
-    assert client.delete(detail).status_code == 204
+    response = client.delete(detail)
+    assert response.status_code == 200
+    assert response.data == {"slot_id": str(first["id"]), "deleted_attachment_ids": []}
 
 
 def test_template_edits_do_not_retroactively_change_applied_slots(attachment_context):
@@ -206,7 +208,7 @@ def test_template_edits_do_not_retroactively_change_applied_slots(attachment_con
     assert applied.status_code == 200, applied.data
     proof = applied.data[0]
     asset_id = upload(attachment_context, proof["id"])
-    assert client.patch(assets + asset_id + "/", {}, format="json").status_code == 204
+    assert client.patch(assets + asset_id + "/", {}, format="json").status_code == 200
     original = client.get(slots).data
     assert str(original[0]["attachment"]["attachment_slot_id"]) == str(proof["id"])
     assert original[1]["attachment"] is None
@@ -236,7 +238,7 @@ def test_cross_issue_slot_id_rejected_before_creating_upload(attachment_context)
     foreign_slot = create_slot(other_context)
     existing_id = upload(other_context, foreign_slot["id"])
     other_assets = urls(other_context)[2]
-    assert client.patch(other_assets + existing_id + "/", {}, format="json").status_code == 204
+    assert client.patch(other_assets + existing_id + "/", {}, format="json").status_code == 200
     original = client.get(urls(other_context)[1]).data
     before = FileAsset.objects.count()
     with mock.patch("plane.app.views.issue.attachment.S3Storage") as storage:
@@ -271,32 +273,48 @@ def test_slot_limit_is_atomic(attachment_context):
     assert client.post(slots, {"name": "Overflow"}, format="json").status_code == 400
 
 
-def test_two_phase_replace_retry_delete_and_ordinary_compatibility(attachment_context):
+def test_two_phase_replace_retry_delete_and_direct_upload_rows(attachment_context):
     client = attachment_context[0]
     _, slots, assets = urls(attachment_context)
     slot = create_slot(attachment_context)
     first = upload(attachment_context, slot["id"])
     assert client.get(slots).data[0]["attachment"] is None
-    assert client.patch(assets + first + "/", {}, format="json").status_code == 204
+    first_complete = client.patch(assets + first + "/", {}, format="json")
+    assert first_complete.status_code == 200
+    assert first_complete.data == {
+        "attachment_slot_id": str(slot["id"]), "deleted_attachment_ids": [],
+        "attachment_slot": {"id": str(slot["id"]), "name": slot["name"], "sort_order": slot["sort_order"]},
+    }
     assert str(client.get(slots).data[0]["attachment"]["id"]) == first
     second = upload(attachment_context, slot["id"])
     # A pending/failed storage upload cannot displace the completed file.
     assert str(client.get(slots).data[0]["attachment"]["id"]) == first
-    assert client.patch(assets + second + "/", {}, format="json").status_code == 204
-    assert client.patch(assets + first + "/", {}, format="json").status_code == 204
-    assert client.patch(assets + second + "/", {}, format="json").status_code == 204
+    replaced = client.patch(assets + second + "/", {}, format="json")
+    assert replaced.status_code == 200
+    assert replaced.data == {
+        "attachment_slot_id": str(slot["id"]), "deleted_attachment_ids": [first],
+        "attachment_slot": {"id": str(slot["id"]), "name": slot["name"], "sort_order": slot["sort_order"]},
+    }
+    assert client.patch(assets + first + "/", {}, format="json").status_code == 404
+    repeated = client.patch(assets + second + "/", {}, format="json")
+    assert repeated.status_code == 200 and repeated.data["deleted_attachment_ids"] == []
     assert str(client.get(slots).data[0]["attachment"]["id"]) == second
-    assert FileAsset.objects.get(pk=first).attachment_slot_id is None
-    assert len(client.get(assets).data) == 2
+    old = FileAsset.all_objects.get(pk=first)
+    assert old.is_deleted and old.deleted_at and str(old.attachment_slot_id) == str(slot["id"])
+    assert len(client.get(assets).data) == 1
     assert client.delete(assets + second + "/").status_code == 204
     assert client.get(slots).data[0]["attachment"] is None
     third = upload(attachment_context, slot["id"])
-    assert client.delete(slots + str(slot["id"]) + "/").status_code == 204
-    assert FileAsset.objects.get(pk=third).attachment_slot_id is None
-    assert client.patch(assets + third + "/", {}, format="json").status_code == 204
-    ordinary = upload(attachment_context)
-    assert client.patch(assets + ordinary + "/", {}, format="json").status_code == 204
-    assert len(client.get(assets).data) == 3
+    response = client.delete(slots + str(slot["id"]) + "/")
+    assert response.status_code == 200
+    assert response.data == {"slot_id": str(slot["id"]), "deleted_attachment_ids": [third]}
+    assert FileAsset.all_objects.get(pk=third).is_deleted
+    assert FileAsset.all_objects.get(pk=first).is_deleted
+    assert client.patch(assets + third + "/", {}, format="json").status_code == 404
+    direct = upload(attachment_context)
+    assert client.patch(assets + direct + "/", {}, format="json").status_code == 200
+    assert {str(row["id"]) for row in client.get(assets).data} == {direct}
+    assert FileAsset.objects.get(pk=direct).attachment_slot.name == "附件"
 
 
 @pytest.mark.django_db(transaction=True)
@@ -305,7 +323,7 @@ def test_completion_survives_broker_failure_after_commit(attachment_context, cap
     _, slots, assets = urls(attachment_context)
     slot = create_slot(attachment_context)
     previous = upload(attachment_context, slot["id"])
-    assert client.patch(assets + previous + "/", {}, format="json").status_code == 204
+    assert client.patch(assets + previous + "/", {}, format="json").status_code == 200
     replacement = upload(attachment_context, slot["id"])
 
     with (
@@ -321,18 +339,20 @@ def test_completion_survives_broker_failure_after_commit(attachment_context, cap
     ):
         # transaction=True executes the callbacks during the request's real commit.
         response = client.patch(assets + replacement + "/", {}, format="json")
-        assert response.status_code == 204, response.data
+        assert response.status_code == 200, response.data
+        assert response.data["deleted_attachment_ids"] == [previous]
         current = FileAsset.objects.get(pk=replacement)
         assert current.is_uploaded and str(current.attachment_slot_id) == str(slot["id"])
-        assert FileAsset.objects.get(pk=previous).attachment_slot_id is None
+        old = FileAsset.all_objects.get(pk=previous)
+        assert old.is_deleted and old.deleted_at and str(old.attachment_slot_id) == str(slot["id"])
         assert str(client.get(slots).data[0]["attachment"]["id"]) == replacement
         activity.assert_called_once()
         metadata.assert_called_once_with(replacement)
         assert "activity broker unavailable" in caplog.text
         assert "metadata broker unavailable" in caplog.text
 
-        assert client.patch(assets + replacement + "/", {}, format="json").status_code == 204
-        assert client.patch(assets + previous + "/", {}, format="json").status_code == 204
+        assert client.patch(assets + replacement + "/", {}, format="json").status_code == 200
+        assert client.patch(assets + previous + "/", {}, format="json").status_code == 404
         activity.assert_called_once()
         metadata.assert_called_once()
         assert str(client.get(slots).data[0]["attachment"]["id"]) == replacement
@@ -350,11 +370,11 @@ def test_completion_permissions_and_generic_bypass(attachment_context):
     second_client.force_authenticate(user=outsider)
     assert second_client.patch(assets + asset_id + "/", {}, format="json").status_code == 403
     generic = f"/api/assets/v2/workspaces/{workspace.slug}/{asset_id}/"
-    assert second_client.patch(generic, {}, format="json").status_code == 400
+    assert second_client.patch(generic, {}, format="json").status_code == 403
     assert not FileAsset.objects.get(pk=asset_id).is_uploaded
     member.role = 20
     member.save()
-    assert second_client.patch(assets + asset_id + "/", {}, format="json").status_code == 204
+    assert second_client.patch(assets + asset_id + "/", {}, format="json").status_code == 200
 
 
 def test_upload_scope_and_failed_presign_preserve_current(attachment_context):
@@ -379,16 +399,127 @@ def test_upload_scope_and_failed_presign_preserve_current(attachment_context):
     assert str(client.get(slots).data[0]["attachment"]["id"]) == asset_id
 
 
-def test_deleting_populated_slot_preserves_completed_attachment(attachment_context):
+def test_deleting_populated_slot_deletes_completed_and_pending(attachment_context):
     client = attachment_context[0]
     _, slots, assets = urls(attachment_context)
     slot = create_slot(attachment_context)
-    asset_id = upload(attachment_context, slot["id"])
-    assert client.patch(assets + asset_id + "/", {}, format="json").status_code == 204
-    assert client.delete(slots + str(slot["id"]) + "/").status_code == 204
-    asset = FileAsset.objects.get(pk=asset_id)
-    assert asset.is_uploaded and asset.attachment_slot_id is None and not asset.is_deleted
-    assert str(client.get(assets).data[0]["id"]) == asset_id
+    completed = upload(attachment_context, slot["id"])
+    assert client.patch(assets + completed + "/", {}, format="json").status_code == 200
+    pending = upload(attachment_context, slot["id"])
+    response = client.delete(slots + str(slot["id"]) + "/")
+    assert response.status_code == 200
+    assert response.data["slot_id"] == str(slot["id"])
+    assert set(response.data["deleted_attachment_ids"]) == {completed, pending}
+    assert client.get(slots).data == []
+    assert client.get(assets).data == []
+    for asset_id in (completed, pending):
+        asset = FileAsset.all_objects.get(pk=asset_id)
+        assert asset.is_deleted and asset.deleted_at is not None
+        assert str(asset.attachment_slot_id) == str(slot["id"])
+        assert client.get(assets + asset_id + "/").status_code == 404
+        assert client.patch(assets + asset_id + "/", {}, format="json").status_code == 404
+    assert not FileAsset.all_objects.get(pk=pending).is_uploaded
+
+
+@pytest.mark.parametrize("project_role,workspace_role,allowed", [(15, 15, False), (15, 20, False), (20, 15, True)])
+@pytest.mark.parametrize("foreign_pending", [False, True])
+def test_slot_delete_checks_every_file_owner(
+    attachment_context, project_role, workspace_role, allowed, foreign_pending
+):
+    client, workspace, project, _, membership = attachment_context
+    _, slots, assets = urls(attachment_context)
+    slot = create_slot(attachment_context)
+    completed = upload(attachment_context, slot["id"])
+    assert client.patch(assets + completed + "/", {}, format="json").status_code == 200
+    pending = upload(attachment_context, slot["id"])
+    other = User.objects.create(email="file-owner@example.com", username="file-owner")
+    FileAsset.objects.filter(pk=pending if foreign_pending else completed).update(created_by=other)
+    ProjectMember.objects.filter(pk=membership.pk).update(role=project_role)
+    WorkspaceMember.objects.filter(workspace=workspace, member=membership.member).update(role=workspace_role)
+    response = client.delete(slots + str(slot["id"]) + "/")
+    assert response.status_code == (200 if allowed else 403), response.data
+    assert IssueAttachmentSlot.objects.filter(pk=slot["id"]).exists() is not allowed
+    for asset_id in (completed, pending):
+        asset = FileAsset.all_objects.get(pk=asset_id)
+        assert asset.is_deleted is allowed
+        assert (asset.deleted_at is not None) is allowed
+        assert str(asset.attachment_slot_id) == str(slot["id"])
+    if allowed:
+        assert set(response.data["deleted_attachment_ids"]) == {completed, pending}
+
+
+@pytest.mark.parametrize("scope", ["workspace", "project", "issue", "entity_type", "slot"])
+def test_slot_delete_does_not_touch_files_outside_scope(attachment_context, scope):
+    client, workspace, project, issue, _ = attachment_context
+    _, slots, _ = urls(attachment_context)
+    slot = create_slot(attachment_context)
+    current = upload(attachment_context, slot["id"])
+    foreign = upload(attachment_context, slot["id"])
+    if scope == "workspace":
+        other = Workspace.objects.create(name="Other", slug="outside", owner=workspace.owner)
+        changes = {"workspace": other}
+    elif scope == "project":
+        other = Project.objects.create(name="Other", identifier="OTH", workspace=workspace)
+        changes = {"project": other}
+    elif scope == "issue":
+        changes = {"issue": Issue.objects.create(name="Other", workspace=workspace, project=project)}
+    elif scope == "entity_type":
+        changes = {"entity_type": FileAsset.EntityTypeContext.COMMENT_DESCRIPTION}
+    else:
+        other = IssueAttachmentSlot.objects.create(name="Other", workspace=workspace, project=project, issue=issue)
+        changes = {"attachment_slot": other}
+    FileAsset.objects.filter(pk=foreign).update(**changes)
+    response = client.delete(slots + str(slot["id"]) + "/")
+    assert response.status_code == 200
+    assert response.data == {"slot_id": str(slot["id"]), "deleted_attachment_ids": [current]}
+    asset = FileAsset.objects.get(pk=foreign)
+    assert not asset.is_deleted and asset.deleted_at is None
+
+
+def test_slot_delete_database_failure_rolls_back_files_and_slot(attachment_context):
+    from django.db.models.query import QuerySet
+
+    client = attachment_context[0]
+    _, slots, assets = urls(attachment_context)
+    slot = create_slot(attachment_context)
+    completed = upload(attachment_context, slot["id"])
+    assert client.patch(assets + completed + "/", {}, format="json").status_code == 200
+    pending = upload(attachment_context, slot["id"])
+    original_update = QuerySet.update
+
+    def fail_slot_update(queryset, **kwargs):
+        if queryset.model is IssueAttachmentSlot:
+            assert not FileAsset.objects.filter(pk__in=[completed, pending]).exists()
+            original_update(queryset, **kwargs)
+            raise IntegrityError("slot update failed")
+        return original_update(queryset, **kwargs)
+
+    with mock.patch.object(QuerySet, "update", fail_slot_update):
+        response = client.delete(slots + str(slot["id"]) + "/")
+    assert response.status_code >= 400
+    assert IssueAttachmentSlot.objects.filter(pk=slot["id"]).exists()
+    for asset_id in (completed, pending):
+        asset = FileAsset.objects.get(pk=asset_id)
+        assert not asset.is_deleted and asset.deleted_at is None
+        assert str(asset.attachment_slot_id) == str(slot["id"])
+
+
+@pytest.mark.django_db(transaction=True)
+def test_slot_delete_survives_broker_failure(attachment_context, caplog):
+    client = attachment_context[0]
+    _, slots, _ = urls(attachment_context)
+    slot = create_slot(attachment_context)
+    pending = upload(attachment_context, slot["id"])
+    with (
+        mock.patch("plane.app.views.attachment.issue_activity.delay", side_effect=RuntimeError("broker unavailable")),
+        caplog.at_level("ERROR", logger="django.db.backends.base"),
+    ):
+        response = client.delete(slots + str(slot["id"]) + "/")
+    assert response.status_code == 200
+    assert response.data == {"slot_id": str(slot["id"]), "deleted_attachment_ids": [pending]}
+    assert FileAsset.all_objects.get(pk=pending).is_deleted
+    assert not IssueAttachmentSlot.objects.filter(pk=slot["id"]).exists()
+    assert "broker unavailable" in caplog.text
 
 
 def test_guest_cannot_mutate_existing_slots(attachment_context):
@@ -424,7 +555,7 @@ def test_concurrent_create_apply_and_completion(attachment_context):
     client, _, _, _, membership = attachment_context
     templates, slots, assets = urls(attachment_context)
 
-    def race(method, requests):
+    def race(method, requests, include_data=False):
         barrier = Barrier(len(requests))
 
         def execute(item):
@@ -433,7 +564,8 @@ def test_concurrent_create_apply_and_completion(attachment_context):
                 threaded_client = APIClient()
                 threaded_client.force_authenticate(user=membership.member)
                 barrier.wait(timeout=10)
-                return getattr(threaded_client, method)(item[0], item[1], format="json").status_code
+                response = getattr(threaded_client, method)(item[0], item[1], format="json")
+                return (response.status_code, response.data) if include_data else response.status_code
             finally:
                 close_old_connections()
 
@@ -452,6 +584,14 @@ def test_concurrent_create_apply_and_completion(attachment_context):
         mock.patch("plane.app.views.issue.attachment.issue_activity.delay"),
         mock.patch("plane.app.views.issue.attachment.get_asset_object_metadata.delay"),
     ):
-        assert race("patch", [(assets + first + "/", {}), (assets + second + "/", {})]) == [204, 204]
+        results = race("patch", [(assets + first + "/", {}), (assets + second + "/", {})], include_data=True)
+        assert [result[0] for result in results] == [200, 200]
     assert FileAsset.objects.filter(attachment_slot_id=rows[0]["id"], is_uploaded=True).count() == 1
-    assert FileAsset.objects.filter(pk__in=[first, second], is_uploaded=True).count() == 2
+    assert FileAsset.objects.filter(pk__in=[first, second], is_uploaded=True).count() == 1
+    assert FileAsset.all_objects.filter(pk__in=[first, second], is_uploaded=True).count() == 2
+    deleted = FileAsset.all_objects.get(pk__in=[first, second], is_deleted=True)
+    returned_ids = [pk for _, body in results for pk in body["deleted_attachment_ids"]]
+    assert returned_ids == [str(deleted.id)]
+    assert all(body["attachment_slot_id"] == str(rows[0]["id"]) for _, body in results)
+    for own_id, (_, body) in zip([first, second], results):
+        assert own_id not in body["deleted_attachment_ids"]

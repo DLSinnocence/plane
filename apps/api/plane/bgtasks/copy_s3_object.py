@@ -10,6 +10,8 @@ from bs4 import BeautifulSoup
 
 # Django imports
 from django.conf import settings
+from django.db import transaction
+from plane.utils.attachment_rows import create_attachment_asset
 
 # Module imports
 from plane.db.models import FileAsset, Page, Issue
@@ -85,6 +87,7 @@ def sync_with_external_service(entity_name, description_html):
     return {}
 
 
+@transaction.atomic
 def copy_assets(entity, entity_identifier, project_id, asset_ids, user_id):
     duplicated_assets = []
     workspace = entity.workspace
@@ -93,7 +96,8 @@ def copy_assets(entity, entity_identifier, project_id, asset_ids, user_id):
 
     for original_asset in original_assets:
         destination_key = f"{workspace.id}/{uuid.uuid4().hex}-{original_asset.attributes.get('name')}"
-        duplicated_asset = FileAsset.objects.create(
+        duplicated_asset = create_attachment_asset(
+            reuse_pending=False,
             attributes={
                 "name": original_asset.attributes.get("name"),
                 "type": original_asset.attributes.get("type"),
@@ -108,7 +112,7 @@ def copy_assets(entity, entity_identifier, project_id, asset_ids, user_id):
             storage_metadata=original_asset.storage_metadata,
             **get_entity_id_field(original_asset.entity_type, entity_identifier),
         )
-        storage.copy_object(original_asset.asset, destination_key)
+        storage.copy_object(original_asset.asset, duplicated_asset.asset.name)
         duplicated_assets.append(
             {
                 "new_asset_id": str(duplicated_asset.id),

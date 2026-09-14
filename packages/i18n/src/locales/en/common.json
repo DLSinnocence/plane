@@ -766,7 +766,7 @@
     "slots": {
       "title": "Attachments",
       "add": "Add empty attachment",
-      "default_name": "Empty attachment",
+      "default_name": "Attachment",
       "invalid_name": "Enter a name of 1–100 characters.",
       "duplicate": "An attachment with this name already exists.",
       "name": "Attachment name",
@@ -789,7 +789,7 @@
       "edit": "Edit",
       "confirm_delete": "Confirm deletion",
       "save_error": "Unable to save. Names must be 1–100 characters; use 1–50 unique attachment names (case-insensitive). Check your input and permissions, then retry.",
-      "preserve_help": "Each attachment holds one file. Replacing keeps the old file until upload succeeds, then moves it to ordinary attachments. Deleting an attachment entry also keeps its file in ordinary attachments.",
+      "preserve_help": "Each attachment row holds one file. A successful replacement deletes the old file. Deleting an attachment removes both the row and its file.",
       "library": "Attachment template library",
       "new_template": "New template",
       "edit_template": "Edit template",
@@ -801,7 +801,7 @@
       "library_help": "Templates are shared across this workspace. Applying only adds missing attachment names (case-insensitive) and keeps existing files. Later template edits do not change work items.",
       "limit": "Applying this template would exceed the 50-attachment limit.",
       "delete_template_help": "Delete template “{name}”? Existing work item attachments will be kept.",
-      "delete_slot_help": "Delete attachment “{name}”? Its file will be kept in ordinary attachments.",
+      "delete_slot_help": "Delete attachment “{name}” and its file? This cannot be undone.",
       "delete_file_help": "Permanently delete file “{name}”? The attachment will remain empty. This cannot be undone."
     },
     "error": "File could not be attached. Try uploading again.",

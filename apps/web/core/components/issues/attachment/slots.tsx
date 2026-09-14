@@ -23,7 +23,8 @@ import { getAttachmentUploadErrorKey, getAttachmentUploadErrorDetails } from "@/
 import { useFileSize } from "@/hooks/use-file-size";
 import type { TAttachmentHelpers } from "../issue-detail-widgets/attachments/helper";
 import { AttachmentConfirm } from "./slot-dialogs";
-import { validateSlotNames } from "./slot-helpers";
+import { IssueAttachmentsUploadItem } from "./attachment-list-upload-item";
+import { validateAttachmentName } from "./slot-helpers";
 
 const EMPTY_SLOTS: TIssueAttachmentSlot[] = [];
 
@@ -61,6 +62,8 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
     editable &&
     Boolean(slot.attachment) &&
     (isProjectAdmin || Boolean(currentUser?.id && slot.attachment?.created_by === currentUser.id));
+  const canDeleteSlot = (slot: TIssueAttachmentSlot) => editable && (!slot.attachment || canDeleteFile(slot));
+  const canUploadToSlot = (slot: TIssueAttachmentSlot) => editable && (!slot.attachment || canDeleteFile(slot));
   const { maxFileSize } = useFileSize();
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +73,7 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
   const [busy, setBusy] = useState<string | null>(null);
   const lock = useRef(false);
   const [editor, setEditor] = useState<{ id: string; name: string; error?: string } | null>(null);
-  const [deleting, setDeleting] = useState<{ slot: TIssueAttachmentSlot; file: boolean } | null>(null);
+  const [deleting, setDeleting] = useState<TIssueAttachmentSlot | null>(null);
   const fileInputs = useRef(new Map<string, HTMLInputElement>());
   const nameInput = useRef<HTMLInputElement>(null);
   const active = useRef(true);
@@ -121,10 +124,10 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
     const current = slots.find((slot) => slot.id === editor.id);
     if (!current) return;
     const name = editor.name.trim();
-    const validation = validateSlotNames([
-      ...slots.filter((slot) => slot.id !== editor.id).map((slot) => slot.name),
+    const validation = validateAttachmentName(
       name,
-    ]);
+      slots.filter((slot) => slot.id !== editor.id).map((slot) => slot.name)
+    );
     if (validation) {
       setEditor({ ...editor, error: `attachment.slots.${validation === "duplicate" ? "duplicate" : "invalid_name"}` });
       return;
@@ -154,13 +157,17 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
     }
   };
   const chooseFile = (slotId: string) => {
-    if (!editable || lock.current || hasUnsavedName) return;
+    const slot = slots.find((item) => item.id === slotId);
+    if (!slot || !canUploadToSlot(slot) || lock.current || hasUnsavedName) return;
     setEditor(null);
     fileInputs.current.get(slotId)?.click();
   };
 
   return (
     <div>
+      {attachmentHelpers.snapshot.uploadStatus?.map((status) => (
+        <IssueAttachmentsUploadItem key={status.id} uploadStatus={status} />
+      ))}
       {!ready && !error && (
         <p role="status" className="px-3 py-2 text-13 text-tertiary">
           {t("attachment.slots.loading")}
@@ -282,7 +289,7 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
                 <ButtonAvatars showTooltip userIds={slot.attachment.created_by} />
               </div>
             )}
-            {editable && (
+            {canDeleteSlot(slot) && (
               <CustomMenu ellipsis closeOnSelect placement="bottom-end" disabled={busy !== null || hasUnsavedName}>
                 {slot.attachment && (
                   <CustomMenu.MenuItem className="flex items-center gap-2" onClick={() => chooseFile(slot.id)}>
@@ -290,26 +297,14 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
                     <span>{t("attachment.slots.replace")}</span>
                   </CustomMenu.MenuItem>
                 )}
-                {canDeleteFile(slot) && (
-                  <CustomMenu.MenuItem
-                    className="flex items-center gap-2"
-                    onClick={() => setDeleting({ slot, file: true })}
-                  >
-                    <DeleteOutline className="h-3.5 w-3.5" />
-                    <span>{t("attachment.slots.delete_file")}</span>
-                  </CustomMenu.MenuItem>
-                )}
-                <CustomMenu.MenuItem
-                  className="flex items-center gap-2"
-                  onClick={() => setDeleting({ slot, file: false })}
-                >
+                <CustomMenu.MenuItem className="flex items-center gap-2" onClick={() => setDeleting(slot)}>
                   <DeleteOutline className="h-3.5 w-3.5" />
                   <span>{t("attachment.slots.delete_slot")}</span>
                 </CustomMenu.MenuItem>
               </CustomMenu>
             )}
           </div>
-          {editable && (
+          {canUploadToSlot(slot) && (
             <input
               ref={(element) => {
                 if (element) fileInputs.current.set(slot.id, element);
@@ -349,20 +344,12 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
           )}
         </div>
       ))}
-      {deleting && editable && (!deleting.file || canDeleteFile(deleting.slot)) && (
+      {deleting && canDeleteSlot(deleting) && (
         <AttachmentConfirm
-          title={t(deleting.file ? "attachment.slots.delete_file" : "attachment.slots.delete_slot")}
-          message={t(deleting.file ? "attachment.slots.delete_file_help" : "attachment.slots.delete_slot_help", {
-            name: deleting.file
-              ? (deleting.slot.attachment?.attributes.name ?? deleting.slot.name)
-              : deleting.slot.name,
-          })}
+          title={t("attachment.slots.delete_slot")}
+          message={t("attachment.slots.delete_slot_help", { name: deleting.name })}
           onClose={() => setDeleting(null)}
-          onConfirm={async () => {
-            if (deleting.file && deleting.slot.attachment)
-              await attachment.removeAttachment(workspaceSlug, projectId, issueId, deleting.slot.attachment.id);
-            else await attachment.removeAttachmentSlot(workspaceSlug, projectId, issueId, deleting.slot.id);
-          }}
+          onConfirm={() => attachment.removeAttachmentSlot(workspaceSlug, projectId, issueId, deleting.id)}
         />
       )}
     </div>

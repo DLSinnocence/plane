@@ -13,10 +13,13 @@ from django.conf import settings
 from django.http import HttpResponseRedirect
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from rest_framework.exceptions import PermissionDenied
+from plane.utils.attachment_rows import (
+    complete_attachment_asset, create_attachment_asset, provision_attachment_row,
+    require_replacement_permission, presign_attachment_upload, attachment_completion_data, attachment_slot_data,
+)
 from plane.app.serializers.attachment import AttachmentSlotUploadSerializer
 from plane.app.views.attachment import require_slot_role, scoped_issue
-from plane.db.models import IssueAttachmentSlot, ProjectMember
+from plane.db.models import IssueAttachmentSlot
 
 # Third Party imports
 from rest_framework.response import Response
@@ -41,11 +44,16 @@ class IssueAttachmentEndpoint(BaseAPIView):
     parser_classes = (MultiPartParser, FormParser)
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
+    @transaction.atomic
     def post(self, request, slug, project_id, issue_id):
+        issue = scoped_issue(slug, project_id, issue_id, lock=True)
         serializer = IssueAttachmentSerializer(data=request.data)
         workspace = Workspace.objects.get(slug=slug)
         if serializer.is_valid():
             serializer.save(
+                attachment_slot=provision_attachment_row(issue, request.user.id),
+                created_by=request.user,
+                is_uploaded=True,
                 project_id=project_id,
                 issue_id=issue_id,
                 workspace_id=workspace.id,
@@ -118,6 +126,7 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
                 project_id=project_id,
                 issue_id=issue_id,
             )
+            require_replacement_permission(slot, request.user)
         name = sanitize_filename(request.data.get("name")) or "unnamed"
         type = request.data.get("type", False)
         size = int(request.data.get("size", settings.FILE_SIZE_LIMIT))
@@ -138,7 +147,7 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
         size_limit = min(size, settings.FILE_SIZE_LIMIT)
 
         # Create a File Asset
-        asset = FileAsset.objects.create(
+        asset = create_attachment_asset(
             attachment_slot=slot,
             attributes={"name": name, "type": type, "size": size_limit},
             asset=asset_key,
@@ -154,13 +163,15 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
         storage = S3Storage(request=request)
 
         # Generate a presigned URL to share an S3 object
-        presigned_url = storage.generate_presigned_post(object_name=asset_key, file_type=type, file_size=size_limit)
+        presigned_url = presign_attachment_upload(storage, asset, type, size_limit)
 
         # Return the presigned URL
         return Response(
             {
                 "upload_data": presigned_url,
                 "asset_id": str(asset.id),
+                "attachment_slot_id": str(asset.attachment_slot_id),
+                "attachment_slot": attachment_slot_data(asset.attachment_slot),
                 "attachment": IssueAttachmentSerializer(asset).data,
                 "asset_url": asset.asset_url,
             },
@@ -233,6 +244,7 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
     @transaction.atomic
     def patch(self, request, slug, project_id, issue_id, pk):
+        require_slot_role(request, slug, project_id)
         scoped_issue(slug, project_id, issue_id, lock=True)
         issue_attachment = get_object_or_404(
             FileAsset.objects.select_for_update(),
@@ -243,40 +255,9 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
             is_deleted=False,
             entity_type=FileAsset.EntityTypeContext.ISSUE_ATTACHMENT,
         )
-        if issue_attachment.attachment_slot_id:
-            require_slot_role(request, slug, project_id, write=True)
-            if (
-                issue_attachment.created_by_id != request.user.id
-                and not ProjectMember.objects.filter(
-                    project_id=project_id,
-                    workspace__slug=slug,
-                    member=request.user,
-                    is_active=True,
-                    role=ROLE.ADMIN.value,
-                ).exists()
-            ):
-                raise PermissionDenied("Only the uploader or a project admin can complete this upload.")
-            slot = get_object_or_404(
-                IssueAttachmentSlot.objects.select_for_update(),
-                pk=issue_attachment.attachment_slot_id,
-                workspace__slug=slug,
-                project_id=project_id,
-                issue_id=issue_id,
-            )
-            if not issue_attachment.is_uploaded:
-                FileAsset.objects.filter(
-                    attachment_slot=slot,
-                    is_uploaded=True,
-                    is_deleted=False,
-                ).exclude(pk=pk).update(attachment_slot=None)
-
-        # Already completed assets never reattach after replacement. Their FK has
-        # been cleared, and this early return also avoids duplicate activity.
-        if issue_attachment.is_uploaded:
-            return Response(status=status.HTTP_204_NO_CONTENT)
-
-        issue_attachment.is_uploaded = True
-        issue_attachment.save(update_fields=["is_uploaded", "updated_at"], disable_auto_set_user=True)
+        issue_attachment, completed = complete_attachment_asset(issue_attachment, request.user)
+        if not completed:
+            return Response(attachment_completion_data(issue_attachment), status=status.HTTP_200_OK)
         serialized = json.dumps(IssueAttachmentSerializer(issue_attachment).data, cls=DjangoJSONEncoder)
         # Publication failures are logged by Django after commit and must not
         # turn an already successful replacement into an HTTP failure.
@@ -299,4 +280,4 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
                 lambda: get_asset_object_metadata.delay(str(issue_attachment.id)),
                 robust=True,
             )
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(attachment_completion_data(issue_attachment), status=status.HTTP_200_OK)

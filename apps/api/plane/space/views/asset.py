@@ -95,6 +95,10 @@ class EntityAssetEndpoint(BaseAPIView):
             )
         entity_type = request.data.get("entity_type", "")
         entity_identifier = request.data.get("entity_identifier")
+        if entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
+            return Response(
+                {"error": "Upload work item attachments through the issue attachment endpoint."}, status=400,
+            )
 
         # Clamp the client-provided size to [1, FILE_SIZE_LIMIT] so the signed
         # upload policy cannot exceed the instance limit and always carries a
@@ -163,6 +167,8 @@ class EntityAssetEndpoint(BaseAPIView):
 
         # get the asset id — scope to project to prevent cross-project IDOR
         asset = FileAsset.objects.get(id=pk, workspace=deploy_board.workspace, project_id=deploy_board.project_id)
+        if asset.attachment_slot_id or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
+            return Response({"error": "Use the issue attachment endpoint for work item attachments."}, status=400)
         # get the storage metadata
         asset.is_uploaded = True
         # get the storage metadata
@@ -183,6 +189,8 @@ class EntityAssetEndpoint(BaseAPIView):
             return Response({"error": "Project is not published"}, status=status.HTTP_404_NOT_FOUND)
         # Get the asset
         asset = FileAsset.objects.get(id=pk, workspace=deploy_board.workspace, project_id=deploy_board.project_id)
+        if asset.attachment_slot_id or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
+            return Response({"error": "Use the issue attachment endpoint for work item attachments."}, status=400)
         # Check deleted assets
         asset.is_deleted = True
         asset.deleted_at = timezone.now()
@@ -203,6 +211,8 @@ class AssetRestoreEndpoint(BaseAPIView):
 
         # Get the asset — scope to project to prevent cross-project IDOR
         asset = FileAsset.all_objects.get(id=pk, workspace=deploy_board.workspace, project_id=deploy_board.project_id)
+        if asset.attachment_slot_id or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
+            return Response({"error": "Deleted work item attachments cannot be restored."}, status=400)
         asset.is_deleted = False
         asset.deleted_at = None
         asset.save(update_fields=["is_deleted", "deleted_at"])
