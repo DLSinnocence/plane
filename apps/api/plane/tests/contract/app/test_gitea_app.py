@@ -12,6 +12,7 @@ from plane.db.models import (
     Issue,
     Project,
     ProjectMember,
+    State,
     Workspace,
     WorkspaceMember,
 )
@@ -39,7 +40,8 @@ def items(workspace, create_user):
     for prefix in ["研发_7", "TEAM-SUB"]:
         project = Project.objects.create(workspace=workspace, name=prefix, identifier=prefix)
         ProjectMember.objects.create(workspace=workspace, project=project, member=create_user, role=20)
-        result.append(Issue.objects.create(workspace=workspace, project=project, name="Actual work"))
+        state = State.objects.create(workspace=workspace, project=project, name="开发中", group="started")
+        result.append(Issue.objects.create(workspace=workspace, project=project, state=state, name="Actual work"))
     return result
 
 

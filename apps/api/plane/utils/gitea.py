@@ -7,6 +7,7 @@ import unicodedata
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from plane.db.models import Issue
+from plane.db.models.state import StateGroup
 from plane.utils import feishu
 
 SHA_PATTERN = r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})"
@@ -107,7 +108,7 @@ def issue_for_identifier(workspace, identifier):
     if not prefix or not re.fullmatch(r"[1-9][0-9]{0,18}", sequence) or int(sequence) > 9223372036854775807:
         return None
     return (
-        Issue.objects.select_related("project")
+        Issue.objects.select_related("project", "state")
         .filter(
             project__identifier=prefix,
             project__workspace=workspace,
@@ -136,6 +137,24 @@ def validate_commits(workspace, commits):
             }
         elif issue is None:
             error = {"code": "work_item_not_found", "message": "Work item does not exist in this workspace."}
+        elif (
+            issue.archived_at is not None
+            or issue.state is None
+            or issue.state.deleted_at is not None
+            or issue.state.group != StateGroup.STARTED
+        ):
+            current_state = issue.state.name if issue.state is not None else "no state"
+            if issue.archived_at is not None:
+                current_state += " (archived)"
+            elif issue.state is not None and issue.state.deleted_at is not None:
+                current_state += " (removed state)"
+            error = {
+                "code": "work_item_not_in_progress",
+                "message": (
+                    f'Work item {identifier} is in state "{current_state}". '
+                    "Only in-progress work items (development or awaiting acceptance) allow commits."
+                ),
+            }
         results.append(
             {
                 "sha": commit["sha"].lower(),

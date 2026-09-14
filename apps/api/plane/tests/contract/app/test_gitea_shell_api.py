@@ -9,7 +9,7 @@ from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 
-from plane.db.models import GiteaCommit, GiteaCommitLink, GiteaIntegration, Issue, Project, Workspace
+from plane.db.models import GiteaCommit, GiteaCommitLink, GiteaIntegration, Issue, Project, State, Workspace
 from plane.utils.gitea import encrypt
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
@@ -40,7 +40,8 @@ def items(workspace):
     result = []
     for prefix in ("研发", "TEAM-SUB"):
         project = Project.objects.create(workspace=workspace, identifier=prefix, name=prefix)
-        result.append(Issue.objects.create(workspace=workspace, project=project, name="Work"))
+        state = State.objects.create(workspace=workspace, project=project, name="开发中", group="started")
+        result.append(Issue.objects.create(workspace=workspace, project=project, state=state, name="Work"))
     return result
 
 

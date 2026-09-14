@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from plane.db.models import GiteaCommit, GiteaCommitLink, GiteaIntegration, Issue, Project
+from plane.db.models import GiteaCommit, GiteaCommitLink, GiteaIntegration, Issue, Project, State
 from plane.utils.gitea import encrypt
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db(transaction=True)]
@@ -22,7 +22,8 @@ def test_generated_shell_hooks_push_to_real_django_api_without_python(
     token = "integration-test-hook-token"
     GiteaIntegration.objects.create(workspace=workspace, enabled=True, secret=encrypt(token))
     project = Project.objects.create(workspace=workspace, name="Shell hooks", identifier="HOOK")
-    issue = Issue.objects.create(project=project, name="Accept shell push")
+    started = State.objects.create(workspace=workspace, project=project, name="开发中", group="started")
+    issue = Issue.objects.create(project=project, state=started, name="Accept shell push")
     generated = session_client.post(f"/api/workspaces/{workspace.slug}/integrations/gitea/hooks/", {}, format="json")
     assert generated.status_code == 200
     runtime = tmp_path / "runtime"
@@ -103,3 +104,24 @@ def test_generated_shell_hooks_push_to_real_django_api_without_python(
     assert token not in rejected.stdout + rejected.stderr
     assert git(remote, "rev-parse", "main").stdout.strip() == sha
     assert GiteaCommit.objects.count() == 1
+
+    retry_sha = git(local, "commit-tree", tree, "-p", sha, "-m", f"HOOK-{issue.sequence_id} follow-up").stdout.strip()
+    for group, name in (("completed", "已完成"), ("cancelled", "已拒绝")):
+        state = State.objects.create(workspace=workspace, project=project, name=name, group=group)
+        Issue.objects.filter(pk=issue.pk).update(state=state)
+        rejected = git(local, "push", str(remote), retry_sha + ":refs/heads/main", check=False)
+        assert token not in rejected.stdout + rejected.stderr
+        assert rejected.returncode != 0
+        assert f"HOOK-{issue.sequence_id}" in rejected.stderr and name in rejected.stderr
+        assert git(remote, "rev-parse", "main").stdout.strip() == sha
+        assert GiteaCommit.objects.count() == GiteaCommitLink.objects.count() == 1
+        assert not GiteaCommit.objects.filter(sha=retry_sha).exists()
+
+    Issue.objects.filter(pk=issue.pk).update(state=started)
+    accepted = git(local, "push", str(remote), retry_sha + ":refs/heads/main", check=False)
+    assert token not in accepted.stdout + accepted.stderr
+    assert accepted.returncode == 0, accepted.stderr
+    assert "Verified" in accepted.stderr and "Reported" in accepted.stderr
+    assert git(remote, "rev-parse", "main").stdout.strip() == retry_sha
+    assert GiteaCommit.objects.count() == GiteaCommitLink.objects.count() == 2
+    assert GiteaCommitLink.objects.get(commit__sha=retry_sha).issue_id == issue.id

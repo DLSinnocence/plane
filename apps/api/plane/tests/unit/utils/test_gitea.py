@@ -76,13 +76,61 @@ def test_gitea_logs_omit_request_and_response(path):
 @pytest.mark.parametrize("separator", [" ", "\t", " \t "])
 def test_full_workspace_identifier(prefix, separator):
     workspace = SimpleNamespace(slug="team")
+    issue = SimpleNamespace(archived_at=None, state=SimpleNamespace(group="started", name="开发中", deleted_at=None))
     with (
-        patch("plane.utils.gitea.issue_for_identifier", return_value=object()) as lookup,
+        patch("plane.utils.gitea.issue_for_identifier", return_value=issue) as lookup,
         patch("plane.utils.gitea.issue_data", return_value={"id": "item"}),
     ):
         result = validate_commits(workspace, [{"sha": "A" * 40, "message": f"{prefix}-3{separator}works\nbody"}])
         assert result["valid"]
         lookup.assert_called_once_with(workspace, f"{prefix}-3")
+
+
+@pytest.mark.parametrize(
+    "group,name,allowed",
+    [
+        ("started", "开发中", True),
+        ("started", "开发完成/待验收", True),
+        ("started", "Custom active stage", True),
+        ("backlog", "待规划", False),
+        ("unstarted", "待开始", False),
+        ("completed", "已完成", False),
+        ("cancelled", "已拒绝", False),
+        ("triage", "待处理", False),
+    ],
+)
+def test_commit_state_eligibility_uses_group_and_reports_actual_state(group, name, allowed):
+    issue = SimpleNamespace(archived_at=None, state=SimpleNamespace(group=group, name=name, deleted_at=None))
+    with (
+        patch("plane.utils.gitea.issue_for_identifier", return_value=issue),
+        patch("plane.utils.gitea.issue_data", return_value={"id": "item"}),
+    ):
+        result = validate_commits(object(), [{"sha": SHA, "message": "PROJ-3 implement change"}])
+    assert result["valid"] is allowed
+    row = result["results"][0]
+    if allowed:
+        assert row["error"] is None
+    else:
+        assert row["error"]["code"] == "work_item_not_in_progress"
+        assert name in row["error"]["message"] and "PROJ-3" in row["error"]["message"]
+
+
+@pytest.mark.parametrize("blocked", ["archived", "missing_state", "deleted_state"])
+def test_inactive_work_item_cannot_pass_even_with_started_state(blocked):
+    issue = SimpleNamespace(archived_at=None, state=SimpleNamespace(group="started", name="开发中", deleted_at=None))
+    if blocked == "archived":
+        issue.archived_at = object()
+    elif blocked == "missing_state":
+        issue.state = None
+    else:
+        issue.state.deleted_at = object()
+    with (
+        patch("plane.utils.gitea.issue_for_identifier", return_value=issue),
+        patch("plane.utils.gitea.issue_data", return_value={"id": "item"}),
+    ):
+        result = validate_commits(object(), [{"sha": SHA, "message": "PROJ-3 implement change"}])
+    assert result["valid"] is False
+    assert result["results"][0]["error"]["code"] == "work_item_not_in_progress"
 
 
 @pytest.mark.parametrize("message", ["ABC-0 fix", "ABC-01 fix", "ABC-1", "ABC-1\nfix", "x ABC-1 fix", "ABC-1\vfix"])
