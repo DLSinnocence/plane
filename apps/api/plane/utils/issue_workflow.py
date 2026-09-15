@@ -8,10 +8,13 @@ from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
-from plane.db.models import Issue, IssueAssignee, ProjectMember, State, WorkspaceMember
-
-
-FIXED_ASSIGNEE_STATE_GROUPS = frozenset({"backlog", "completed", "cancelled"})
+from plane.db.models import Issue, IssueAssignee, ProjectMember, State
+from plane.utils.issue_permissions import (
+    FIXED_ASSIGNEE_STATE_GROUPS,
+    project_access_role,
+    require_issue_write_access,
+    require_project_admin_access,
+)
 
 
 def workflow_default_assignees(issue):
@@ -175,8 +178,26 @@ class IssueWorkflowSerializerMixin:
             data[self.workflow_assignee_field] = self._validate_workflow_members(data[self.workflow_assignee_field])
 
     def _authorize_workflow(self, issue, data):
+        actor = getattr(self.context.get("request"), "user", None)
+        role = project_access_role(actor, issue.project_id, issue.workspace_id)
+        administrator = role == 20
+        owner = actor is not None and str(actor.pk) == str(issue.created_by_id)
+        in_triage = getattr(issue.state, "group", None) == "triage"
+        # Guest submitters retain the dedicated intake editor; formal work-item
+        # endpoints never inherit that exception from creator status alone.
+        guest_submitter = role == 5 and owner and in_triage and self.context.get("intake_submission", False)
+        if not guest_submitter:
+            require_issue_write_access(actor, issue)
+        if in_triage and not administrator:
+            editable = {"name", "description_html", "description_json", "description_binary", "priority"}
+            if set(data) - editable:
+                raise PermissionDenied("Only administrators may triage or accept intake work items.")
         if self.workflow_assignee_field in data:
             raise PermissionDenied("Current assignees are managed through the state's workflow assignment.")
+        if "state_assignees" in data and not (administrator or (role == 15 and owner)):
+            raise PermissionDenied("Only the work item owner or administrators may change workflow assignments.")
+        if issue.is_draft and data.get("is_draft") is False:
+            require_project_admin_access(actor, issue.project_id, issue.workspace_id)
         next_state = data.get("state", issue.state)
         if next_state is None:
             next_state = (
@@ -185,47 +206,12 @@ class IssueWorkflowSerializerMixin:
             )
             if "state" in data:
                 data["state"] = next_state
-        changing_state = getattr(next_state, "pk", None) != issue.state_id
-        changing_assignment = "state_assignees" in data or self.workflow_assignee_field in data
-        if not changing_state and not changing_assignment:
-            return
-        actor = getattr(self.context.get("request"), "user", None)
-        actor_id = getattr(actor, "pk", None)
-        membership = (
-            ProjectMember.objects.filter(
-                project_id=issue.project_id,
-                member_id=actor_id,
-                is_active=True,
-                member__is_active=True,
-            ).first()
-            if actor_id and getattr(actor, "is_active", False)
-            else None
-        )
-        administrator = membership is not None and (
-            membership.role == 20
-            or WorkspaceMember.objects.filter(
-                workspace_id=issue.workspace_id, member_id=actor_id, role=20, is_active=True
-            ).exists()
-        )
-        owner = membership is not None and membership.role >= 15 and actor_id == issue.created_by_id
-        if changing_assignment and not (administrator or owner):
-            raise PermissionDenied("Only the work item owner or administrators may change workflow assignments.")
-        if not changing_state:
-            return
-        transition_manager = administrator or (
-            membership is not None and membership.role >= 15 and issue.project.project_lead_id == actor_id
-        )
-        key = str(issue.state_id)
-        saved_plan = issue.state_assignees or {}
-        if getattr(issue.state, "group", None) in FIXED_ASSIGNEE_STATE_GROUPS:
-            current = workflow_default_assignees(issue)
-        else:
-            current = saved_plan[key] if key in saved_plan else workflow_default_assignees(issue)
-        responsible = membership is not None and membership.role >= 15 and str(actor_id) in (current or [])
-        if not (transition_manager or responsible):
-            raise PermissionDenied(
-                "Only current responsible members, project admins, or the project lead may change state."
-            )
+        if in_triage and getattr(next_state, "pk", None) != issue.state_id:
+            require_project_admin_access(actor, issue.project_id, issue.workspace_id)
+        if "parent" in data and getattr(data["parent"], "pk", None) != issue.parent_id:
+            parent_ids = {issue.parent_id, getattr(data["parent"], "pk", None)} - {None}
+            for parent in Issue.objects.select_for_update().filter(pk__in=parent_ids).order_by("pk"):
+                require_issue_write_access(actor, parent)
 
     def _replace_workflow_assignees(self, issue, members):
         IssueAssignee.objects.filter(issue=issue).delete()
@@ -250,6 +236,21 @@ class IssueWorkflowSerializerMixin:
     @transaction.atomic
     def create(self, validated_data):
         self._validate_workflow_save(validated_data)
+        actor = getattr(self.context.get("request"), "user", None)
+        project_id = self.context.get("project_id")
+        workspace_id = self.context.get("workspace_id")
+        if self.context.get("intake_submission", False):
+            role = project_access_role(actor, project_id, workspace_id)
+            if role not in (5, 15, 20) or getattr(validated_data.get("state"), "group", None) != "triage":
+                raise PermissionDenied("Intake submissions require project access and the triage state.")
+            if role != 20:
+                allowed = {"name", "description_html", "description_json", "description_binary", "priority", "state"}
+                if set(validated_data) - allowed:
+                    raise PermissionDenied(
+                        "Submit work-item content through intake; only administrators may triage it."
+                    )
+        else:
+            require_project_admin_access(actor, project_id, workspace_id)
         direct = validated_data.get(self.workflow_assignee_field)
         issue = self.create_workflow_issue(validated_data)
         key = str(issue.state_id)

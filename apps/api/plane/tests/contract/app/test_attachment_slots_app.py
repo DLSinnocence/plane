@@ -39,6 +39,8 @@ def attachment_context(workspace, create_user, session_client, settings):
         membership = ProjectMember.objects.create(project=project, workspace=workspace, member=create_user, role=15)
         WorkspaceMember.objects.filter(workspace=workspace, member=create_user).update(role=15)
         issue = Issue.objects.create(name="Attach files", project=project, workspace=workspace)
+        Issue.objects.filter(pk=issue.pk).update(created_by=create_user)
+        issue.refresh_from_db()
         yield session_client, workspace, project, issue, membership
 
 
@@ -234,6 +236,7 @@ def test_cross_issue_slot_id_rejected_before_creating_upload(attachment_context)
     client, workspace, project, _, membership = attachment_context
     _, _, assets = urls(attachment_context)
     other_issue = Issue.objects.create(name="Other issue", workspace=workspace, project=project)
+    Issue.objects.filter(pk=other_issue.pk).update(created_by=membership.member)
     other_context = client, workspace, project, other_issue, membership
     foreign_slot = create_slot(other_context)
     existing_id = upload(other_context, foreign_slot["id"])
@@ -421,7 +424,9 @@ def test_deleting_populated_slot_deletes_completed_and_pending(attachment_contex
     assert not FileAsset.all_objects.get(pk=pending).is_uploaded
 
 
-@pytest.mark.parametrize("project_role,workspace_role,allowed", [(15, 15, False), (15, 20, False), (20, 15, True)])
+@pytest.mark.parametrize(
+    "project_role,workspace_role,allowed", [(15, 15, False), (15, 20, True), (5, 20, True), (20, 15, True)],
+)
 @pytest.mark.parametrize("foreign_pending", [False, True])
 def test_slot_delete_checks_every_file_owner(
     attachment_context, project_role, workspace_role, allowed, foreign_pending

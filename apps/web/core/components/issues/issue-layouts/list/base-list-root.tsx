@@ -5,11 +5,11 @@
  */
 
 import type { FC } from "react";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { observer } from "mobx-react";
 import { useParams } from "next/navigation";
 // plane constants
-import { EIssueFilterType, EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
+import { EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
 // types
 import type { EIssuesStoreType, GroupByColumnTypes, TGroupedIssues, TIssueKanbanFilters } from "@plane/types";
 import { EIssueLayoutTypes } from "@plane/types";
@@ -81,10 +81,11 @@ export const BaseListRoot = observer(function BaseListRoot(props: IBaseListRoot)
   const group_by = (displayFilters?.group_by || null) as GroupByColumnTypes | null;
   const showEmptyGroup = displayFilters?.show_empty_groups ?? false;
 
-  const { workspaceSlug, projectId } = useParams();
-  const { updateFilters } = useIssuesActions(storeType);
-  const collapsedGroups =
-    issuesFilter?.issueFilters?.kanbanFilters || ({ group_by: [], sub_group_by: [] } as TIssueKanbanFilters);
+  const { workspaceSlug, projectId, cycleId, moduleId, userId } = useParams();
+  const [collapsedGroups, setCollapsedGroups] = useState<TIssueKanbanFilters>({ group_by: [], sub_group_by: [] });
+  useEffect(() => {
+    setCollapsedGroups({ group_by: [], sub_group_by: [] });
+  }, [workspaceSlug, projectId, cycleId, moduleId, userId, storeType, viewId]);
 
   useEffect(() => {
     fetchIssues("init-loader", { canGroup: true, perPageCount: group_by ? 50 : 100 }, viewId);
@@ -134,23 +135,14 @@ export const BaseListRoot = observer(function BaseListRoot(props: IBaseListRoot)
     [fetchNextIssues]
   );
 
-  // kanbanFilters and EIssueFilterType.KANBAN_FILTERS are used because the state is shared between kanban view and list view
-  const handleCollapsedGroups = useCallback(
-    (value: string) => {
-      if (workspaceSlug) {
-        let collapsedGroups = issuesFilter?.issueFilters?.kanbanFilters?.group_by || [];
-        if (collapsedGroups.includes(value)) {
-          collapsedGroups = collapsedGroups.filter((_value) => _value != value);
-        } else {
-          collapsedGroups.push(value);
-        }
-        updateFilters(projectId?.toString() ?? "", EIssueFilterType.KANBAN_FILTERS, {
-          group_by: collapsedGroups,
-        } as TIssueKanbanFilters);
-      }
-    },
-    [workspaceSlug, issuesFilter, projectId, updateFilters]
-  );
+  const handleCollapsedGroups = useCallback((value: string) => {
+    setCollapsedGroups((previous) => ({
+      ...previous,
+      group_by: previous.group_by.includes(value)
+        ? previous.group_by.filter((id) => id !== value)
+        : [...previous.group_by, value],
+    }));
+  }, []);
 
   return (
     <IssueLayoutHOC layout={EIssueLayoutTypes.LIST}>
@@ -168,7 +160,9 @@ export const BaseListRoot = observer(function BaseListRoot(props: IBaseListRoot)
           quickAddCallback={quickAddIssue}
           enableIssueQuickAdd={!!enableQuickAdd}
           canEditProperties={canEditProperties}
-          disableIssueCreation={!enableIssueCreation || !isEditingAllowed}
+          disableIssueCreation={
+            !enableIssueCreation || !allowPermissions([EUserPermissions.ADMIN], EUserPermissionsLevel.PROJECT)
+          }
           addIssuesToView={addIssuesToView}
           isCompletedCycle={isCompletedCycle}
           handleOnDrop={handleOnDrop}

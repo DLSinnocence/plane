@@ -15,7 +15,8 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from plane.utils.attachment_rows import (
     complete_attachment_asset, create_attachment_asset, provision_attachment_row,
-    require_replacement_permission, presign_attachment_upload, attachment_completion_data, attachment_slot_data,
+    require_replacement_permission, require_file_owner_or_admin, presign_attachment_upload,
+    attachment_completion_data, attachment_slot_data,
 )
 from plane.app.serializers.attachment import AttachmentSlotUploadSerializer
 from plane.app.views.attachment import require_slot_role, scoped_issue
@@ -36,6 +37,7 @@ from plane.settings.storage import S3Storage
 from plane.utils.path_validator import sanitize_filename
 from plane.bgtasks.storage_metadata_task import get_asset_object_metadata
 from plane.utils.host import base_host
+from plane.utils.issue_permissions import require_issue_write_access
 
 
 class IssueAttachmentEndpoint(BaseAPIView):
@@ -47,6 +49,7 @@ class IssueAttachmentEndpoint(BaseAPIView):
     @transaction.atomic
     def post(self, request, slug, project_id, issue_id):
         issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
         serializer = IssueAttachmentSerializer(data=request.data)
         workspace = Workspace.objects.get(slug=slug)
         if serializer.is_valid():
@@ -74,8 +77,11 @@ class IssueAttachmentEndpoint(BaseAPIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @allow_permission([ROLE.ADMIN], creator=True, model=FileAsset)
+    @transaction.atomic
     def delete(self, request, slug, project_id, issue_id, pk):
-        issue_attachment = FileAsset.objects.filter(
+        issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
+        issue_attachment = FileAsset.objects.select_for_update().filter(
             pk=pk, workspace__slug=slug, project_id=project_id, issue_id=issue_id
         ).first()
         if not issue_attachment:
@@ -83,6 +89,9 @@ class IssueAttachmentEndpoint(BaseAPIView):
                 {"error": "Issue attachment not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        require_file_owner_or_admin(
+            issue_attachment, request.user, "Only the uploader or an admin can delete this attachment."
+        )
         issue_attachment.asset.delete(save=False)
         issue_attachment.delete()
         issue_activity.delay(
@@ -114,11 +123,11 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
     @transaction.atomic
     def post(self, request, slug, project_id, issue_id):
         issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
         slot_data = AttachmentSlotUploadSerializer(data=request.data)
         slot_data.is_valid(raise_exception=True)
         slot = None
         if "slot_id" in slot_data.validated_data:
-            require_slot_role(request, slug, project_id, write=True)
             slot = get_object_or_404(
                 IssueAttachmentSlot.objects.select_for_update(),
                 pk=slot_data.validated_data["slot_id"],
@@ -181,13 +190,17 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
     @allow_permission([ROLE.ADMIN], creator=True, model=FileAsset)
     @transaction.atomic
     def delete(self, request, slug, project_id, issue_id, pk):
-        scoped_issue(slug, project_id, issue_id, lock=True)
+        issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
         issue_attachment = get_object_or_404(
             FileAsset.objects.select_for_update(),
             pk=pk,
             workspace__slug=slug,
             project_id=project_id,
             issue_id=issue_id,
+        )
+        require_file_owner_or_admin(
+            issue_attachment, request.user, "Only the uploader or an admin can delete this attachment."
         )
         issue_attachment.is_deleted = True
         issue_attachment.deleted_at = timezone.now()
@@ -245,7 +258,8 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
     @transaction.atomic
     def patch(self, request, slug, project_id, issue_id, pk):
         require_slot_role(request, slug, project_id)
-        scoped_issue(slug, project_id, issue_id, lock=True)
+        issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
         issue_attachment = get_object_or_404(
             FileAsset.objects.select_for_update(),
             pk=pk,

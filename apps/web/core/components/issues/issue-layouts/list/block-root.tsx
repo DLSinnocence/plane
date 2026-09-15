@@ -20,6 +20,8 @@ import { DropIndicator } from "@plane/ui";
 import RenderIfVisible from "@/components/core/render-if-visible-HOC";
 import { ListLoaderItemRow } from "@/components/ui/loader/layouts/list-layout-loader";
 // hooks
+import { useParams } from "next/navigation";
+import { useExpandedSubIssues } from "@/hooks/use-expanded-sub-issues";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import type { TSelectionHelper } from "@/hooks/use-multiple-select";
 import { usePlatformOS } from "@/hooks/use-platform-os";
@@ -69,7 +71,6 @@ export const IssueBlockRoot = observer(function IssueBlockRoot(props: Props) {
     isEpic = false,
   } = props;
   // states
-  const [isExpanded, setExpanded] = useState<boolean>(false);
   const [instruction, setInstruction] = useState<"DRAG_OVER" | "DRAG_BELOW" | undefined>(undefined);
   const [isCurrentBlockDragging, setIsCurrentBlockDragging] = useState(false);
   // ref
@@ -78,6 +79,16 @@ export const IssueBlockRoot = observer(function IssueBlockRoot(props: Props) {
   const { isMobile } = usePlatformOS();
   // store hooks
   const { subIssues: subIssuesStore } = useIssueDetail(isEpic ? EIssueServiceType.EPICS : EIssueServiceType.ISSUES);
+  const { workspaceSlug } = useParams();
+  const { isExpanded, setExpanded } = useExpandedSubIssues({
+    workspaceSlug: workspaceSlug?.toString(),
+    projectId: issuesMap[issueId]?.project_id,
+    issueId,
+    subIssueCount: issuesMap[issueId]?.sub_issues_count,
+    nestingLevel,
+    isEpic,
+    fetchSubIssues: subIssuesStore.fetchSubIssues,
+  });
 
   const isSubIssue = nestingLevel !== 0;
 

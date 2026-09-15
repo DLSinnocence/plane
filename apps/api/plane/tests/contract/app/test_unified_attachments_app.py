@@ -25,6 +25,8 @@ def context(workspace, create_user, session_client, settings):
     membership = ProjectMember.objects.create(workspace=workspace, project=project, member=create_user, role=15)
     WorkspaceMember.objects.filter(workspace=workspace, member=create_user).update(role=15)
     issue = Issue.objects.create(workspace=workspace, project=project, name="Files")
+    Issue.objects.filter(pk=issue.pk).update(created_by=create_user)
+    issue.refresh_from_db()
     base = f"/api/assets/v2/workspaces/{workspace.slug}/projects/{project.id}/issues/{issue.id}/attachments/"
     with (
         mock.patch(f"{VIEW}.S3Storage") as storage,
@@ -52,10 +54,14 @@ def post(context, name="proof.pdf", slot_id=None):
 
 
 @pytest.mark.parametrize("role", [5, 15, 20])
-def test_direct_upload_has_row_and_guest_can_complete(context, role):
+def test_direct_upload_requires_formal_write_role(context, role):
     ProjectMember.objects.filter(pk=context.membership.pk).update(role=role)
     WorkspaceMember.objects.filter(workspace=context.workspace, member=context.user).update(role=role)
     response = post(context)
+    if role == 5:
+        assert response.status_code == 403
+        assert not FileAsset.objects.filter(issue=context.issue).exists()
+        return
     assert response.status_code == 200, response.data
     asset = FileAsset.objects.get(pk=response.data["asset_id"])
     assert asset.attachment_slot.name == "附件"
@@ -102,8 +108,10 @@ def test_failed_presign_rolls_back_asset_and_row(context, raises):
     method = context.storage.return_value.generate_presigned_post
     if raises:
         method.side_effect = RuntimeError("Storage offline")
-        with pytest.raises(RuntimeError, match="Storage offline"):
-            post(context)
+        # BaseAPIView translates unexpected storage errors into an HTTP 500.
+        response = post(context)
+        assert response.status_code == 500
+        assert response.data == {"error": "Something went wrong please try again later"}
     else:
         method.return_value = None
         assert post(context).status_code == 503

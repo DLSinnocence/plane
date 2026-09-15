@@ -7,11 +7,12 @@
 import { useEffect, useState } from "react";
 import { observer } from "mobx-react";
 import useSWR from "swr";
-import { EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
+import { EUserPermissions } from "@plane/constants";
 import type { TNameDescriptionLoader } from "@plane/types";
 // components
 import { ContentWrapper } from "@plane/ui";
 // hooks
+import { getIntakePermissions } from "@/helpers/issue-workflow";
 import { useProjectInbox } from "@/hooks/store/use-project-inbox";
 import { useUser, useUserPermissions } from "@/hooks/store/user";
 import { useAppRouter } from "@/hooks/use-app-router";
@@ -47,7 +48,7 @@ export const InboxContentRoot = observer(function InboxContentRoot(props: TInbox
   const { data: currentUser } = useUser();
   const { currentTab, fetchInboxIssueById, getIssueInboxByIssueId, getIsIssueAvailable } = useProjectInbox();
   const inboxIssue = getIssueInboxByIssueId(inboxIssueId);
-  const { allowPermissions, getProjectRoleByWorkspaceSlugAndProjectId } = useUserPermissions();
+  const { getProjectRoleByWorkspaceSlugAndProjectId } = useUserPermissions();
 
   // derived values
   const isIssueAvailable = getIsIssueAvailable(inboxIssueId?.toString() || "");
@@ -72,9 +73,11 @@ export const InboxContentRoot = observer(function InboxContentRoot(props: TInbox
     }
   );
 
-  const isEditable =
-    allowPermissions([EUserPermissions.ADMIN], EUserPermissionsLevel.PROJECT, workspaceSlug, projectId) ||
-    inboxIssue?.issue.created_by === currentUser?.id;
+  const isEditable = getIntakePermissions(
+    getProjectRoleByWorkspaceSlugAndProjectId(workspaceSlug, projectId),
+    currentUser?.id,
+    inboxIssue?.issue.created_by
+  ).canEdit;
 
   const isGuest = getProjectRoleByWorkspaceSlugAndProjectId(workspaceSlug, projectId) === EUserPermissions.GUEST;
   const isOwner = inboxIssue?.issue.created_by === currentUser?.id;

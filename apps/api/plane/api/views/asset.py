@@ -22,7 +22,9 @@ from plane.utils.path_validator import sanitize_filename
 from plane.db.models import FileAsset, User, Workspace
 from plane.app.permissions import WorkspaceUserPermission
 from plane.app.views.attachment import require_slot_role
-from plane.utils.attachment_rows import complete_attachment_asset, attachment_completion_data
+from plane.utils.attachment_rows import (
+    complete_attachment_asset, attachment_completion_data, require_attachment_asset_write,
+)
 from plane.api.views.base import BaseAPIView
 from plane.api.serializers import (
     UserAssetUploadSerializer,
@@ -212,7 +214,11 @@ class UserAssetEndpoint(BaseAPIView):
         This endpoint should be called after completing the S3 upload to mark the asset as uploaded.
         """
         # get the asset id
-        asset = FileAsset.objects.get(id=asset_id, user_id=request.user.id)
+        asset = FileAsset.objects.get(
+            id=asset_id, user_id=request.user.id,
+            attachment_slot__isnull=True,
+            entity_type__in=[FileAsset.EntityTypeContext.USER_AVATAR, FileAsset.EntityTypeContext.USER_COVER],
+        )
         # get the storage metadata
         asset.is_uploaded = True
         # get the storage metadata
@@ -239,7 +245,11 @@ class UserAssetEndpoint(BaseAPIView):
         Delete a user profile asset (avatar or cover image) and remove its reference from the user profile.
         This performs a soft delete by marking the asset as deleted and updating the user's profile.
         """
-        asset = FileAsset.objects.get(id=asset_id, user_id=request.user.id)
+        asset = FileAsset.objects.get(
+            id=asset_id, user_id=request.user.id,
+            attachment_slot__isnull=True,
+            entity_type__in=[FileAsset.EntityTypeContext.USER_AVATAR, FileAsset.EntityTypeContext.USER_COVER],
+        )
         asset.is_deleted = True
         asset.deleted_at = timezone.now()
         # get the entity and save the asset id for the request field
@@ -368,7 +378,11 @@ class UserServerAssetEndpoint(BaseAPIView):
         This endpoint should be called after completing the S3 upload to mark the asset as uploaded.
         """
         # get the asset id
-        asset = FileAsset.objects.get(id=asset_id, user_id=request.user.id)
+        asset = FileAsset.objects.get(
+            id=asset_id, user_id=request.user.id,
+            attachment_slot__isnull=True,
+            entity_type__in=[FileAsset.EntityTypeContext.USER_AVATAR, FileAsset.EntityTypeContext.USER_COVER],
+        )
         # get the storage metadata
         asset.is_uploaded = True
         # get the storage metadata
@@ -396,7 +410,11 @@ class UserServerAssetEndpoint(BaseAPIView):
         remove its reference from the user profile. This performs a soft delete by marking the
         asset as deleted and updating the user's profile.
         """
-        asset = FileAsset.objects.get(id=asset_id, user_id=request.user.id)
+        asset = FileAsset.objects.get(
+            id=asset_id, user_id=request.user.id,
+            attachment_slot__isnull=True,
+            entity_type__in=[FileAsset.EntityTypeContext.USER_AVATAR, FileAsset.EntityTypeContext.USER_COVER],
+        )
         asset.is_deleted = True
         asset.deleted_at = timezone.now()
         # get the entity and save the asset id for the request field
@@ -613,6 +631,7 @@ class GenericAssetEndpoint(BaseAPIView):
             404: ASSET_NOT_FOUND_RESPONSE,
         },
     )
+    @transaction.atomic
     def patch(self, request, slug, asset_id):
         """Update generic asset after upload completion.
 
@@ -622,6 +641,7 @@ class GenericAssetEndpoint(BaseAPIView):
         """
         try:
             asset = FileAsset.objects.get(id=asset_id, workspace__slug=slug, is_deleted=False)
+            asset = require_attachment_asset_write(asset, request.user)
 
             if asset.attachment_slot_id or (
                 asset.issue_id and asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT

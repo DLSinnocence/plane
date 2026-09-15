@@ -8,6 +8,7 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission
 # Module import
 from plane.db.models import ProjectMember, WorkspaceMember
 from plane.db.models.project import ROLE
+from plane.utils.issue_permissions import project_access_role
 
 
 class ProjectBasePermission(BasePermission):
@@ -109,14 +110,21 @@ class ProjectEntityPermission(BasePermission):
                 is_active=True,
             ).exists()
 
-        ## Only project members or admins can create and edit the project attributes
-        return ProjectMember.objects.filter(
-            workspace__slug=view.workspace_slug,
-            member=request.user,
-            role__in=[ROLE.ADMIN.value, ROLE.MEMBER.value],
-            project_id=view.project_id,
-            is_active=True,
-        ).exists()
+        # Workspace admins still need a real, active membership in this project.
+        workspace_id = (
+            ProjectMember.objects.filter(
+                workspace__slug=view.workspace_slug,
+                member=request.user,
+                project_id=view.project_id,
+                is_active=True,
+            )
+            .values_list("workspace_id", flat=True)
+            .first()
+        )
+        return workspace_id is not None and project_access_role(request.user, view.project_id, workspace_id) in (
+            ROLE.ADMIN.value,
+            ROLE.MEMBER.value,
+        )
 
 
 class ProjectAdminPermission(BasePermission):

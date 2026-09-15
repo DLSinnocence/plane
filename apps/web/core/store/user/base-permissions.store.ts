@@ -17,6 +17,8 @@ import {
 import type { EUserProjectRoles, IUserProjectsRole, IWorkspaceMemberMe, TProjectMembership } from "@plane/types";
 import { EUserWorkspaceRoles } from "@plane/types";
 // plane web imports
+import type { TIssue } from "@plane/types";
+import { canCreateIssue, getIssueWorkflowPermissions } from "@/helpers/issue-workflow";
 import { WorkspaceService } from "@/services/workspace.service";
 import type { RootStore } from "@/store/root.store";
 // services
@@ -50,6 +52,11 @@ export interface IBaseUserPermissionStore {
     projectId?: string,
     onPermissionAllowed?: () => boolean
   ) => boolean;
+  canCreateIssue: (workspaceSlug: string, projectId?: string) => boolean;
+  getIssuePermissions: (
+    workspaceSlug: string,
+    issue: TIssue | undefined
+  ) => ReturnType<typeof getIssueWorkflowPermissions>;
   // actions
   fetchUserWorkspaceInfo: (workspaceSlug: string) => Promise<IWorkspaceMemberMe>;
   leaveWorkspace: (workspaceSlug: string) => Promise<void>;
@@ -90,6 +97,18 @@ export class BaseUserPermissionStore implements IBaseUserPermissionStore {
     });
   }
 
+  canCreateIssue = (workspaceSlug: string, projectId?: string) =>
+    !!this.store.user.data?.id &&
+    canCreateIssue(this.getProjectRoleByWorkspaceSlugAndProjectId(workspaceSlug, projectId));
+
+  getIssuePermissions = (workspaceSlug: string, issue: TIssue | undefined) =>
+    getIssueWorkflowPermissions({
+      issue,
+      userId: this.store.user.data?.id,
+      role: this.getProjectRoleByWorkspaceSlugAndProjectId(workspaceSlug, issue?.project_id ?? undefined),
+      stateGroup: issue?.state_id ? this.store.state.getStateById(issue.state_id)?.group : undefined,
+    });
+
   // computed helpers
   /**
    * @description Returns the current workspace information
@@ -121,9 +140,11 @@ export class BaseUserPermissionStore implements IBaseUserPermissionStore {
    */
   protected getProjectRole = computedFn((workspaceSlug: string, projectId?: string): EUserPermissions | undefined => {
     if (!workspaceSlug || !projectId) return undefined;
+    if (this.projectUserInfo[workspaceSlug]?.[projectId]?.id === null) return undefined;
     const projectRole = this.workspaceProjectsPermissions?.[workspaceSlug]?.[projectId];
     if (!projectRole) return undefined;
     const workspaceRole = this.workspaceUserInfo?.[workspaceSlug]?.role;
+    if (workspaceRole === undefined) return undefined;
     if (workspaceRole === EUserWorkspaceRoles.ADMIN) return EUserPermissions.ADMIN;
     else return projectRole;
   });

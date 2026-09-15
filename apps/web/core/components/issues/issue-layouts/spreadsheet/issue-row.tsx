@@ -29,6 +29,9 @@ import { useIssues } from "@/hooks/store/use-issues";
 import { useProject } from "@/hooks/store/use-project";
 import useIssuePeekOverviewRedirection from "@/hooks/use-issue-peek-overview-redirection";
 import type { TSelectionHelper } from "@/hooks/use-multiple-select";
+import { useExpandedSubIssues } from "@/hooks/use-expanded-sub-issues";
+import { MAX_LIST_NESTING_LEVEL } from "../list/hierarchy";
+import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
 import { usePlatformOS } from "@/hooks/use-platform-os";
 // local components
 import type { TRenderQuickActions } from "../list/list-view-types";
@@ -71,14 +74,22 @@ export const SpreadsheetIssueRow = observer(function SpreadsheetIssueRow(props: 
     shouldRenderByDefault,
     isEpic = false,
   } = props;
-  // states
-  const [isExpanded, setExpanded] = useState<boolean>(false);
   // store hooks
   const { subIssues: subIssuesStore } = useIssueDetail(isEpic ? EIssueServiceType.EPICS : EIssueServiceType.ISSUES);
   const { issueMap } = useIssues();
 
   // derived values
   const issue = issueMap[issueId];
+  const { workspaceSlug } = useParams();
+  const { isExpanded, setExpanded } = useExpandedSubIssues({
+    workspaceSlug: workspaceSlug?.toString(),
+    projectId: issue?.project_id,
+    issueId,
+    subIssueCount: issue?.sub_issues_count,
+    nestingLevel,
+    isEpic,
+    fetchSubIssues: subIssuesStore.fetchSubIssues,
+  });
   const subIssues = subIssuesStore.subIssuesByIssueId(issueId);
   const isIssueSelected = selectionHelpers.getIsEntitySelected(issueId);
   const isIssueActive = selectionHelpers.getIsEntityActive(issueId);
@@ -203,9 +214,10 @@ const IssueRowDetails = observer(function IssueRowDetails(props: IssueRowDetails
   const handleIssuePeekOverview = (issue: TIssue) =>
     handleRedirection(workspaceSlug?.toString(), issue, isMobile, nestingLevel);
 
-  const { subIssues: subIssuesStore, issue } = useIssueDetail();
+  const { issue } = useIssueDetail();
 
   const issueDetail = issue.getIssueById(issueId);
+  const { canEdit } = useIssueWorkflow(issueDetail, workspaceSlug?.toString() ?? "");
 
   const subIssueIndentation = `${spacingLeft}px`;
 
@@ -227,18 +239,14 @@ const IssueRowDetails = observer(function IssueRowDetails(props: IssueRowDetails
   const handleToggleExpand = (e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     e.preventDefault();
-    if (nestingLevel >= 3) {
+    if (nestingLevel >= MAX_LIST_NESTING_LEVEL) {
       handleIssuePeekOverview(issueDetail);
     } else {
-      setExpanded((prevState) => {
-        if (!prevState && workspaceSlug && issueDetail && issueDetail.project_id)
-          subIssuesStore.fetchSubIssues(workspaceSlug.toString(), issueDetail.project_id, issueDetail.id);
-        return !prevState;
-      });
+      setExpanded((prevState) => !prevState);
     }
   };
 
-  const disableUserActions = !canEditProperties(issueDetail.project_id ?? undefined);
+  const disableUserActions = !canEdit || !canEditProperties(issueDetail.project_id ?? undefined);
   const subIssuesCount = issueDetail?.sub_issues_count ?? 0;
   const isIssueSelected = selectionHelpers.getIsEntitySelected(issueDetail.id);
   const projectIdentifier = getProjectIdentifierById(issueDetail.project_id);

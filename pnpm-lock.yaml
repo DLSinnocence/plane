@@ -429,6 +429,9 @@ catalogs:
     react-router:
       specifier: 8.3.0
       version: 8.3.0
+    react-test-renderer:
+      specifier: 19.2.8
+      version: 19.2.8
     recharts:
       specifier: ^2.15.4
       version: 2.15.4
@@ -1244,6 +1247,9 @@ importers:
       dotenv:
         specifier: 'catalog:'
         version: 16.4.7
+      react-test-renderer:
+        specifier: 'catalog:'
+        version: 19.2.8(react@19.2.8)
       typescript:
         specifier: 5.8.3
         version: 5.8.3
@@ -9023,6 +9029,11 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  react-test-renderer@19.2.8:
+    resolution: {integrity: sha512-GHKPaDRaNYU24PHTLG8Bx8VMY9t+qNfxQbt/Yjp7aMWBkKU6766SR0n6TnYu7P5I1MfEuAMUadqiyDHyI4Yy9Q==}
+    peerDependencies:
+      react: 19.2.8
 
   react-transition-group@4.4.5:
     resolution: {integrity: sha512-pZcd1MCJoiKiBR2NRxeCRg13uCXbydPnmB4EOeRrY7480qNWO8IIgQG6zlDkm6uRMsURXPuKq0GWtiM59a5Q6g==}
@@ -17549,6 +17560,12 @@ snapshots:
       tslib: 2.8.1
     optionalDependencies:
       '@types/react': 19.2.17
+
+  react-test-renderer@19.2.8(react@19.2.8):
+    dependencies:
+      react: 19.2.8
+      react-is: 19.2.8
+      scheduler: 0.27.0
 
   react-transition-group@4.4.5(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:

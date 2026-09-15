@@ -205,6 +205,15 @@ export class BaseCommandPaletteStore implements IBaseCommandPaletteStore {
    * @returns
    */
   toggleCreateIssueModal = (value?: boolean, storeType?: TCreateModalStoreTypes, allowedProjectIds?: string[]) => {
+    const slug = store.router.workspaceSlug ?? "";
+    const permissions = store.user.permission;
+    if (
+      (value ?? !this.isCreateIssueModalOpen) &&
+      !Object.keys(permissions.getProjectRolesByWorkspaceSlug(slug)).some(
+        (id) => permissions.canCreateIssue(slug, id) && (!allowedProjectIds || allowedProjectIds.includes(id))
+      )
+    )
+      return;
     if (value !== undefined) {
       this.isCreateIssueModalOpen = value;
       this.createIssueStoreType = storeType || EIssuesStoreType.PROJECT;

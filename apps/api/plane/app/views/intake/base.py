@@ -53,7 +53,11 @@ from plane.app.views.base import BaseAPIView
 from plane.utils.timezone_converter import user_timezone_converter
 from plane.utils.global_paginator import paginate
 from plane.utils.issue_workflow_activity import issue_activity_payload
+from plane.utils.issue_permissions import (
+    project_access_role, require_intake_write_access, require_project_admin_access,
+)
 from plane.utils.host import base_host
+from plane.utils.issue_write_scope import lock_issue_delete_scope
 from plane.db.models.intake import SourceType
 
 
@@ -269,6 +273,7 @@ class IntakeIssueViewSet(BaseViewSet):
                 "workspace_id": project.workspace_id,
                 "default_assignee_id": project.default_assignee_id,
                 "allow_triage_state": True,
+                "intake_submission": True,
             },
         )
         if serializer.is_valid():
@@ -342,7 +347,7 @@ class IntakeIssueViewSet(BaseViewSet):
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @allow_permission(allowed_roles=[ROLE.ADMIN], creator=True, model=Issue)
+    @allow_permission(allowed_roles=[ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
     @transaction.atomic
     def partial_update(self, request, slug, project_id, pk):
         skip_activity = request.data.pop("skip_activity", False)
@@ -356,6 +361,10 @@ class IntakeIssueViewSet(BaseViewSet):
             intake_id=intake_id,
         )
         intake_issue.issue = Issue.objects.select_for_update().get(pk=intake_issue.issue_id)
+        require_intake_write_access(request.user, intake_issue.issue)
+        role = project_access_role(request.user, project_id, intake_issue.workspace_id)
+        if set(request.data) - {"issue"}:
+            require_project_admin_access(request.user, project_id, intake_issue.workspace_id)
 
         project_member = ProjectMember.objects.filter(
             workspace__slug=slug,
@@ -414,7 +423,7 @@ class IntakeIssueViewSet(BaseViewSet):
                 ),
             ).get(pk=intake_issue.issue_id, workspace__slug=slug, project_id=project_id)
 
-            if project_member and project_member.role <= ROLE.GUEST.value:
+            if role == ROLE.GUEST.value:
                 issue_data = {
                     "name": issue_data.get("name", issue.name),
                     "description_html": issue_data.get("description_html", issue.description_html),
@@ -433,6 +442,7 @@ class IntakeIssueViewSet(BaseViewSet):
                     "project_id": project_id,
                     "workspace_id": intake_issue.workspace_id,
                     "allow_triage_state": True,
+                    "intake_submission": True,
                 },
             )
 
@@ -454,6 +464,7 @@ class IntakeIssueViewSet(BaseViewSet):
                     "project_id": project_id,
                     "workspace_id": intake_issue.workspace_id,
                     "allow_triage_state": True,
+                    "intake_submission": True,
                 },
             )
 
@@ -621,7 +632,10 @@ class IntakeIssueViewSet(BaseViewSet):
         return Response(issue, status=status.HTTP_200_OK)
 
     @allow_permission(allowed_roles=[ROLE.ADMIN], creator=True, model=Issue)
+    @transaction.atomic
     def destroy(self, request, slug, project_id, pk):
+        issue = Issue.objects.select_for_update().get(workspace__slug=slug, project_id=project_id, pk=pk)
+        require_intake_write_access(request.user, issue)
         intake_id = Intake.objects.filter(workspace__slug=slug, project_id=project_id).first()
         intake_issue = IntakeIssue.objects.get(
             issue_id=pk,
@@ -634,6 +648,8 @@ class IntakeIssueViewSet(BaseViewSet):
         if intake_issue.status in [-2, -1, 0, 2]:
             # Delete the issue also
             issue = Issue.objects.filter(workspace__slug=slug, project_id=project_id, pk=pk).first()
+            if Issue.objects.using("default").filter(parent_id=issue.pk).exists():
+                issue = lock_issue_delete_scope(request.user, slug, issue.pk, project_id)
             issue.delete()
 
         intake_issue.delete()

@@ -13,6 +13,7 @@ from .project import ProjectLiteSerializer
 from .state import StateLiteSerializer
 from .user import UserLiteSerializer
 from plane.db.models import Intake, IntakeIssue, Issue, StateGroup, State
+from plane.utils.issue_permissions import require_project_admin_access
 
 
 class IntakeSerializer(BaseSerializer):
@@ -46,6 +47,9 @@ class IntakeIssueSerializer(BaseSerializer):
         instance = IntakeIssue.objects.select_for_update().get(pk=instance.pk)
         issue = Issue.objects.select_for_update().get(pk=instance.issue_id)
         instance.issue = issue
+        require_project_admin_access(
+            getattr(self.context.get("request"), "user", None), issue.project_id, issue.workspace_id
+        )
         if validated_data.get("status") == 1 and issue.state and issue.state.group == StateGroup.TRIAGE.value:
             default_state = State.objects.filter(project_id=issue.project_id, default=True).first()
             if default_state is None:

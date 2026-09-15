@@ -57,7 +57,7 @@ export interface IIssueProperties {
 }
 
 export const IssueProperties = observer(function IssueProperties(props: IIssueProperties) {
-  const { issue, updateIssue, displayProperties, isReadOnly, className, isEpic = false } = props;
+  const { issue, updateIssue, displayProperties, isReadOnly: readOnlyByParent, className, isEpic = false } = props;
   // i18n
   const { t } = useTranslation();
   // store hooks
@@ -78,7 +78,8 @@ export const IssueProperties = observer(function IssueProperties(props: IIssuePr
   // router
   const router = useAppRouter();
   const { workspaceSlug, projectId } = useParams();
-  const { canTransition } = useIssueWorkflow(issue, workspaceSlug?.toString() ?? "");
+  const { canEdit, canTransition } = useIssueWorkflow(issue, workspaceSlug?.toString() ?? "");
+  const isReadOnly = readOnlyByParent || !canEdit;
 
   // derived values
   const stateDetails = getStateById(issue.state_id);

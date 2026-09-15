@@ -17,10 +17,6 @@ const ISSUE_EXTRA_OPTIONS: {
   titleTranslationKey: string;
 }[] = [
   {
-    key: "sub_issue",
-    titleTranslationKey: "issue.display.extra.show_sub_issues",
-  }, // in spreadsheet its always false
-  {
     key: "show_empty_groups",
     titleTranslationKey: "issue.display.extra.show_empty_groups",
   }, // filter on front-end

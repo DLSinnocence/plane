@@ -42,6 +42,7 @@ from .. import BaseViewSet
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.utils.issue_filters import issue_filters
 from plane.utils.issue_workflow_activity import issue_activity_payload
+from plane.utils.issue_permissions import require_project_admin_access
 from plane.utils.host import base_host
 
 
@@ -228,6 +229,7 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        require_project_admin_access(request.user, draft_issue.project_id, draft_issue.workspace_id)
         issue_data = request.data.copy()
         if "state_assignees" not in issue_data:
             issue_data["state_assignees"] = draft_issue.state_assignees

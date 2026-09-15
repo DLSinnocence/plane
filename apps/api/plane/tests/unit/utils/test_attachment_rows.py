@@ -31,21 +31,14 @@ def test_next_name_fills_first_available_default(names, expected):
 def test_replacement_requires_delete_permission(owner, admin, allowed):
     user = SimpleNamespace(id=uuid4())
     asset = SimpleNamespace(created_by_id=user.id if owner else uuid4(), workspace_id=uuid4(), project_id=uuid4())
-    with mock.patch.object(rows.ProjectMember.objects, "filter") as memberships:
-        memberships.return_value.exists.return_value = admin
+    with mock.patch.object(rows, "has_project_admin_access", return_value=admin) as memberships:
         if allowed:
             rows.require_file_owner_or_admin(asset, user, "Denied")
         else:
             with pytest.raises(PermissionDenied, match="Denied"):
                 rows.require_file_owner_or_admin(asset, user, "Denied")
         if not owner:
-            memberships.assert_called_once_with(
-                workspace_id=asset.workspace_id,
-                project_id=asset.project_id,
-                member_id=user.id,
-                is_active=True,
-                role=20,
-            )
+            memberships.assert_called_once_with(user, asset.project_id, asset.workspace_id)
 
 
 def test_row_cap_prevents_new_creation_but_not_name_generation():
@@ -89,6 +82,7 @@ def test_completion_soft_deletes_old_file_without_clearing_audit_link():
     )
     with (
         mock.patch.object(rows, "lock_attachment_issue", return_value=issue),
+        mock.patch.object(rows, "require_issue_write_access"),
         mock.patch.object(rows, "get_object_or_404", side_effect=[asset, slot]),
         mock.patch.object(rows.FileAsset.objects, "select_for_update"),
         mock.patch.object(rows.IssueAttachmentSlot.objects, "select_for_update"),
@@ -127,6 +121,7 @@ def test_repeat_completion_does_not_replace_or_publish_again():
     slot = SimpleNamespace(id=asset.attachment_slot_id, name="改名后", sort_order=9)
     with (
         mock.patch.object(rows, "lock_attachment_issue", return_value=issue),
+        mock.patch.object(rows, "require_issue_write_access"),
         mock.patch.object(rows, "get_object_or_404", side_effect=[asset, slot]),
         mock.patch.object(rows.FileAsset.objects, "select_for_update"),
         mock.patch.object(rows.IssueAttachmentSlot.objects, "select_for_update"),
@@ -142,3 +137,68 @@ def test_repeat_completion_does_not_replace_or_publish_again():
         old_files.assert_not_called()
         permission.assert_not_called()
         asset.save.assert_not_called()
+
+
+@pytest.mark.parametrize("operation", ["create", "complete", "delete"])
+def test_denied_issue_write_stops_before_any_attachment_mutation(operation):
+    issue = SimpleNamespace(id=uuid4(), workspace_id=uuid4(), project_id=uuid4())
+    user = SimpleNamespace(id=uuid4())
+    asset = mock.Mock(
+        issue_id=issue.id, project_id=issue.project_id, workspace_id=issue.workspace_id,
+        entity_type=rows.FileAsset.EntityTypeContext.ISSUE_ATTACHMENT,
+    )
+    with (
+        mock.patch.object(rows, "lock_attachment_issue", return_value=issue) as lock,
+        mock.patch.object(rows, "require_issue_write_access", side_effect=PermissionDenied("Revoked")) as permission,
+        mock.patch.object(rows, "provision_attachment_row") as provision,
+        mock.patch.object(rows.FileAsset.objects, "select_for_update") as assets,
+        mock.patch.object(rows.FileAsset.objects, "filter") as files,
+    ):
+        with pytest.raises(PermissionDenied, match="Revoked"):
+            if operation == "create":
+                rows.create_attachment_asset.__wrapped__(
+                    workspace_id=issue.workspace_id, project_id=issue.project_id, issue_id=issue.id,
+                    created_by=user, entity_type=rows.FileAsset.EntityTypeContext.ISSUE_ATTACHMENT,
+                )
+            elif operation == "complete":
+                rows.complete_attachment_asset.__wrapped__(asset, user)
+            else:
+                rows.require_attachment_asset_write(asset, user)
+        lock.assert_called_once_with(issue.workspace_id, issue.project_id, issue.id)
+        permission.assert_called_once_with(user, issue)
+        provision.assert_not_called()
+        assets.assert_not_called()
+        files.assert_not_called()
+        asset.save.assert_not_called()
+
+
+def test_generic_delete_rechecks_locked_file_owner():
+    user = SimpleNamespace(id=uuid4())
+    issue = SimpleNamespace(id=uuid4(), workspace_id=uuid4(), project_id=uuid4())
+    stale = mock.Mock(issue_id=issue.id, project_id=issue.project_id, workspace_id=issue.workspace_id)
+    persisted = mock.Mock(created_by_id=uuid4(), project_id=issue.project_id, workspace_id=issue.workspace_id)
+    with (
+        mock.patch.object(rows, "lock_attachment_issue", return_value=issue),
+        mock.patch.object(rows, "require_issue_write_access"),
+        mock.patch.object(rows.FileAsset.objects, "select_for_update"),
+        mock.patch.object(rows, "get_object_or_404", return_value=persisted),
+        mock.patch.object(rows, "has_project_admin_access", return_value=False),
+    ):
+        with pytest.raises(PermissionDenied):
+            rows.require_attachment_asset_write(stale, user)
+        persisted.save.assert_not_called()
+
+
+def test_generic_write_rejects_concurrent_binding_before_mutation():
+    stale = SimpleNamespace(pk=uuid4(), attachment_slot_id=None, issue_id=None, entity_type="ISSUE_ATTACHMENT")
+    bound = SimpleNamespace(attachment_slot_id=uuid4(), issue_id=uuid4(), entity_type="ISSUE_ATTACHMENT")
+    with (
+        mock.patch.object(rows.FileAsset.objects, "select_for_update") as files,
+        mock.patch.object(rows, "get_object_or_404", return_value=bound),
+        mock.patch.object(rows, "lock_attachment_issue") as issue_lock,
+    ):
+        with pytest.raises(PermissionDenied, match="changed"):
+            rows.require_attachment_asset_write(stale, mock.Mock())
+        files.assert_called_once()
+        # Never take asset -> issue locks, which would deadlock normal binding.
+        issue_lock.assert_not_called()

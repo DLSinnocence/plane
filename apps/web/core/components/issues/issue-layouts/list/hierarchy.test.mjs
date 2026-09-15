@@ -162,7 +162,7 @@ test("row expansion switches to peek at the same depth used to retain roots", ()
       { fetchSubIssues: () => calls.push("fetch") }
     );
     toggle({ stopPropagation() {}, preventDefault() {} });
-    assert.deepEqual(calls, nestingLevel < 3 ? ["fetch", true] : ["peek"]);
+    assert.deepEqual(calls, nestingLevel < 3 ? [true] : ["peek"]);
   }
 });
 

@@ -9,6 +9,8 @@ import uuid
 from django.conf import settings
 from django.http import HttpResponseRedirect
 from django.utils import timezone
+from django.db.models import Q
+from plane.utils.attachment_rows import is_work_item_attachment
 
 # Third party imports
 from rest_framework import status
@@ -167,7 +169,7 @@ class EntityAssetEndpoint(BaseAPIView):
 
         # get the asset id — scope to project to prevent cross-project IDOR
         asset = FileAsset.objects.get(id=pk, workspace=deploy_board.workspace, project_id=deploy_board.project_id)
-        if asset.attachment_slot_id or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
+        if is_work_item_attachment(asset) or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
             return Response({"error": "Use the issue attachment endpoint for work item attachments."}, status=400)
         # get the storage metadata
         asset.is_uploaded = True
@@ -189,7 +191,7 @@ class EntityAssetEndpoint(BaseAPIView):
             return Response({"error": "Project is not published"}, status=status.HTTP_404_NOT_FOUND)
         # Get the asset
         asset = FileAsset.objects.get(id=pk, workspace=deploy_board.workspace, project_id=deploy_board.project_id)
-        if asset.attachment_slot_id or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
+        if is_work_item_attachment(asset) or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
             return Response({"error": "Use the issue attachment endpoint for work item attachments."}, status=400)
         # Check deleted assets
         asset.is_deleted = True
@@ -211,7 +213,7 @@ class AssetRestoreEndpoint(BaseAPIView):
 
         # Get the asset — scope to project to prevent cross-project IDOR
         asset = FileAsset.all_objects.get(id=pk, workspace=deploy_board.workspace, project_id=deploy_board.project_id)
-        if asset.attachment_slot_id or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
+        if is_work_item_attachment(asset) or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
             return Response({"error": "Deleted work item attachments cannot be restored."}, status=400)
         asset.is_deleted = False
         asset.deleted_at = None
@@ -240,6 +242,9 @@ class EntityBulkAssetEndpoint(BaseAPIView):
             id__in=asset_ids,
             workspace=deploy_board.workspace,
             project_id=deploy_board.project_id,
+            attachment_slot__isnull=True,
+        ).exclude(entity_type=FileAsset.EntityTypeContext.ISSUE_ATTACHMENT).exclude(
+            Q(issue__isnull=False) & (Q(entity_type__isnull=True) | Q(entity_type=""))
         )
 
         asset = assets.first()

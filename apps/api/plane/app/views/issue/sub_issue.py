@@ -7,7 +7,7 @@ import json
 
 # Django imports
 from django.utils import timezone
-from django.db.models import OuterRef, Func, F, Q, Value, UUIDField, Subquery, Count, IntegerField
+from django.db.models import OuterRef, F, Value, UUIDField, Subquery, Count, IntegerField
 from django.utils.decorators import method_decorator
 from django.views.decorators.gzip import gzip_page
 from django.contrib.postgres.aggregates import ArrayAgg
@@ -17,6 +17,7 @@ from django.db.models.functions import Coalesce
 # Third Party imports
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 
 # Module imports
 from .. import BaseAPIView
@@ -26,6 +27,8 @@ from plane.db.models import Issue, IssueLink, FileAsset, CycleIssue, IssueLabel,
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.utils.timezone_converter import user_timezone_converter
 from collections import defaultdict
+from django.db import transaction
+from plane.utils.issue_write_scope import lock_issue_write_scope
 from plane.utils.host import base_host
 from plane.utils.order_queryset import order_issue_queryset
 
@@ -208,6 +211,7 @@ class SubIssuesEndpoint(BaseAPIView):
         )
 
     # Assign multiple sub issues
+    @transaction.atomic
     def post(self, request, slug, project_id, issue_id):
         # SECURITY: bind the parent issue to the URL workspace + project. A bare
         # pk lookup let any project member re-parent issues under a parent in a
@@ -228,10 +232,23 @@ class SubIssuesEndpoint(BaseAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Scope to workspace + project to prevent cross-project/cross-tenant IDOR
-        sub_issues = Issue.issue_objects.filter(
-            id__in=sub_issue_ids, workspace__slug=slug, project_id=project_id
+        old_parent_ids = set(
+            Issue.objects.using("default").filter(
+                pk__in=sub_issue_ids, workspace__slug=slug, project_id=project_id,
+                parent_id__isnull=False,
+            ).values_list("parent_id", flat=True)
         )
+        # Lock both sides in one order, including the parents losing children.
+        locked_issues = lock_issue_write_scope(
+            request.user, slug, [issue_id, *sub_issue_ids, *old_parent_ids]
+        )
+        parent_issue = next(issue for issue in locked_issues if str(issue.id) == str(issue_id))
+        child_ids = {str(pk) for pk in sub_issue_ids}
+        sub_issues = [issue for issue in locked_issues if str(issue.id) in child_ids]
+        if any(str(issue.project_id) != str(project_id) for issue in [parent_issue, *sub_issues]):
+            raise PermissionDenied("Parent and child work items must belong to this project.")
+        if any(issue.parent_id and issue.parent_id not in old_parent_ids for issue in sub_issues):
+            raise PermissionDenied("The parent changed concurrently; retry this operation.")
 
         for sub_issue in sub_issues:
             sub_issue.parent = parent_issue

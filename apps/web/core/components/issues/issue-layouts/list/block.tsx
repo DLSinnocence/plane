@@ -83,12 +83,9 @@ export const IssueBlock = observer(function IssueBlock(props: IssueBlockProps) {
   // hooks
   const { sidebarCollapsed: isSidebarCollapsed } = useAppTheme();
   const { getProjectIdentifierById, currentProjectNextSequenceId } = useProject();
-  const {
-    getIsIssuePeeked,
-    peekIssue,
-    setPeekIssue,
-    subIssues: subIssuesStore,
-  } = useIssueDetail(isEpic ? EIssueServiceType.EPICS : EIssueServiceType.ISSUES);
+  const { getIsIssuePeeked, peekIssue, setPeekIssue } = useIssueDetail(
+    isEpic ? EIssueServiceType.EPICS : EIssueServiceType.ISSUES
+  );
 
   const handleIssuePeekOverview = (issue: TIssue) =>
     workspaceSlug &&
@@ -107,8 +104,8 @@ export const IssueBlock = observer(function IssueBlock(props: IssueBlockProps) {
   // derived values
   const issue = issuesMap[issueId];
   const subIssuesCount = issue?.sub_issues_count ?? 0;
-  const canEditIssueProperties = canEditProperties(issue?.project_id ?? undefined);
-  const { canTransition } = useIssueWorkflow(issue, workspaceSlug ?? "");
+  const { canEdit, canTransition } = useIssueWorkflow(issue, workspaceSlug ?? "");
+  const canEditIssueProperties = canEdit && canEditProperties(issue?.project_id ?? undefined);
   const storeType = useIssueStoreType();
   const { issuesFilter } = useIssues(storeType);
   const displayFilters = issuesFilter?.issueFilters?.displayFilters;
@@ -154,11 +151,7 @@ export const IssueBlock = observer(function IssueBlock(props: IssueBlockProps) {
     if (nestingLevel >= MAX_LIST_NESTING_LEVEL) {
       handleIssuePeekOverview(issue);
     } else {
-      setExpanded((prevState) => {
-        if (!prevState && workspaceSlug && issue && issue.project_id)
-          subIssuesStore.fetchSubIssues(workspaceSlug.toString(), issue.project_id, issue.id);
-        return !prevState;
-      });
+      setExpanded((prevState) => !prevState);
     }
   };
 

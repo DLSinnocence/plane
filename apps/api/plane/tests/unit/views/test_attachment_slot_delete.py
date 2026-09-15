@@ -26,19 +26,18 @@ def deletion():
     files = mock.MagicMock()
     slots = mock.MagicMock()
     with (
-        mock.patch.object(views, "require_slot_role") as role,
+        mock.patch.object(views, "require_issue_write_access") as role,
         mock.patch.object(views, "scoped_issue", return_value=issue) as lookup,
         mock.patch.object(views, "scoped_slots", return_value=slots),
         mock.patch.object(views, "get_object_or_404", return_value=slot),
         mock.patch.object(views.FileAsset.objects, "select_for_update") as locked_files,
         mock.patch.object(views.IssueAttachmentSlot.objects, "filter") as slot_update,
-        mock.patch.object(views.ProjectMember.objects, "filter") as members,
+        mock.patch.object(views, "has_project_admin_access", return_value=False) as members,
         mock.patch.object(views.transaction, "on_commit") as on_commit,
         mock.patch.object(views.issue_activity, "delay") as activity,
         mock.patch.object(views, "base_host", return_value="https://plane.test"),
     ):
         locked_files.return_value.filter.return_value = files
-        members.return_value.exists.return_value = False
         yield SimpleNamespace(
             user=user,
             request=request,
@@ -89,7 +88,7 @@ def test_delete_authorizes_entire_set_before_mutations(deletion, owners, admin, 
         for index, owner in enumerate(owners)
     ]
     context.files.__iter__.return_value = iter(assets)
-    context.members.return_value.exists.return_value = admin
+    context.members.return_value = admin
     if not allowed:
         with pytest.raises(PermissionDenied):
             call_delete(context)
@@ -105,7 +104,7 @@ def test_delete_authorizes_entire_set_before_mutations(deletion, owners, admin, 
         "slot_id": str(context.slot.id),
         "deleted_attachment_ids": [str(asset.id) for asset in assets],
     }
-    context.role.assert_called_once_with(context.request, "workspace", context.issue.project_id, write=True)
+    context.role.assert_called_once_with(context.user, context.issue)
     context.lookup.assert_called_once_with("workspace", context.issue.project_id, context.issue.id, lock=True)
     context.locked_files.return_value.filter.assert_called_once_with(
         attachment_slot=context.slot,
@@ -120,13 +119,7 @@ def test_delete_authorizes_entire_set_before_mutations(deletion, owners, admin, 
     assert update == {"is_deleted": True, "deleted_at": mock.ANY}
     context.slot_update.return_value.update.assert_called_once_with(deleted_at=update["deleted_at"])
     if "other" in owners:
-        context.members.assert_called_once_with(
-            workspace_id=context.issue.workspace_id,
-            project_id=context.issue.project_id,
-            member=context.user,
-            is_active=True,
-            role=views.ROLE.ADMIN.value,
-        )
+        context.members.assert_called_once_with(context.user, context.issue.project_id, context.issue.workspace_id)
     else:
         context.members.assert_not_called()
     context.activity.assert_not_called()
@@ -143,7 +136,7 @@ def test_slot_write_denial_never_reads_or_mutates_files(deletion):
     deletion.role.side_effect = PermissionDenied("No slot write access")
     with pytest.raises(PermissionDenied):
         call_delete(deletion)
-    deletion.lookup.assert_not_called()
+    deletion.lookup.assert_called_once_with("workspace", deletion.issue.project_id, deletion.issue.id, lock=True)
     deletion.locked_files.assert_not_called()
     deletion.slot_update.assert_not_called()
 
@@ -156,6 +149,7 @@ def test_late_completion_rejects_missing_active_asset_before_storage_or_activity
     project_id, issue_id, asset_id = uuid4(), uuid4(), uuid4()
     with (
         mock.patch.object(issue_views, "require_slot_role"),
+        mock.patch.object(issue_views, "require_issue_write_access"),
         mock.patch.object(issue_views, "scoped_issue") as issue_lookup,
         mock.patch.object(issue_views.FileAsset.objects, "select_for_update") as assets,
         mock.patch.object(issue_views, "get_object_or_404", side_effect=Http404) as lookup,
@@ -192,3 +186,37 @@ def test_database_update_failure_does_not_publish_activity(deletion):
         call_delete(deletion)
     deletion.on_commit.assert_not_called()
     deletion.activity.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "version,method", [("v1", "post"), ("v1", "delete"), ("v2", "post"), ("v2", "patch"), ("v2", "delete")],
+)
+def test_issue_attachment_endpoints_authorize_locked_issue_before_files(version, method):
+    from inspect import unwrap
+    from plane.app.views.issue import attachment as issue_views
+
+    issue = SimpleNamespace(id=uuid4(), project_id=uuid4())
+    request = SimpleNamespace(user=SimpleNamespace(id=uuid4()), data={})
+    cls = issue_views.IssueAttachmentEndpoint if version == "v1" else issue_views.IssueAttachmentV2Endpoint
+    with (
+        mock.patch.object(issue_views, "scoped_issue", return_value=issue) as lock,
+        mock.patch.object(issue_views, "require_slot_role"),
+        mock.patch.object(
+            issue_views, "require_issue_write_access", side_effect=PermissionDenied("Revoked"),
+        ) as permission,
+        mock.patch.object(issue_views.FileAsset.objects, "select_for_update") as files,
+        mock.patch.object(issue_views, "S3Storage") as storage,
+        mock.patch.object(issue_views, "create_attachment_asset") as create,
+        mock.patch.object(issue_views, "complete_attachment_asset") as complete,
+    ):
+        args = (cls(), request, "workspace", issue.project_id, issue.id)
+        if method != "post":
+            args += (uuid4(),)
+        with pytest.raises(PermissionDenied, match="Revoked"):
+            unwrap(getattr(cls, method))(*args)
+        lock.assert_called_once_with("workspace", issue.project_id, issue.id, lock=True)
+        permission.assert_called_once_with(request.user, issue)
+        files.assert_not_called()
+        storage.assert_not_called()
+        create.assert_not_called()
+        complete.assert_not_called()

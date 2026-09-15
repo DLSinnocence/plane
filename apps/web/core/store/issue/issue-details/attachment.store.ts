@@ -18,6 +18,7 @@ import type {
   TIssueServiceType,
 } from "@plane/types";
 // services
+import { getIntakePermissions } from "@/helpers/issue-workflow";
 import { IssueAttachmentService } from "@/services/issue";
 import { AttachmentTemplateService } from "@/services/issue/attachment-template.service";
 import type { IIssueRootStore } from "../root.store";
@@ -198,7 +199,30 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
     return slots;
   };
 
+  private assertCanEditAttachments(workspaceSlug: string, projectId: string, issueId: string) {
+    const root = this.rootIssueStore.rootStore;
+    const intake = root.projectInbox.getIssueInboxByIssueId(issueId);
+    if (intake && [0, -2].includes(intake.status)) {
+      const allowed = getIntakePermissions(
+        root.user.permission.getProjectRoleByWorkspaceSlugAndProjectId(workspaceSlug, projectId),
+        root.user.data?.id,
+        intake.issue.created_by
+      ).canEdit;
+      if (allowed && intake.issue.project_id === projectId) return;
+      throw new Error("You do not have permission to edit intake attachments");
+    }
+    const issue = this.rootIssueStore.issues.getIssueById(issueId);
+    if (
+      !issue ||
+      issue.project_id !== projectId ||
+      !this.rootIssueStore.rootStore.user.permission.getIssuePermissions(workspaceSlug, issue).canUploadAttachments
+    ) {
+      throw new Error("You do not have permission to edit attachments on this work item");
+    }
+  }
+
   createAttachmentSlot = async (workspaceSlug: string, projectId: string, issueId: string, name: string) => {
+    this.assertCanEditAttachments(workspaceSlug, projectId, issueId);
     this.nextSlotRequest(issueId);
     const slot = await this.attachmentTemplateService.createSlot(workspaceSlug, projectId, issueId, name);
     this.setAttachmentSlots(issueId, [
@@ -215,6 +239,7 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
     slotId: string,
     name: string
   ) => {
+    this.assertCanEditAttachments(workspaceSlug, projectId, issueId);
     this.nextSlotRequest(issueId);
     const slot = await this.attachmentTemplateService.updateSlot(workspaceSlug, projectId, issueId, slotId, name);
     this.setAttachmentSlots(
@@ -227,6 +252,7 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
   };
 
   removeAttachmentSlot = async (workspaceSlug: string, projectId: string, issueId: string, slotId: string) => {
+    this.assertCanEditAttachments(workspaceSlug, projectId, issueId);
     this.nextSlotRequest(issueId);
     const result = await this.attachmentTemplateService.deleteSlot(workspaceSlug, projectId, issueId, slotId);
     runInAction(() => {
@@ -240,6 +266,7 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
   };
 
   applyAttachmentTemplate = async (workspaceSlug: string, projectId: string, issueId: string, templateId: string) => {
+    this.assertCanEditAttachments(workspaceSlug, projectId, issueId);
     this.nextSlotRequest(issueId);
     const slots = await this.attachmentTemplateService.applyTemplate(workspaceSlug, projectId, issueId, templateId);
     this.setAttachmentSlots(issueId, slots);
@@ -292,6 +319,7 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
   }, 16);
 
   createAttachment = async (workspaceSlug: string, projectId: string, issueId: string, file: File, slotId?: string) => {
+    this.assertCanEditAttachments(workspaceSlug, projectId, issueId);
     const tempId = uuidv4();
     try {
       // update attachment upload status
@@ -365,6 +393,7 @@ export class IssueAttachmentStore implements IIssueAttachmentStore {
   };
 
   removeAttachment = async (workspaceSlug: string, projectId: string, issueId: string, attachmentId: string) => {
+    this.assertCanEditAttachments(workspaceSlug, projectId, issueId);
     const response = await this.issueAttachmentService.deleteIssueAttachment(
       workspaceSlug,
       projectId,

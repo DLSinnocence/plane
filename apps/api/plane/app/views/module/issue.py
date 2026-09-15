@@ -39,6 +39,11 @@ from plane.utils.paginator import GroupedOffsetPaginator, SubGroupedOffsetPagina
 from plane.utils.filters import ComplexFilterBackend
 from plane.utils.filters import IssueFilterSet
 from .. import BaseViewSet
+from django.db import transaction
+from django.shortcuts import get_object_or_404
+from rest_framework.exceptions import MethodNotAllowed, PermissionDenied
+from plane.db.models import Module
+from plane.utils.issue_write_scope import lock_issue_write_scope
 from plane.utils.host import base_host
 
 
@@ -49,6 +54,13 @@ class ModuleIssueViewSet(BaseViewSet):
     bulk = True
     filter_backends = (ComplexFilterBackend,)
     filterset_class = IssueFilterSet
+
+    def update(self, request, *args, **kwargs):
+        # Association changes use the guarded create/destroy actions.
+        raise MethodNotAllowed(request.method)
+
+    def partial_update(self, request, *args, **kwargs):
+        raise MethodNotAllowed(request.method)
 
     def apply_annotations(self, issues):
         return (
@@ -208,11 +220,14 @@ class ModuleIssueViewSet(BaseViewSet):
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
     # create multiple issues inside a module
+    @transaction.atomic
     def create_module_issues(self, request, slug, project_id, module_id):
         issues = request.data.get("issues", [])
         if not issues:
             return Response({"error": "Issues are required"}, status=status.HTTP_400_BAD_REQUEST)
-        project = Project.objects.get(pk=project_id)
+        lock_issue_write_scope(request.user, slug, issues, project_id)
+        get_object_or_404(Module, pk=module_id, project_id=project_id, workspace__slug=slug)
+        project = Project.objects.get(pk=project_id, workspace__slug=slug)
         # Scope to workspace+project to prevent cross-tenant IDOR
         issues = list(
             Issue.issue_objects.filter(
@@ -255,10 +270,20 @@ class ModuleIssueViewSet(BaseViewSet):
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
     # add multiple module inside an issue and remove multiple modules from an issue
+    @transaction.atomic
     def create_issue_modules(self, request, slug, project_id, issue_id):
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
         modules = request.data.get("modules", [])
         removed_modules = request.data.get("removed_modules", [])
-        project = Project.objects.get(pk=project_id)
+        module_ids = {str(pk) for pk in [*modules, *removed_modules]}
+        scoped_ids = {
+            str(pk) for pk in Module.objects.filter(
+                pk__in=module_ids, project_id=project_id, workspace__slug=slug
+            ).values_list("pk", flat=True)
+        }
+        if scoped_ids != module_ids:
+            raise PermissionDenied("One or more modules are unavailable for this operation.")
+        project = Project.objects.get(pk=project_id, workspace__slug=slug)
 
         if modules:
             _ = ModuleIssue.objects.bulk_create(
@@ -323,7 +348,9 @@ class ModuleIssueViewSet(BaseViewSet):
         return Response({"message": "success"}, status=status.HTTP_201_CREATED)
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
+    @transaction.atomic
     def destroy(self, request, slug, project_id, module_id, issue_id):
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
         module_issue = ModuleIssue.objects.filter(
             workspace__slug=slug,
             project_id=project_id,

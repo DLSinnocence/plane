@@ -19,11 +19,10 @@ import {
   UnsubscribeOutline,
 } from "@makeplane/propel/icons";
 // plane imports
-import { EUserPermissionsLevel } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
 import { setToast, TOAST_TYPE } from "@plane/propel/toast";
 import type { ICycle, IIssueLabel, IModule, TIssue, TIssuePriorities } from "@plane/types";
-import { EIssueServiceType, EUserPermissions } from "@plane/types";
+import { EIssueServiceType } from "@plane/types";
 import { copyTextToClipboard } from "@plane/utils";
 // components
 import type { TPowerKCommandConfig } from "@/components/power-k/core/types";
@@ -39,7 +38,7 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
   const { workspaceSlug, workItem: entityIdentifier } = useParams();
   // store
   const {
-    permission: { allowPermissions },
+    permission: { getIssuePermissions },
   } = useUser();
   const { toggleDeleteIssueModal } = useCommandPalette();
   const { getProjectById } = useProject();
@@ -75,12 +74,8 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
   const removeEntitySubscription = isEpic ? removeEpicSubscription : removeSubscription;
   // permission
   const isEditingAllowed =
-    allowPermissions(
-      [EUserPermissions.ADMIN, EUserPermissions.MEMBER],
-      EUserPermissionsLevel.PROJECT,
-      workspaceSlug?.toString(),
-      entityDetails?.project_id ?? undefined
-    ) && !entityDetails?.archived_at;
+    getIssuePermissions(workspaceSlug?.toString() ?? "", entityDetails ?? undefined).canEdit &&
+    !entityDetails?.archived_at;
 
   const handleUpdateEntity = useCallback(
     async (formData: Partial<TIssue>) => {

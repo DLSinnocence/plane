@@ -5,14 +5,12 @@
  */
 
 import { differenceInCalendarDays } from "date-fns/differenceInCalendarDays";
-import { isEmpty } from "lodash-es";
 import { v4 as uuidv4 } from "uuid";
 // plane imports
 import type { TIssueFilterPriorityObject, TIssuePriorities } from "@plane/constants";
 import { ISSUE_DISPLAY_FILTERS_BY_PAGE, ISSUE_PRIORITY_FILTERS, STATE_GROUPS } from "@plane/constants";
 import type {
   IGanttBlock,
-  IIssueDisplayFilterOptions,
   IIssueDisplayProperties,
   TGroupedIssues,
   TIssue,
@@ -262,29 +260,7 @@ export const issueCountBasedOnFilters = (
   return issuesCount;
 };
 
-/**
- * @description This method is used to apply the display filters on the issues
- * @param {IIssueDisplayFilterOptions} displayFilters
- * @returns {IIssueDisplayFilterOptions}
- */
-export const getComputedDisplayFilters = (
-  displayFilters: IIssueDisplayFilterOptions = {},
-  defaultValues?: IIssueDisplayFilterOptions
-): IIssueDisplayFilterOptions => {
-  const filters = !isEmpty(displayFilters) ? displayFilters : defaultValues;
-  return {
-    calendar: {
-      show_weekends: filters?.calendar?.show_weekends || false,
-      layout: filters?.calendar?.layout || "month",
-    },
-    layout: filters?.layout || EIssueLayoutTypes.LIST,
-    order_by: filters?.order_by || "sort_order",
-    group_by: filters?.group_by || null,
-    sub_group_by: filters?.sub_group_by || null,
-    sub_issue: filters?.sub_issue || false,
-    show_empty_groups: filters?.show_empty_groups || false,
-  };
-};
+export { getComputedDisplayFilters } from "./display-filters";
 
 /**
  * @description This method is used to apply the display properties on the issues

@@ -44,6 +44,7 @@ from plane.utils.order_queryset import order_issue_queryset
 from plane.utils.paginator import GroupedOffsetPaginator, SubGroupedOffsetPaginator
 from plane.app.permissions import allow_permission, ROLE
 from plane.utils.error_codes import ERROR_CODES
+from plane.utils.issue_write_scope import lock_issue_write_scope
 from plane.utils.host import base_host
 
 # Module imports
@@ -256,8 +257,9 @@ class IssueArchiveViewSet(BaseViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
+    @transaction.atomic
     def archive(self, request, slug, project_id, pk=None):
-        issue = Issue.issue_objects.get(workspace__slug=slug, project_id=project_id, pk=pk)
+        issue = lock_issue_write_scope(request.user, slug, [pk], project_id)[0]
         if issue.state.group not in ["completed", "cancelled"]:
             return Response(
                 {"error": "Can only archive completed or cancelled state group issue"},
@@ -280,7 +282,9 @@ class IssueArchiveViewSet(BaseViewSet):
         return Response({"archived_at": str(issue.archived_at)}, status=status.HTTP_200_OK)
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
+    @transaction.atomic
     def unarchive(self, request, slug, project_id, pk=None):
+        lock_issue_write_scope(request.user, slug, [pk], project_id)
         issue = Issue.objects.get(
             workspace__slug=slug,
             project_id=project_id,
@@ -308,15 +312,14 @@ class BulkArchiveIssuesEndpoint(BaseAPIView):
     permission_classes = [ProjectEntityPermission]
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
+    @transaction.atomic
     def post(self, request, slug, project_id):
         issue_ids = request.data.get("issue_ids", [])
 
         if not len(issue_ids):
             return Response({"error": "Issue IDs are required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        issues = Issue.objects.filter(workspace__slug=slug, project_id=project_id, pk__in=issue_ids).select_related(
-            "state"
-        )
+        issues = lock_issue_write_scope(request.user, slug, issue_ids, project_id)
         bulk_archive_issues = []
         activity_events = []
         for issue in issues:

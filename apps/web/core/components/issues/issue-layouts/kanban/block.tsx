@@ -179,9 +179,8 @@ export const KanbanIssueBlock = observer(function KanbanIssueBlock(props: IssueB
   const [isDraggingOverBlock, setIsDraggingOverBlock] = useState(false);
   const [isCurrentBlockDragging, setIsCurrentBlockDragging] = useState(false);
 
-  const canEditIssueProperties = canEditProperties(issue?.project_id ?? undefined);
-
-  const { canTransition } = useIssueWorkflow(issue, workspaceSlug ?? "");
+  const { canEdit, canTransition } = useIssueWorkflow(issue, workspaceSlug ?? "");
+  const canEditIssueProperties = canEdit && canEditProperties(issue?.project_id ?? undefined);
   const storeType = useIssueStoreType();
   const { issuesFilter } = useIssues(storeType);
   const displayFilters = issuesFilter?.issueFilters?.displayFilters;

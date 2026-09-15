@@ -18,6 +18,7 @@ import { CustomMenu } from "@plane/ui";
 import { ExistingIssuesListModal } from "@/components/core/modals/existing-issues-list-modal";
 import { CreateUpdateIssueModal } from "@/components/issues/issue-modal/modal";
 // constants
+import { useUserPermissions } from "@/hooks/store/user";
 import { useIssueStoreType } from "@/hooks/use-issue-layout-store";
 import { CreateUpdateEpicModal } from "@/components/epic-modal";
 
@@ -46,7 +47,7 @@ export const HeaderGroupByCard = observer(function HeaderGroupByCard(props: IHea
     collapsedGroups,
     handleCollapsedGroups,
     issuePayload,
-    disableIssueCreation,
+    disableIssueCreation: creationDisabledByParent,
     addIssuesToView,
     isEpic = false,
   } = props;
@@ -58,6 +59,10 @@ export const HeaderGroupByCard = observer(function HeaderGroupByCard(props: IHea
   const storeType = useIssueStoreType();
   // router
   const { workspaceSlug, projectId, moduleId, cycleId } = useParams();
+  const { canCreateIssue } = useUserPermissions();
+  const disableIssueCreation =
+    creationDisabledByParent ||
+    !canCreateIssue(workspaceSlug?.toString() ?? "", issuePayload.project_id ?? projectId?.toString());
 
   const renderExistingIssueModal = moduleId || cycleId;
   const ExistingIssuesListModalPayload = moduleId ? { module: moduleId.toString() } : { cycle: true };

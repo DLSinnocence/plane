@@ -15,6 +15,7 @@ from django.views.decorators.gzip import gzip_page
 
 # Third party imports
 from rest_framework import status
+from rest_framework.exceptions import MethodNotAllowed
 from rest_framework.response import Response
 
 
@@ -32,6 +33,8 @@ from plane.utils.issue_filters import issue_filters
 from plane.utils.order_queryset import order_issue_queryset
 from plane.utils.paginator import GroupedOffsetPaginator, SubGroupedOffsetPaginator
 from plane.app.permissions import allow_permission, ROLE
+from django.db import transaction
+from plane.utils.issue_write_scope import lock_cycle_write_scope, lock_issue_write_scope
 from plane.utils.host import base_host
 from plane.utils.filters import ComplexFilterBackend
 from plane.utils.filters import IssueFilterSet
@@ -47,6 +50,13 @@ class CycleIssueViewSet(BaseViewSet):
     bulk = True
 
     filterset_fields = ["issue__labels__id", "issue__assignees__id"]
+
+    def update(self, request, *args, **kwargs):
+        # Association changes use the guarded create/destroy actions.
+        raise MethodNotAllowed(request.method)
+
+    def partial_update(self, request, *args, **kwargs):
+        raise MethodNotAllowed(request.method)
 
     def get_queryset(self):
         return self.filter_queryset(
@@ -221,12 +231,15 @@ class CycleIssueViewSet(BaseViewSet):
             )
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
+    @transaction.atomic
     def create(self, request, slug, project_id, cycle_id):
         issues = request.data.get("issues", [])
 
         if not issues:
             return Response({"error": "Issues are required"}, status=status.HTTP_400_BAD_REQUEST)
 
+        lock_cycle_write_scope(slug, project_id)
+        lock_issue_write_scope(request.user, slug, issues, project_id)
         cycle = Cycle.objects.get(workspace__slug=slug, project_id=project_id, pk=cycle_id)
 
         if cycle.end_date is not None and cycle.end_date < timezone.now():
@@ -317,7 +330,10 @@ class CycleIssueViewSet(BaseViewSet):
         return Response({"message": "success"}, status=status.HTTP_201_CREATED)
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
+    @transaction.atomic
     def destroy(self, request, slug, project_id, cycle_id, issue_id):
+        lock_cycle_write_scope(slug, project_id)
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
         cycle_issue = CycleIssue.objects.filter(
             issue_id=issue_id,
             workspace__slug=slug,
