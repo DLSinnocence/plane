@@ -7,7 +7,7 @@
       "base_url": "基础 URL（可选）",
       "model": "模型",
       "api_key": "API 密钥",
-      "base_url_help": "支持任意 HTTP(S) 服务地址，包括企业或本地网关。留空使用服务提供商的默认地址。",
+      "base_url_help": "可填写服务根地址、基础路径，或完整的 chat/completions、responses、messages 接口地址；自动补全标准路径并识别接口协议。留空使用默认地址。",
       "fetch_models": "获取模型列表",
       "model_select": "选择模型",
       "model_search": "按名称或 ID 搜索模型",

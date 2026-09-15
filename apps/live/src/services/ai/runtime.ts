@@ -8,6 +8,7 @@ import { CE_ACTIONS, createCeTools, createTextRedactor } from "./tools";
 import { AI_LIMITS } from "./types";
 import type { AiChatInput, AiDoneReason, AiEmit, AiStreamEvent, AiToolDetails } from "./types";
 import { TOOL_FAILURE_OUTPUT } from "./details";
+import { resolveAiEndpoint } from "./endpoint";
 
 function reasoningLevelMap(config: AiChatInput["model_config"]): Model<Api>["thinkingLevelMap"] {
   // Match exact IDs only. A gateway's OpenAI transport does not identify its model vendor.
@@ -27,12 +28,11 @@ function reasoningLevelMap(config: AiChatInput["model_config"]): Model<Api>["thi
 }
 
 export function createChatModel(config: AiChatInput["model_config"]): Model<Api> {
+  const endpoint = resolveAiEndpoint(config.base_url, config.provider);
   return {
     id: config.model,
     name: config.model,
-    api: config.provider === "anthropic" ? "anthropic-messages" : "openai-completions",
-    provider: config.provider,
-    baseUrl: config.base_url,
+    ...endpoint,
     reasoning: config.supports_reasoning === true,
     thinkingLevelMap: config.supports_reasoning ? reasoningLevelMap(config) : undefined,
     input: config.supports_images ? ["text", "image"] : ["text"],
@@ -41,7 +41,7 @@ export function createChatModel(config: AiChatInput["model_config"]): Model<Api>
     // Reasoning and visible answers share the completion budget on many models.
     maxTokens: config.supports_reasoning ? 16_384 : 4096,
     compat:
-      config.provider === "openai"
+      endpoint.api === "openai-completions"
         ? {
             supportsStore: false,
             supportsDeveloperRole: false,
@@ -52,7 +52,9 @@ export function createChatModel(config: AiChatInput["model_config"]): Model<Api>
                 ? "max_completion_tokens"
                 : "max_tokens",
           }
-        : { supportsEagerToolInputStreaming: false },
+        : endpoint.api === "anthropic-messages"
+          ? { supportsEagerToolInputStreaming: false }
+          : undefined,
   };
 }
 
