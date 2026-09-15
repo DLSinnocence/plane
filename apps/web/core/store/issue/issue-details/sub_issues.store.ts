@@ -76,6 +76,7 @@ export class IssueSubIssuesStore implements IIssueSubIssuesStore {
   // services
   serviceType;
   issueService;
+  private subIssueRequests = new Map<string, Promise<TIssueSubIssues>>();
 
   constructor(rootStore: IIssueDetail, serviceType: TIssueServiceType) {
     makeObservable(this, {
@@ -125,39 +126,47 @@ export class IssueSubIssuesStore implements IIssueSubIssuesStore {
     });
   };
 
-  fetchSubIssues = async (workspaceSlug: string, projectId: string, parentIssueId: string) => {
+  fetchSubIssues = (workspaceSlug: string, projectId: string, parentIssueId: string): Promise<TIssueSubIssues> => {
+    const key = JSON.stringify([workspaceSlug, projectId, parentIssueId]);
+    const pending = this.subIssueRequests.get(key);
+    if (pending) return pending;
+
     this.loader = "init-loader";
+    const request = this.loadSubIssues(workspaceSlug, projectId, parentIssueId).finally(() => {
+      this.subIssueRequests.delete(key);
+      runInAction(() => {
+        this.loader = this.subIssueRequests.size > 0 ? "init-loader" : undefined;
+      });
+    });
+    this.subIssueRequests.set(key, request);
+    return request;
+  };
+
+  private loadSubIssues = async (workspaceSlug: string, projectId: string, parentIssueId: string) => {
     const response = await this.issueService.subIssues(workspaceSlug, projectId, parentIssueId);
-
     const subIssuesStateDistribution = response?.state_distribution ?? {};
-
     const issueList = (response.sub_issues ?? []) as TIssue[];
 
-    this.rootIssueDetailStore.rootIssueStore.issues.addIssue(issueList);
-
-    // fetch other issues states and members when sub-issues are from different project
-    if (issueList && issueList.length > 0) {
-      const otherProjectIds = uniq(
-        issueList.map((issue) => issue.project_id).filter((id) => !!id && id !== projectId)
-      ) as string[];
-      this.fetchOtherProjectProperties(workspaceSlug, otherProjectIds);
-    }
-    if (issueList) {
-      this.rootIssueDetailStore.rootIssueStore.issues.updateIssue(parentIssueId, {
-        sub_issues_count: issueList.length,
-      });
-    }
-
+    // Publish the children, their IDs, and their count together so reactions never
+    // observe an expanded parent whose freshly loaded children are still missing.
     runInAction(() => {
+      this.rootIssueDetailStore.rootIssueStore.issues.addIssue(issueList);
       set(this.subIssuesStateDistribution, parentIssueId, subIssuesStateDistribution);
       set(
         this.subIssues,
         parentIssueId,
         issueList.map((issue) => issue.id)
       );
+      this.rootIssueDetailStore.rootIssueStore.issues.updateIssue(parentIssueId, {
+        sub_issues_count: issueList.length,
+      });
     });
 
-    this.loader = undefined;
+    // fetch other issues states and members when sub-issues are from different project
+    const otherProjectIds = uniq(
+      issueList.map((issue) => issue.project_id).filter((id) => !!id && id !== projectId)
+    ) as string[];
+    void this.fetchOtherProjectProperties(workspaceSlug, otherProjectIds);
     return response;
   };
 

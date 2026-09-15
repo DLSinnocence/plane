@@ -27,6 +27,7 @@ import type { TSelectionHelper } from "@/hooks/use-multiple-select";
 import { usePlatformOS } from "@/hooks/use-platform-os";
 // types
 import { HIGHLIGHT_CLASS, getIssueBlockId, isIssueNew } from "../utils";
+import { SubIssuesLoadStatus } from "../sub-issues-load-status";
 import { IssueBlock } from "./block";
 import type { TRenderQuickActions } from "./list-view-types";
 
@@ -80,7 +81,7 @@ export const IssueBlockRoot = observer(function IssueBlockRoot(props: Props) {
   // store hooks
   const { subIssues: subIssuesStore } = useIssueDetail(isEpic ? EIssueServiceType.EPICS : EIssueServiceType.ISSUES);
   const { workspaceSlug } = useParams();
-  const { isExpanded, setExpanded } = useExpandedSubIssues({
+  const { isExpanded, setExpanded, isLoading, hasError, retry } = useExpandedSubIssues({
     workspaceSlug: workspaceSlug?.toString(),
     projectId: issuesMap[issueId]?.project_id,
     issueId,
@@ -173,6 +174,11 @@ export const IssueBlockRoot = observer(function IssueBlockRoot(props: Props) {
         />
       </RenderIfVisible>
 
+      {(isLoading || hasError) && (
+        <div className="border-b border-b-subtle" style={{ paddingLeft: spacingLeft + 12 }}>
+          <SubIssuesLoadStatus isLoading={isLoading} hasError={hasError} onRetry={retry} />
+        </div>
+      )}
       {isExpanded &&
         !isEpic &&
         subIssues?.map((subIssueId) => (

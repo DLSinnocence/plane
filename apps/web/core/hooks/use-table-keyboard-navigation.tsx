@@ -4,23 +4,28 @@
  * See the LICENSE file for details.
  */
 
+const getAdjacentRow = (element: HTMLElement, direction: "previous" | "next") => {
+  let row = element.closest("tr");
+  while (row) {
+    const section = row.parentElement;
+    let adjacent = direction === "previous" ? row.previousElementSibling : row.nextElementSibling;
+    if (!adjacent) {
+      // Keep navigation between the header and body when skipping boundary rows.
+      const adjacentSection = direction === "previous" ? section?.previousElementSibling : section?.nextElementSibling;
+      if (direction === "previous" && section?.tagName === "TBODY" && adjacentSection?.tagName === "THEAD") {
+        adjacent = adjacentSection.lastElementChild;
+      } else if (direction === "next" && section?.tagName === "THEAD" && adjacentSection?.tagName === "TBODY") {
+        adjacent = adjacentSection.firstElementChild;
+      }
+    }
+    if (!adjacent || adjacent.tagName !== "TR") return null;
+    if (adjacent.getAttribute("data-skip-keyboard-navigation") !== "true") return adjacent;
+    row = adjacent as HTMLTableRowElement;
+  }
+  return null;
+};
+
 export const useTableKeyboardNavigation = () => {
-  const getPreviousRow = (element: HTMLElement) => {
-    const previousRow = element.closest("tr")?.previousSibling;
-
-    if (previousRow) return previousRow;
-    //if previous row does not exist in the parent check the row with the header of the table
-    return element.closest("tbody")?.previousSibling?.childNodes?.[0];
-  };
-
-  const getNextRow = (element: HTMLElement) => {
-    const nextRow = element.closest("tr")?.nextSibling;
-
-    if (nextRow) return nextRow;
-    //if next row does not exist in the parent check the row with the body of the table
-    return element.closest("thead")?.nextSibling?.childNodes?.[0];
-  };
-
   const handleKeyBoardNavigation = function (e: React.KeyboardEvent<HTMLTableElement>) {
     const element = e.target as HTMLElement;
 
@@ -33,18 +38,10 @@ export const useTableKeyboardNavigation = () => {
     } else if (e.key == "ArrowLeft") {
       // Left Arrow
       c = element.previousSibling as HTMLElement;
-    } else if (e.key == "ArrowUp") {
-      // Up Arrow
-      const index = Array.prototype.indexOf.call(element?.parentNode?.childNodes || [], element);
-      const prevRow = getPreviousRow(element);
-
-      c = prevRow?.childNodes?.[index] as HTMLElement;
-    } else if (e.key == "ArrowDown") {
-      // Down Arrow
-      const index = Array.prototype.indexOf.call(element?.parentNode?.childNodes || [], element);
-      const nextRow = getNextRow(element);
-
-      c = nextRow?.childNodes[index] as HTMLElement;
+    } else if (e.key == "ArrowUp" || e.key == "ArrowDown") {
+      const index = Array.prototype.indexOf.call(element.parentElement?.children || [], element);
+      const row = getAdjacentRow(element, e.key === "ArrowUp" ? "previous" : "next");
+      c = row?.children[index] as HTMLElement;
     } else if (e.key == "Enter" || e.key == "Space") {
       e.preventDefault();
       (element?.querySelector(".clickable") as HTMLElement)?.click();

@@ -153,6 +153,105 @@ test("failed initial load can retry after collapsing and reopening", async () =>
   }
 });
 
+test("temporary load failures retry automatically while the row stays expanded", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let calls = 0;
+  const view = await mountHook({
+    ...defaults,
+    fetchSubIssues: async () => {
+      calls++;
+      if (calls === 1) throw new Error("temporary failure");
+    },
+  });
+  try {
+    assert.equal(view.snapshot.isExpanded, true);
+    await act(async () => t.mock.timers.tick(1000));
+    assert.equal(calls, 2);
+    assert.equal(view.snapshot.isLoading, false);
+    assert.equal(view.snapshot.hasError, false);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test("automatic retries are bounded and an explicit retry can recover", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.method(console, "error", () => {});
+  let calls = 0;
+  let shouldFail = true;
+  const view = await mountHook({
+    ...defaults,
+    fetchSubIssues: async () => {
+      calls++;
+      if (shouldFail) throw new Error("offline");
+    },
+  });
+  try {
+    await act(async () => t.mock.timers.tick(1000));
+    await act(async () => t.mock.timers.tick(2000));
+    await act(async () => t.mock.timers.tick(4000));
+    assert.equal(calls, 4);
+    assert.equal(view.snapshot.isExpanded, true);
+    assert.equal(view.snapshot.isLoading, false);
+    assert.equal(view.snapshot.hasError, true);
+    await act(async () => t.mock.timers.tick(60000));
+    assert.equal(calls, 4);
+    shouldFail = false;
+    await act(async () => view.snapshot.retry());
+    assert.equal(calls, 5);
+    assert.equal(view.snapshot.hasError, false);
+  } finally {
+    await view.unmount();
+  }
+});
+
+for (const cleanup of ["toggle", "unmount"]) {
+  test(`${cleanup} cancels scheduled retries`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let calls = 0;
+    const view = await mountHook({
+      ...defaults,
+      fetchSubIssues: async () => {
+        calls++;
+        throw new Error("offline");
+      },
+    });
+    await view[cleanup]();
+    await act(async () => t.mock.timers.tick(10000));
+    assert.equal(calls, 1);
+    if (cleanup === "toggle") await view.unmount();
+  });
+}
+
+test("reopening during an in-flight request observes its failure and retries", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let reject;
+  let calls = 0;
+  const view = await mountHook({
+    ...defaults,
+    fetchSubIssues: () => {
+      calls++;
+      return calls === 1
+        ? new Promise((_resolve, fail) => {
+            reject = fail;
+          })
+        : Promise.resolve();
+    },
+  });
+  try {
+    await view.toggle();
+    await view.toggle();
+    assert.equal(calls, 1);
+    await act(async () => reject(new Error("temporary failure")));
+    await act(async () => t.mock.timers.tick(1000));
+    assert.equal(calls, 2);
+    assert.equal(view.snapshot.hasError, false);
+    assert.equal(view.snapshot.isLoading, false);
+  } finally {
+    await view.unmount();
+  }
+});
+
 test("nested read-only trees actually load and render all matching deep rows once", async () => {
   const issuesMap = Object.fromEntries(
     Array.from({ length: 9 }, (_, depth) => [

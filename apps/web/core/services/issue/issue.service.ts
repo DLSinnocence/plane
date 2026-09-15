@@ -259,11 +259,11 @@ export class IssueService extends APIService {
   ): Promise<TIssueSubIssues> {
     return this.get(
       `/api/workspaces/${workspaceSlug}/projects/${projectId}/${this.serviceType}/${issueId}/${this.serviceType === EIssueServiceType.EPICS ? "issues" : "sub-issues"}/`,
-      { params: queries }
+      { params: queries, timeout: 20000 }
     )
       .then((response) => response?.data)
       .catch((error) => {
-        throw error?.response?.data;
+        throw error?.response?.data ?? error;
       });
   }
 

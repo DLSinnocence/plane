@@ -36,6 +36,7 @@ import { usePlatformOS } from "@/hooks/use-platform-os";
 // local components
 import type { TRenderQuickActions } from "../list/list-view-types";
 import { isIssueNew } from "../utils";
+import { SubIssuesLoadStatus } from "../sub-issues-load-status";
 import { IssueColumn } from "./issue-column";
 
 interface Props {
@@ -81,7 +82,7 @@ export const SpreadsheetIssueRow = observer(function SpreadsheetIssueRow(props: 
   // derived values
   const issue = issueMap[issueId];
   const { workspaceSlug } = useParams();
-  const { isExpanded, setExpanded } = useExpandedSubIssues({
+  const { isExpanded, setExpanded, isLoading, hasError, retry } = useExpandedSubIssues({
     workspaceSlug: workspaceSlug?.toString(),
     projectId: issue?.project_id,
     issueId,
@@ -136,6 +137,13 @@ export const SpreadsheetIssueRow = observer(function SpreadsheetIssueRow(props: 
         />
       </RenderIfVisible>
 
+      {(isLoading || hasError) && (
+        <tr data-skip-keyboard-navigation="true">
+          <td colSpan={100} className="border-b border-b-subtle" style={{ paddingLeft: spacingLeft + 12 }}>
+            <SubIssuesLoadStatus isLoading={isLoading} hasError={hasError} onRetry={retry} />
+          </td>
+        </tr>
+      )}
       {isExpanded &&
         !isEpic &&
         subIssues?.map((subIssueId: string) => (
