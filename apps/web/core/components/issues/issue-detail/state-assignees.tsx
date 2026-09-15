@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { observer } from "mobx-react";
+import { Collapsible } from "@makeplane/propel/components/collapsible";
 import { useTranslation } from "@plane/i18n";
 import { setToast, TOAST_TYPE } from "@plane/propel/toast";
 import type { TIssue } from "@plane/types";
@@ -46,25 +47,29 @@ export const IssueStateAssignees = observer(function IssueStateAssignees(props: 
 
   return (
     <section className="mt-5 border-t border-subtle pt-4 pb-3" aria-busy={isSaving}>
-      <h6 className="text-body-xs-medium">{t("workflows.state_assignees.title")}</h6>
-      <p className="mt-1 text-body-xs-regular text-secondary">{t("workflows.state_assignees.description")}</p>
-      {!disabled && !canManageAssignments && (
-        <p className="mt-2 text-body-xs-regular text-secondary">
-          {t("workflows.state_assignees.configuration_permission_hint")}
-        </p>
-      )}
-      {!disabled && !canTransition && (
-        <p className="mt-2 text-body-xs-regular text-secondary">{t("workflows.state_assignees.permission_hint")}</p>
-      )}
-      <StateAssigneeFields
-        workspaceSlug={workspaceSlug}
-        projectId={projectId}
-        stateId={issue.state_id}
-        creatorId={issue.created_by}
-        value={issue.state_assignees}
-        onChange={(assignments) => void saveOwners(assignments)}
-        disabled={disabled || !canManageAssignments || isSaving}
-      />
+      <Collapsible
+        key={issue.id}
+        defaultOpen={false}
+        trigger={<span className="text-body-xs-medium">{t("workflows.state_assignees.title")}</span>}
+      >
+        {!disabled && !canManageAssignments && (
+          <p className="mt-2 text-body-xs-regular text-secondary">
+            {t("workflows.state_assignees.configuration_permission_hint")}
+          </p>
+        )}
+        {!disabled && !canTransition && (
+          <p className="mt-2 text-body-xs-regular text-secondary">{t("workflows.state_assignees.permission_hint")}</p>
+        )}
+        <StateAssigneeFields
+          workspaceSlug={workspaceSlug}
+          projectId={projectId}
+          stateId={issue.state_id}
+          creatorId={issue.created_by}
+          value={issue.state_assignees}
+          onChange={(assignments) => void saveOwners(assignments)}
+          disabled={disabled || !canManageAssignments || isSaving}
+        />
+      </Collapsible>
     </section>
   );
 });

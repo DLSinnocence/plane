@@ -9,6 +9,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { observer } from "mobx-react";
+import { Collapsible } from "@makeplane/propel/components/collapsible";
 import { useParams } from "next/navigation";
 import { Controller, FormProvider, useForm } from "react-hook-form";
 // editor
@@ -425,30 +426,33 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
               </div>
               {projectId && (
                 <section className="border-t border-subtle px-5 pt-3">
-                  <h6 className="text-body-xs-medium">{t("workflows.state_assignees.title")}</h6>
-                  <p className="mt-1 text-body-xs-regular text-secondary">
-                    {t("workflows.state_assignees.description")}
-                  </p>
-                  <Controller
-                    control={control}
-                    name="state_assignees"
-                    render={({ field: { value, onChange } }) => (
-                      <StateAssigneeFields
-                        key={projectId}
-                        columns={2}
-                        workspaceSlug={workspaceSlug?.toString()}
-                        projectId={projectId}
-                        stateId={watch("state_id")}
-                        creatorId={creatorId}
-                        value={value}
-                        onChange={(assignments) => {
-                          onChange(assignments);
-                          handleFormChange();
-                        }}
-                        disabled={isDisabled}
-                      />
-                    )}
-                  />
+                  <Collapsible
+                    key={`${projectId}:${data?.id ?? "new"}`}
+                    defaultOpen={false}
+                    keepMounted
+                    trigger={<span className="text-body-xs-medium">{t("workflows.state_assignees.title")}</span>}
+                  >
+                    <Controller
+                      control={control}
+                      name="state_assignees"
+                      render={({ field: { value, onChange } }) => (
+                        <StateAssigneeFields
+                          key={projectId}
+                          columns={2}
+                          workspaceSlug={workspaceSlug?.toString()}
+                          projectId={projectId}
+                          stateId={watch("state_id")}
+                          creatorId={creatorId}
+                          value={value}
+                          onChange={(assignments) => {
+                            onChange(assignments);
+                            handleFormChange();
+                          }}
+                          disabled={isDisabled}
+                        />
+                      )}
+                    />
+                  </Collapsible>
                 </section>
               )}
             </div>

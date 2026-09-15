@@ -95,16 +95,6 @@ export const StateAssigneeFields = observer(function StateAssigneeFields(props: 
                 tooltipContent={state.name}
                 dropdownArrow={!disabled}
               />
-              {creatorId && !isCreator && !disabled && (
-                <button
-                  type="button"
-                  className="shrink-0 text-body-xs-regular text-secondary underline"
-                  onClick={() => onChange({ ...assignments, [state.id]: [creatorId] })}
-                  aria-label={t("workflows.state_assignees.reset_label", { state: state.name })}
-                >
-                  {t("workflows.state_assignees.reset")}
-                </button>
-              )}
             </div>
           </div>
         );

@@ -48,7 +48,7 @@ test("only unstarted and started stages are configurable and every stage default
   expect(errors).toEqual([]);
 });
 
-test("stage selection, clearing, reset to creator, and submission remain independent", async ({ page }) => {
+test("stage selection, clearing, and submission remain independent without reset buttons", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/?stage-assignees");
@@ -66,7 +66,10 @@ test("stage selection, clearing, reset to creator, and submission remain indepen
   await closeMembers(page);
   await expect.poll(() => mapping(page)).toEqual({ ...defaults, todo: ["reviewer"], started: [] });
   await expect(developing.getByRole("button").first()).toContainText("workflows.state_assignees.unassigned");
-  await developing.getByRole("button", { name: "workflows.state_assignees.reset_label", exact: true }).click();
+  await expect(developing.getByRole("button")).toHaveCount(1);
+  await developing.getByRole("button").click();
+  await page.getByRole("option", { name: /you$/ }).click();
+  await closeMembers(page);
   await expect.poll(() => mapping(page)).toEqual({ ...defaults, todo: ["reviewer"] });
   await expect(planning.getByRole("button").first()).toContainText("Reviewer");
 
@@ -89,7 +92,10 @@ test("stage selection, clearing, reset to creator, and submission remain indepen
       state_id: "todo",
       state_assignees: { ...defaults, todo: [] },
     });
-  await planning.getByRole("button", { name: "workflows.state_assignees.reset_label", exact: true }).click();
+  await expect(planning.getByRole("button")).toHaveCount(1);
+  await planning.getByRole("button").click();
+  await page.getByRole("option", { name: /you$/ }).click();
+  await closeMembers(page);
   await expect.poll(() => mapping(page)).toEqual(defaults);
   expect(errors).toEqual([]);
 });
