@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Work item clipboard fixture</title>
+  </head>
+  <body>
+    <label>Work item name <input id="name" value="修复农场显示" /></label>
+    <button id="copy">Copy link</button>
+    <p id="result" role="status"></p>
+    <div contenteditable="true" role="textbox" aria-label="Rich text editor"></div>
+    <label>Plain text <textarea id="plain"></textarea></label>
+    <script type="module" src="./clipboard.ts"></script>
+  </body>
+</html>

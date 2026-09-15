@@ -15,7 +15,7 @@ import { copyUrlToClipboard } from "@plane/utils";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 
 export type TRelationIssueOperations = {
-  copyLink: (path: string) => void;
+  copyLink: (path: string, title?: string) => void;
   update: (workspaceSlug: string, projectId: string, issueId: string, data: Partial<TIssue>) => Promise<void>;
   remove: (workspaceSlug: string, projectId: string, issueId: string) => Promise<void>;
 };
@@ -30,13 +30,17 @@ export const useRelationOperations = (
 
   const issueOperations: TRelationIssueOperations = useMemo(
     () => ({
-      copyLink: async (path) => {
-        await copyUrlToClipboard(path);
-        setToast({
-          type: TOAST_TYPE.SUCCESS,
-          title: t("common.link_copied"),
-          message: t("entity.link_copied_to_clipboard", { entity: entityName }),
-        });
+      copyLink: async (path, title) => {
+        try {
+          await copyUrlToClipboard(path, title);
+          setToast({
+            type: TOAST_TYPE.SUCCESS,
+            title: t("common.link_copied"),
+            message: t("entity.link_copied_to_clipboard", { entity: entityName }),
+          });
+        } catch {
+          setToast({ type: TOAST_TYPE.ERROR, title: t("toast.error") });
+        }
       },
       update: async (workspaceSlug, projectId, issueId, data) => {
         try {

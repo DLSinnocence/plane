@@ -7,6 +7,7 @@
 import React, { useState } from "react";
 import { observer } from "mobx-react";
 import { copyUrlToClipboard, generateWorkItemLink } from "@plane/utils";
+import { getWorkItemLinkTitle } from "@/helpers/work-item-link";
 // plane imports
 // helpers
 // hooks
@@ -49,7 +50,10 @@ export const CreateIssueToastActionItems = observer(function CreateIssueToastAct
 
   const copyToClipboard = async (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
     try {
-      await copyUrlToClipboard(workItemLink);
+      await copyUrlToClipboard(
+        workItemLink,
+        getWorkItemLinkTitle({ projectIdentifier, sequenceId: issue.sequence_id, name: issue.name })
+      );
       setCopied(true);
       setTimeout(() => setCopied(false), 3000);
     } catch (_error) {

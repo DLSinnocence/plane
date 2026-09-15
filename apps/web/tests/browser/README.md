@@ -45,6 +45,12 @@ The `/?ai-assistant` fixture mounts the production `AIAssistant` sidebar beside 
 
 Coverage includes dock geometry and workspace interactivity, hide/reopen memory retention, model metadata from models.dev, searchable selection, image upload, Enter/Shift+Enter, IME-aware input, incremental thoughts/text/tools, code copying, desktop/mobile overflow, and scroll-following. HTTP/service setup failures retain editable drafts without claiming changes; interrupted writes retain context and offer verification without forced clearing. `test-results/ai-sidebar-zh.png` shows the production Chinese sidebar in the fixture workspace.
 
+## Work item clipboard regressions
+
+Run `pnpm --filter web test:browser clipboard.spec.ts --workers=1`.
+
+The standalone `clipboard.html` fixture imports the production URL-copy helper and work item title formatter. Chromium uses its real clipboard with keyboard paste to verify that rich-text editors receive a single clickable issue number/name, plain-text fields receive the original URL, and Chinese names containing HTML-like text remain literal. It does not connect to Feishu or claim to verify Feishu's own preview cards.
+
 ## Actual login-language regressions
 
 `auth-language.spec.ts` uses a second local Vite fixture configured by `language.vite.config.ts`. It loads the real `AuthBase`, login/signup forms, OAuth controls, i18next singleton, `TranslationProvider`, and locale JSON resources. Translations are not mocked in this fixture. Instance configuration and email-check/CSRF responses are synthetic; no real authentication or mail is performed.

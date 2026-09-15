@@ -13,6 +13,7 @@ import type { TIssue, TIssueServiceType, TSubIssueOperations } from "@plane/type
 import { EIssueServiceType, EIssuesStoreType } from "@plane/types";
 import { ControlLink, CustomMenu } from "@plane/ui";
 import { cn, generateWorkItemLink } from "@plane/utils";
+import { getWorkItemLinkTitle } from "@/helpers/work-item-link";
 // helpers
 import { useSubIssueOperations } from "@/components/issues/issue-detail-widgets/sub-issues/helper";
 import { WithDisplayPropertiesHOC } from "@/components/issues/issue-layouts/properties/with-display-properties-HOC";
@@ -204,7 +205,14 @@ export const SubIssuesListItem = observer(function SubIssuesListItem(props: Prop
 
                 <CustomMenu.MenuItem
                   onClick={() => {
-                    subIssueOperations.copyLink(workItemLink);
+                    subIssueOperations.copyLink(
+                      workItemLink,
+                      getWorkItemLinkTitle({
+                        projectIdentifier: projectDetail?.identifier,
+                        sequenceId: issue.sequence_id,
+                        name: issue.name,
+                      })
+                    );
                   }}
                 >
                   <div className="flex items-center gap-2">

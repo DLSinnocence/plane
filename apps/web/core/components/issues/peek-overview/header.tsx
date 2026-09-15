@@ -23,6 +23,7 @@ import type { TNameDescriptionLoader } from "@plane/types";
 import { EIssuesStoreType } from "@plane/types";
 import { CustomSelect } from "@plane/ui";
 import { copyUrlToClipboard, generateWorkItemLink } from "@plane/utils";
+import { getWorkItemLinkTitle } from "@/helpers/work-item-link";
 // hooks
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import { useIssues } from "@/hooks/store/use-issues";
@@ -122,16 +123,22 @@ export const IssuePeekOverviewHeader = observer(function IssuePeekOverviewHeader
     isArchived,
   });
 
-  const handleCopyText = (e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleCopyText = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     e.preventDefault();
-    copyUrlToClipboard(workItemLink).then(() => {
+    try {
+      await copyUrlToClipboard(
+        workItemLink,
+        getWorkItemLinkTitle({ projectIdentifier, sequenceId: issueDetails?.sequence_id, name: issueDetails?.name })
+      );
       setToast({
         type: TOAST_TYPE.SUCCESS,
         title: t("common.link_copied"),
         message: t("common.link_copied_to_clipboard"),
       });
-    });
+    } catch {
+      setToast({ type: TOAST_TYPE.ERROR, title: t("toast.error") });
+    }
   };
 
   const handleDeleteIssue = async () => {

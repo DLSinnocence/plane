@@ -29,18 +29,22 @@ export const useSubIssueOperations = (issueServiceType: TIssueServiceType): TSub
 
   const subIssueOperations: TSubIssueOperations = useMemo(
     () => ({
-      copyLink: async (path) => {
-        await copyUrlToClipboard(path);
-        setToast({
-          type: TOAST_TYPE.SUCCESS,
-          title: t("common.link_copied"),
-          message: t("entity.link_copied_to_clipboard", {
-            entity:
-              issueServiceType === EIssueServiceType.ISSUES
-                ? t("common.sub_work_items", { count: 1 })
-                : t("issue.label", { count: 1 }),
-          }),
-        });
+      copyLink: async (path, title) => {
+        try {
+          await copyUrlToClipboard(path, title);
+          setToast({
+            type: TOAST_TYPE.SUCCESS,
+            title: t("common.link_copied"),
+            message: t("entity.link_copied_to_clipboard", {
+              entity:
+                issueServiceType === EIssueServiceType.ISSUES
+                  ? t("common.sub_work_items", { count: 1 })
+                  : t("issue.label", { count: 1 }),
+            }),
+          });
+        } catch {
+          setToast({ type: TOAST_TYPE.ERROR, title: t("toast.error") });
+        }
       },
       fetchSubIssues: async (workspaceSlug, projectId, parentIssueId) => {
         try {

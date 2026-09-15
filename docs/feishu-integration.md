@@ -48,6 +48,14 @@ When changing App ID, enter the new application's secret before enabling it and 
 
 If delivery fails, check the app secret, published bot and permission scopes, contact data access, full intended recipient visibility, SSO phone synchronization and country code, and worker task consumption. Missing, invalid, or unmatched phones skip sending with a reason; correct the SSO claims or Feishu account phone and have the member sign in again through SSO. If lookup finds no account, also check the application's contact permissions and visibility. Ambiguous or conflicting phone identities must be resolved before sending. Check history and worker logs without disclosing credentials or full phone numbers. If card links fail, check the public Plane origin and recipient permissions.
 
+## Copy work item links into Feishu
+
+Use **Copy link** inside Plane (the work item details, list menu, peek header, related/sub-work item menu, intake, creation toast, or command palette). The clipboard includes an HTML hyperlink labeled **`WITCHFARM-10 Work item name`**, plus the original absolute URL as plain text. A normal paste into a Feishu editor that accepts HTML can retain the number and name as a clickable link. This does not require configuring the Feishu bot.
+
+Pasting as plain text, pasting into an address bar, or using a browser that cannot write HTML to the clipboard copies the original URL. Copying directly from the browser address bar also only copies the URL. Those raw URLs may still display Plane's generic preview because the web app serves a static shell; this change does not add Feishu's native link-preview callback or change existing cards. Readers still need their usual Plane permissions to open the work item. The copied label is the title available at copy time; copy again after renaming an item.
+
+Deploy the rebuilt **web** app (including `@plane/utils`) and refresh Plane before trying this. Automated tests cover clipboard formats, HTML escaping, permission/format failures, and title fallbacks. Chromium tests also verify actual keyboard paste into rich-text and plain-text fields. Feishu client paste behaviour still needs verification in the tenant's actual client.
+
 ## Verification limits
 
 The frontend's configuration validation and safe label fallback have local automated tests. No live Feishu delivery or mobile lookup was verified during implementation: no application credentials were available, and no test messages were sent. Complete the explicit test-card procedure in your own tenant before relying on notifications.

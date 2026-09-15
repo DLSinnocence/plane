@@ -30,6 +30,7 @@ import type { TNameDescriptionLoader } from "@plane/types";
 import { EInboxIssueStatus } from "@plane/types";
 import { ControlLink, CustomMenu, Row } from "@plane/ui";
 import { copyUrlToClipboard, findHowManyDaysLeft, generateWorkItemLink } from "@plane/utils";
+import { getWorkItemLinkTitle } from "@/helpers/work-item-link";
 // components
 import { CreateUpdateIssueModal } from "@/components/issues/issue-modal/modal";
 import { NameDescriptionUpdateStatus } from "@/components/issues/issue-update-status";
@@ -177,14 +178,25 @@ export const InboxIssueActionsHeader = observer(function InboxIssueActionsHeader
     }
   };
 
-  const handleCopyIssueLink = (path: string) =>
-    copyUrlToClipboard(path).then(() =>
+  const handleCopyIssueLink = async (path: string) => {
+    try {
+      await copyUrlToClipboard(
+        path,
+        getWorkItemLinkTitle({
+          projectIdentifier: currentProjectDetails?.identifier,
+          sequenceId: issue?.sequence_id,
+          name: issue?.name,
+        })
+      );
       setToast({
         type: TOAST_TYPE.SUCCESS,
         title: t("common.link_copied"),
         message: t("common.copied_to_clipboard"),
-      })
-    );
+      });
+    } catch {
+      setToast({ type: TOAST_TYPE.ERROR, title: t("toast.error") });
+    }
+  };
 
   const currentIssueIndex = filteredInboxIssueIds.findIndex((issueId) => issueId === currentInboxIssueId) ?? 0;
 

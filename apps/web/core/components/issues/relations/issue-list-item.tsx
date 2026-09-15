@@ -15,6 +15,7 @@ import type { TIssue, TIssueServiceType } from "@plane/types";
 import { EIssueServiceType } from "@plane/types";
 import { ControlLink, CustomMenu } from "@plane/ui";
 import { generateWorkItemLink } from "@plane/utils";
+import { getWorkItemLinkTitle } from "@/helpers/work-item-link";
 // hooks
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import { useProject } from "@/hooks/store/use-project";
@@ -110,7 +111,14 @@ export const RelationIssueListItem = observer(function RelationIssueListItem(pro
   const handleCopyIssueLink = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
     e.stopPropagation();
     e.preventDefault();
-    issueOperations.copyLink(workItemLink);
+    issueOperations.copyLink(
+      workItemLink,
+      getWorkItemLinkTitle({
+        projectIdentifier: projectDetail?.identifier,
+        sequenceId: issue.sequence_id,
+        name: issue.name,
+      })
+    );
   };
 
   const handleRemoveRelation = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {

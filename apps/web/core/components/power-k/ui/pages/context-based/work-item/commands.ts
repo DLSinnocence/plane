@@ -24,7 +24,8 @@ import { useTranslation } from "@plane/i18n";
 import { setToast, TOAST_TYPE } from "@plane/propel/toast";
 import type { ICycle, IIssueLabel, IModule, TIssue, TIssuePriorities } from "@plane/types";
 import { EIssueServiceType, EUserPermissions } from "@plane/types";
-import { copyTextToClipboard } from "@plane/utils";
+import { copyTextToClipboard, copyUrlToClipboard } from "@plane/utils";
+import { getWorkItemLinkTitle } from "@/helpers/work-item-link";
 // components
 import type { TPowerKCommandConfig } from "@/components/power-k/core/types";
 // hooks
@@ -163,7 +164,14 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
 
   const copyWorkItemUrlToClipboard = useCallback(() => {
     const url = new URL(window.location.href);
-    copyTextToClipboard(url.href)
+    copyUrlToClipboard(
+      url.href,
+      getWorkItemLinkTitle({
+        projectIdentifier: projectDetails?.identifier,
+        sequenceId: entityDetails?.sequence_id,
+        name: entityDetails?.name,
+      })
+    )
       .then(() => {
         setToast({
           type: TOAST_TYPE.SUCCESS,
@@ -176,8 +184,7 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
           title: t("power_k.contextual_actions.work_item.copy_url_toast_error"),
         });
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [entityDetails?.name, entityDetails?.sequence_id, projectDetails?.identifier, t]);
 
   return [
     {

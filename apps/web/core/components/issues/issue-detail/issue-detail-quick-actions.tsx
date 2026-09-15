@@ -13,7 +13,8 @@ import { IconButton } from "@plane/propel/icon-button";
 import { TOAST_TYPE, setToast } from "@plane/propel/toast";
 import { Tooltip } from "@makeplane/propel/components/tooltip";
 import { EIssuesStoreType } from "@plane/types";
-import { generateWorkItemLink, copyTextToClipboard } from "@plane/utils";
+import { generateWorkItemLink, copyUrlToClipboard } from "@plane/utils";
+import { getWorkItemLinkTitle } from "@/helpers/work-item-link";
 // hooks
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import { useIssues } from "@/hooks/store/use-issues";
@@ -74,8 +75,10 @@ export const IssueDetailQuickActions = observer(function IssueDetailQuickActions
   // handlers
   const handleCopyText = async () => {
     try {
-      const originURL = typeof window !== "undefined" && window.location.origin ? window.location.origin : "";
-      await copyTextToClipboard(`${originURL}${workItemLink}`);
+      await copyUrlToClipboard(
+        workItemLink,
+        getWorkItemLinkTitle({ projectIdentifier, sequenceId: issue.sequence_id, name: issue.name })
+      );
       setToast({
         type: TOAST_TYPE.SUCCESS,
         title: t("common.link_copied"),

@@ -21,6 +21,7 @@ import { TOAST_TYPE, setToast } from "@plane/propel/toast";
 import type { EIssuesStoreType, TIssue } from "@plane/types";
 import type { TContextMenuItem } from "@plane/ui";
 import { copyUrlToClipboard, generateWorkItemLink } from "@plane/utils";
+import { getWorkItemLinkTitle } from "@/helpers/work-item-link";
 import { createCopyMenuWithDuplication } from "./copy-menu-helper";
 
 // Generic helper function to handle optional function calls gracefully
@@ -103,14 +104,22 @@ export const useIssueActionHandlers = (props: MenuItemFactoryProps) => {
     [workspaceSlug, projectIdentifier, issue]
   );
 
-  const handleCopyIssueLink = () =>
-    copyUrlToClipboard(workItemLink).then(() =>
+  const { t } = useTranslation();
+  const handleCopyIssueLink = async () => {
+    try {
+      await copyUrlToClipboard(
+        workItemLink,
+        getWorkItemLinkTitle({ projectIdentifier, sequenceId: issue.sequence_id, name: issue.name })
+      );
       setToast({
         type: TOAST_TYPE.SUCCESS,
-        title: "Link copied",
-        message: "Work item link copied to clipboard",
-      })
-    );
+        title: t("common.link_copied"),
+        message: t("common.link_copied_to_clipboard"),
+      });
+    } catch {
+      setToast({ type: TOAST_TYPE.ERROR, title: t("toast.error") });
+    }
+  };
 
   const handleOpenInNewTab = () => window.open(workItemLink, "_blank");
 

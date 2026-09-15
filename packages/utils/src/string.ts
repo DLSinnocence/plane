@@ -62,19 +62,48 @@ export const createSimilarString = (str: string) => {
   return shuffled;
 };
 
+/** Escape both link labels and href attributes before writing clipboard HTML. */
+const escapeClipboardHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 /**
- * @description Copies full URL (origin + path) to clipboard
- * @param {string} path - URL path to copy
- * @returns {Promise<void>} Promise that resolves when copying is complete
- * @example
- * await copyUrlToClipboard("issues/123") // copies "https://example.com/issues/123"
+ * Copies a full URL, optionally with a title for rich-text editors such as Feishu.
+ * The plain-text representation stays a URL so address bars and plain-text paste keep working.
  */
-export const copyUrlToClipboard = async (path: string) => {
-  // get origin or default to empty string if not in browser
+export const copyUrlToClipboard = async (path: string, title?: string): Promise<void> => {
   const originUrl = typeof window !== "undefined" ? window.location.origin : "";
-  // create URL object and ensure proper path formatting
   const url = new URL(path, originUrl);
-  await copyTextToClipboard(url.toString());
+  const text = url.toString();
+  const label = title?.trim();
+
+  if (label) {
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      throw new Error("Only HTTP(S) links can be copied as rich text.");
+    }
+    // Some browsers only implement writeText, or reject the HTML clipboard format.
+    try {
+      if (typeof navigator.clipboard?.write === "function" && typeof ClipboardItem !== "undefined") {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/plain": new Blob([text], { type: "text/plain" }),
+            "text/html": new Blob([`<a href="${escapeClipboardHtml(text)}">${escapeClipboardHtml(label)}</a>`], {
+              type: "text/html",
+            }),
+          }),
+        ]);
+        return;
+      }
+    } catch {
+      // Retry the existing plain-URL copy path when rich-text clipboard access is unavailable.
+    }
+  }
+
+  await copyTextToClipboard(text);
 };
 
 /**
@@ -352,18 +381,14 @@ const fallbackCopyTextToClipboard = (text: string) => {
   textArea.style.position = "fixed";
 
   document.body.appendChild(textArea);
-  textArea.focus();
-  textArea.select();
-
   try {
-    // FIXME: Even though we are using this as a fallback, execCommand is deprecated 👎. We should find a better way to do this.
-    // https://developer.mozilla.org/en-US/docs/Web/API/Document/execCommand
-    document.execCommand("copy");
-  } catch (_err) {
-    // catch fallback error
+    textArea.focus();
+    textArea.select();
+    // Legacy browsers without the Clipboard API still support this synchronous path.
+    if (!document.execCommand("copy")) throw new Error("Clipboard copy failed.");
+  } finally {
+    document.body.removeChild(textArea);
   }
-
-  document.body.removeChild(textArea);
 };
 
 /**
