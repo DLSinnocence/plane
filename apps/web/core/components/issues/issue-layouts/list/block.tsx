@@ -33,6 +33,7 @@ import { useProject } from "@/hooks/store/use-project";
 import type { TSelectionHelper } from "@/hooks/use-multiple-select";
 import { usePlatformOS } from "@/hooks/use-platform-os";
 import { calculateIdentifierWidth } from "../utils";
+import { MAX_LIST_NESTING_LEVEL } from "./hierarchy";
 import type { TRenderQuickActions } from "./list-view-types";
 
 interface IssueBlockProps {
@@ -150,7 +151,7 @@ export const IssueBlock = observer(function IssueBlock(props: IssueBlockProps) {
   const handleToggleExpand = (e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     e.preventDefault();
-    if (nestingLevel >= 3) {
+    if (nestingLevel >= MAX_LIST_NESTING_LEVEL) {
       handleIssuePeekOverview(issue);
     } else {
       setExpanded((prevState) => {

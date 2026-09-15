@@ -12,7 +12,7 @@ import { autorun, observable, runInAction } from "mobx";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
-import { getListRootIssueIds } from "./hierarchy.ts";
+import { getListRootIssueIds, MAX_LIST_NESTING_LEVEL } from "./hierarchy.ts";
 
 const issue = (id, parentId = null, childCount = 0) => ({
   id,
@@ -43,6 +43,46 @@ test("an ancestor outside the current filter, page or group does not hide the ch
 
 test("a cached intermediate parent still provides a path from a listed ancestor", () => {
   assert.deepEqual(getListRootIssueIds(["grandchild", "parent"], fixture()), ["parent"]);
+});
+
+const chain = (maxDepth) =>
+  Object.fromEntries(
+    Array.from({ length: maxDepth + 1 }, (_, depth) => {
+      const id = `level-${depth}`;
+      return [id, issue(id, depth > 0 ? `level-${depth - 1}` : null, depth < maxDepth ? 1 : 0)];
+    })
+  );
+
+test("descendants at depth three remain nested while depth four gets a reachable root", () => {
+  const issuesMap = chain(4);
+  assert.deepEqual(getListRootIssueIds(Object.keys(issuesMap), issuesMap), ["level-0", "level-4"]);
+  assert.deepEqual(getListRootIssueIds(Object.keys(issuesMap).toReversed(), issuesMap), ["level-4", "level-0"]);
+});
+
+test("sparse results retain deep descendants even when intermediate ancestors are cached", () => {
+  const issuesMap = chain(4);
+  assert.deepEqual(getListRootIssueIds(["level-0", "level-3"], issuesMap), ["level-0"]);
+  assert.deepEqual(getListRootIssueIds(["level-0", "level-4"], issuesMap), ["level-0", "level-4"]);
+});
+
+test("an ancestor hidden beneath another root cannot reset the inline expansion depth", () => {
+  const issuesMap = chain(4);
+  assert.deepEqual(getListRootIssueIds(["level-4", "level-3", "level-0"], issuesMap), ["level-4", "level-0"]);
+});
+
+test("long chains reset the depth only at retained roots", () => {
+  const issuesMap = chain(12);
+  assert.deepEqual(getListRootIssueIds(Object.keys(issuesMap), issuesMap), [
+    "level-0",
+    "level-4",
+    "level-8",
+    "level-12",
+  ]);
+  assert.deepEqual(getListRootIssueIds(["level-0", "level-5", "level-8", "level-9"], issuesMap), [
+    "level-0",
+    "level-5",
+    "level-9",
+  ]);
 });
 
 test("missing or non-expandable parents do not make children inaccessible", () => {
@@ -80,6 +120,49 @@ test("observable parent changes and pagination recompute roots without replacing
     assert.deepEqual(snapshots, [["child"], ["parent"], ["child", "parent"], ["parent"]]);
   } finally {
     dispose();
+  }
+});
+
+test("row expansion switches to peek at the same depth used to retain roots", () => {
+  const source = ts.createSourceFile(
+    "block.tsx",
+    readFileSync(new URL("./block.tsx", import.meta.url), "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  );
+  let handler;
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "handleToggleExpand")
+      handler = node.initializer.getText(source);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  assert.ok(handler);
+  const compiled = ts.transpileModule(`const handler = ${handler};`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  const createHandler = new Function(
+    "nestingLevel",
+    "MAX_LIST_NESTING_LEVEL",
+    "handleIssuePeekOverview",
+    "setExpanded",
+    "subIssuesStore",
+    `const issue = { id: 'issue', project_id: 'project' }, workspaceSlug = 'workspace';
+    ${compiled}; return handler;`
+  );
+
+  for (const nestingLevel of [2, 3, 4]) {
+    const calls = [];
+    const toggle = createHandler(
+      nestingLevel,
+      MAX_LIST_NESTING_LEVEL,
+      () => calls.push("peek"),
+      (update) => calls.push(update(false)),
+      { fetchSubIssues: () => calls.push("fetch") }
+    );
+    toggle({ stopPropagation() {}, preventDefault() {} });
+    assert.deepEqual(calls, nestingLevel < 3 ? ["fetch", true] : ["peek"]);
   }
 });
 
