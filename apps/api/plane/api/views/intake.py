@@ -31,7 +31,11 @@ from plane.app.permissions import ProjectLitePermission
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.db.models import Intake, IntakeIssue, Issue, Project, ProjectMember, State, StateGroup
 from plane.utils.issue_workflow_activity import issue_activity_payload
+from plane.utils.issue_permissions import (
+    project_access_role, require_intake_write_access, require_project_admin_access,
+)
 from plane.utils.host import base_host
+from plane.utils.issue_write_scope import lock_issue_delete_scope
 from plane.utils.content_validator import validate_html_content
 from .base import BaseAPIView
 from plane.db.models.intake import SourceType
@@ -210,6 +214,7 @@ class IntakeIssueListCreateAPIEndpoint(BaseAPIView):
                 "workspace_id": project.workspace_id,
                 "default_assignee_id": project.default_assignee_id,
                 "allow_triage_state": True,
+                "intake_submission": True,
             },
         )
         issue_serializer.is_valid(raise_exception=True)
@@ -348,21 +353,10 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
             intake_id=intake.id,
         )
         intake_issue.issue = Issue.objects.select_for_update().get(pk=intake_issue.issue_id)
-
-        # Get the project member
-        project_member = ProjectMember.objects.get(
-            workspace__slug=slug,
-            project_id=project_id,
-            member=request.user,
-            is_active=True,
-        )
-
-        # Only project members admins and created_by users can access this endpoint
-        if project_member.role <= 5 and str(intake_issue.created_by_id) != str(request.user.id):
-            return Response(
-                {"error": "You cannot edit intake work items"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        require_intake_write_access(request.user, intake_issue.issue)
+        role = project_access_role(request.user, project_id, project.workspace_id)
+        if set(request.data) - {"issue"}:
+            require_project_admin_access(request.user, project_id, project.workspace_id)
 
         # Get issue data
         issue_data = request.data.pop("issue", False)
@@ -395,7 +389,7 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
             ).get(pk=issue_id, workspace__slug=slug, project_id=project_id)
 
             # Only allow guests to edit name and description
-            if project_member.role <= 5:
+            if role == 5:
                 description_json = issue_data.get("description") or issue_data.get("description_json") or {}
                 issue_data = {
                     "name": issue_data.get("name", issue.name),
@@ -412,14 +406,15 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
                     "project_id": project_id,
                     "workspace_id": project.workspace_id,
                     "allow_triage_state": True,
+                    "intake_submission": True,
                 },
             )
 
             if not issue_serializer.is_valid():
                 return Response(issue_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Only project admins and members can edit intake issue attributes
-        if project_member.role > 15:
+        # Only administrators may review intake submissions.
+        if role == 20:
             intake_serializer = IntakeIssueUpdateSerializer(
                 intake_issue,
                 data=request.data,
@@ -429,6 +424,7 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
                     "project_id": project_id,
                     "workspace_id": project.workspace_id,
                     "allow_triage_state": True,
+                    "intake_submission": True,
                 },
             )
 
@@ -522,12 +518,15 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
             204: DELETED_RESPONSE,
         },
     )
+    @transaction.atomic
     def delete(self, request, slug, project_id, issue_id):
         """Delete intake work item
 
         Permanently remove an intake work item from the triage queue.
         Also deletes the underlying work item if it hasn't been accepted yet.
         """
+        issue = Issue.objects.select_for_update().get(pk=issue_id, workspace__slug=slug, project_id=project_id)
+        require_intake_write_access(request.user, issue)
         intake = Intake.objects.filter(workspace__slug=slug, project_id=project_id).first()
 
         project = Project.objects.get(workspace__slug=slug, pk=project_id)
@@ -564,6 +563,8 @@ class IntakeIssueDetailAPIEndpoint(BaseAPIView):
                     {"error": "Only admin or creator can delete the work item"},
                     status=status.HTTP_403_FORBIDDEN,
                 )
+            if Issue.objects.using("default").filter(parent_id=issue.pk).exists():
+                issue = lock_issue_delete_scope(request.user, slug, issue.pk, project_id)
             issue.delete()
 
         intake_issue.delete()

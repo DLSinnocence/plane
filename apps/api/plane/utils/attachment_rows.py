@@ -3,8 +3,8 @@
 
 """Shared row provisioning and completion for formal work item attachments.
 
-Callers keep their existing upload authorization. Provisioning is part of uploading,
-not permission to configure rows. The issue lock serializes naming and the row cap.
+Formal uploads and completion authorize the persisted issue under its row lock.
+Provisioning is part of uploading; the issue lock serializes naming and the row cap.
 """
 
 from django.db import transaction
@@ -13,7 +13,8 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
-from plane.db.models import FileAsset, Issue, IssueAttachmentSlot, ProjectMember
+from plane.db.models import FileAsset, Issue, IssueAttachmentSlot, User
+from plane.utils.issue_permissions import has_project_admin_access, require_issue_write_access
 
 MAX_ATTACHMENT_ROWS = 50
 
@@ -81,15 +82,35 @@ def provision_attachment_row(issue, creator_id):
 def require_file_owner_or_admin(asset, user, message):
     if asset.created_by_id == user.id:
         return
-    if ProjectMember.objects.filter(
-        workspace_id=asset.workspace_id,
-        project_id=asset.project_id,
-        member_id=user.id,
-        is_active=True,
-        role=20,
-    ).exists():
+    if has_project_admin_access(user, asset.project_id, asset.workspace_id):
         return
     raise PermissionDenied(message)
+
+
+def is_work_item_attachment(asset):
+    return bool(asset.attachment_slot_id or (
+        asset.issue_id and asset.entity_type in (None, "", FileAsset.EntityTypeContext.ISSUE_ATTACHMENT)
+    ))
+
+
+def require_attachment_asset_write(asset, user):
+    """Caller holds an atomic transaction; lock the issue before a bound asset."""
+    if not is_work_item_attachment(asset):
+        # Binding takes the same asset lock. If a concurrent bind already won,
+        # retry instead of acquiring the issue lock in the reverse order.
+        asset = get_object_or_404(FileAsset.objects.select_for_update(), pk=asset.pk)
+        if is_work_item_attachment(asset):
+            raise PermissionDenied("The attachment changed. Retry this request.")
+        return asset
+    issue = lock_attachment_issue(asset.workspace_id, asset.project_id, asset.issue_id)
+    require_issue_write_access(user, issue)
+    asset = get_object_or_404(
+        FileAsset.objects.select_for_update(),
+        pk=asset.pk, workspace_id=issue.workspace_id, project_id=issue.project_id,
+        issue_id=issue.id, is_deleted=False,
+    )
+    require_file_owner_or_admin(asset, user, "Only the uploader or an admin can modify this attachment.")
+    return asset
 
 
 def require_replacement_permission(slot, user):
@@ -120,6 +141,8 @@ def create_attachment_asset(*, reuse_pending=True, **kwargs):
         workspace_id = kwargs.get("workspace_id") or kwargs["workspace"].id
         issue = lock_attachment_issue(workspace_id, kwargs.get("project_id"), kwargs["issue_id"])
         creator_id = kwargs.get("created_by_id") or getattr(kwargs.get("created_by"), "id", None)
+        user = kwargs.get("created_by") or get_object_or_404(User.objects, pk=creator_id)
+        require_issue_write_access(user, issue)
         if not kwargs.get("attachment_slot"):
             # A retried presign for the same unconfirmed file reuses its row and ID.
             pending = (
@@ -174,6 +197,7 @@ def attachment_completion_data(asset):
 def complete_attachment_asset(asset, user):
     """Complete once, retaining the replaced asset as a soft-deleted audit row."""
     issue = lock_attachment_issue(asset.workspace_id, asset.project_id, asset.issue_id)
+    require_issue_write_access(user, issue)
     asset = get_object_or_404(
         FileAsset.objects.select_for_update(),
         pk=asset.pk,

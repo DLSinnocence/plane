@@ -12,6 +12,7 @@ import { observer } from "mobx-react";
 import { Collapsible } from "@makeplane/propel/components/collapsible";
 import type { TIssueServiceType } from "@plane/types";
 // hooks
+import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 // local imports
 import { IssueAttachmentsCollapsibleContent } from "./content";
@@ -27,9 +28,11 @@ type Props = {
 };
 
 export const AttachmentsCollapsible = observer(function AttachmentsCollapsible(props: Props) {
-  const { workspaceSlug, projectId, issueId, disabled = false, issueServiceType } = props;
+  const { workspaceSlug, projectId, issueId, disabled: disabledByParent = false, issueServiceType } = props;
   // store hooks
   const issueDetail = useIssueDetail(issueServiceType);
+  const { canUploadAttachments } = useIssueWorkflow(issueDetail.issue.getIssueById(issueId), workspaceSlug);
+  const disabled = disabledByParent || !canUploadAttachments;
   const { openWidgets, toggleOpenWidget, attachment } = issueDetail;
   const [focusSlotId, setFocusSlotId] = useState<string | null>(null);
   useEffect(() => {

@@ -7,7 +7,7 @@ from plane.utils.attachment_rows import (
     attachment_completion_data,
 )
 from plane.app.serializers.attachment import AttachmentSlotUploadSerializer
-from plane.app.views.attachment import require_slot_role, scoped_issue
+from plane.app.views.attachment import scoped_issue
 from plane.db.models import IssueAttachmentSlot
 from django.shortcuts import get_object_or_404
 
@@ -98,10 +98,14 @@ from plane.utils.order_queryset import (
 from plane.bgtasks.storage_metadata_task import get_asset_object_metadata
 from .base import BaseAPIView
 from plane.utils.issue_workflow_activity import issue_activity_payload
+from plane.utils.issue_permissions import (
+    require_issue_write_access, require_project_admin_access, has_project_admin_access,
+)
+from plane.utils.issue_write_scope import lock_issue_write_scope, lock_issue_delete_scope
+from plane.utils.attachment_rows import require_file_owner_or_admin
 from plane.utils.host import base_host
 from plane.utils.issue_relation_mapper import get_actual_relation
 from plane.bgtasks.webhook_task import model_activity
-from plane.app.permissions import ROLE
 from plane.utils.openapi import (
     work_item_docs,
     work_item_relation_docs,
@@ -463,7 +467,8 @@ class IssueListCreateAPIEndpoint(BaseAPIView):
         Create a new work item in the specified project with the provided details.
         Supports external ID tracking for integration purposes.
         """
-        project = Project.objects.get(pk=project_id)
+        project = Project.objects.get(pk=project_id, workspace__slug=slug)
+        require_project_admin_access(request.user, project_id, project.workspace_id)
 
         serializer = IssueSerializer(
             data=request.data,
@@ -874,21 +879,16 @@ class IssueDetailAPIEndpoint(BaseAPIView):
             404: WORK_ITEM_NOT_FOUND_RESPONSE,
         },
     )
+    @transaction.atomic
     def delete(self, request, slug, project_id, pk):
         """Delete work item
 
         Permanently delete an existing work item from the project.
         Only admins or the item creator can perform this action.
         """
-        issue = Issue.objects.get(workspace__slug=slug, project_id=project_id, pk=pk)
-        if issue.created_by_id != request.user.id and (
-            not ProjectMember.objects.filter(
-                workspace__slug=slug,
-                member=request.user,
-                role=20,
-                project_id=project_id,
-                is_active=True,
-            ).exists()
+        issue = lock_issue_delete_scope(request.user, slug, pk, project_id)
+        if issue.created_by_id != request.user.id and not has_project_admin_access(
+            request.user, project_id, issue.workspace_id
         ):
             return Response(
                 {"error": "Only admin or creator can delete the work item"},
@@ -1220,12 +1220,14 @@ class IssueLinkListCreateAPIEndpoint(BaseAPIView):
             404: ISSUE_NOT_FOUND_RESPONSE,
         },
     )
+    @transaction.atomic
     def post(self, request, slug, project_id, issue_id):
         """Create issue link
 
         Add a new external link to a work item with URL, title, and metadata.
         Automatically tracks link creation activity.
         """
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
         serializer = IssueLinkCreateSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(project_id=project_id, issue_id=issue_id)
@@ -1331,12 +1333,14 @@ class IssueLinkDetailAPIEndpoint(BaseAPIView):
             404: LINK_NOT_FOUND_RESPONSE,
         },
     )
+    @transaction.atomic
     def patch(self, request, slug, project_id, issue_id, pk):
         """Update issue link
 
         Modify the URL, title, or metadata of an existing issue link.
         Tracks all changes in issue activity logs.
         """
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
         issue_link = IssueLink.objects.get(workspace__slug=slug, project_id=project_id, issue_id=issue_id, pk=pk)
         requested_data = json.dumps(request.data, cls=DjangoJSONEncoder)
         current_instance = json.dumps(IssueLinkSerializer(issue_link).data, cls=DjangoJSONEncoder)
@@ -1372,12 +1376,14 @@ class IssueLinkDetailAPIEndpoint(BaseAPIView):
             404: OpenApiResponse(description="Work item link not found"),
         },
     )
+    @transaction.atomic
     def delete(self, request, slug, project_id, issue_id, pk):
         """Delete work item link
 
         Permanently remove an external link from a work item.
         Records deletion activity for audit purposes.
         """
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
         issue_link = IssueLink.objects.get(workspace__slug=slug, project_id=project_id, issue_id=issue_id, pk=pk)
         current_instance = json.dumps(IssueLinkSerializer(issue_link).data, cls=DjangoJSONEncoder)
         issue_activity.delay(
@@ -1920,19 +1926,8 @@ class IssueAttachmentListCreateAPIEndpoint(BaseAPIView):
         Generate presigned URL for uploading file attachments to a work item.
         Validates file type and size before creating the attachment record.
         """
-        issue = Issue.objects.get(pk=issue_id, workspace__slug=slug, project_id=project_id)
-        # if the user is creator or admin,member then allow the upload
-        if not user_has_issue_permission(
-            request.user.id,
-            project_id=project_id,
-            issue=issue,
-            allowed_roles=[ROLE.ADMIN.value, ROLE.MEMBER.value, ROLE.GUEST.value],
-            allow_creator=True,
-        ):
-            return Response(
-                {"error": "You are not allowed to upload this attachment"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
 
         name = sanitize_filename(request.data.get("name"))
         type = request.data.get("type", False)
@@ -1991,10 +1986,8 @@ class IssueAttachmentListCreateAPIEndpoint(BaseAPIView):
 
         slot_data = AttachmentSlotUploadSerializer(data=request.data)
         slot_data.is_valid(raise_exception=True)
-        issue = scoped_issue(slug, project_id, issue_id, lock=True)
         slot = None
         if "slot_id" in slot_data.validated_data:
-            require_slot_role(request, slug, project_id, write=True)
             slot = get_object_or_404(
                 IssueAttachmentSlot.objects.select_for_update(),
                 pk=slot_data.validated_data["slot_id"],
@@ -2084,27 +2077,23 @@ class IssueAttachmentDetailAPIEndpoint(BaseAPIView):
             404: ATTACHMENT_NOT_FOUND_RESPONSE,
         },
     )
+    @transaction.atomic
     def delete(self, request, slug, project_id, issue_id, pk):
         """Delete work item attachment
 
         Soft delete an attachment from a work item by marking it as deleted.
         Records deletion activity and triggers metadata cleanup.
         """
-        issue = Issue.objects.get(pk=issue_id, workspace__slug=slug, project_id=project_id)
-        # if the request user is creator or admin then delete the attachment
-        if not user_has_issue_permission(
-            request.user.id,
-            project_id=project_id,
-            issue=issue,
-            allowed_roles=[ROLE.ADMIN.value, ROLE.MEMBER.value, ROLE.GUEST.value],
-            allow_creator=True,
-        ):
-            return Response(
-                {"error": "You are not allowed to delete this attachment"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        issue_attachment = FileAsset.objects.get(pk=pk, workspace__slug=slug, project_id=project_id)
+        issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
+        issue_attachment = get_object_or_404(
+            FileAsset.objects.select_for_update(),
+            pk=pk, workspace_id=issue.workspace_id, project_id=issue.project_id, issue_id=issue.id,
+            entity_type=FileAsset.EntityTypeContext.ISSUE_ATTACHMENT, is_deleted=False,
+        )
+        require_file_owner_or_admin(
+            issue_attachment, request.user, "Only the uploader or an admin can delete this attachment.",
+        )
         issue_attachment.is_deleted = True
         issue_attachment.deleted_at = timezone.now()
         issue_attachment.save()
@@ -2238,6 +2227,7 @@ class IssueAttachmentDetailAPIEndpoint(BaseAPIView):
             404: ATTACHMENT_NOT_FOUND_RESPONSE,
         },
     )
+    @transaction.atomic
     def patch(self, request, slug, project_id, issue_id, pk):
         """Confirm attachment upload
 
@@ -2245,22 +2235,12 @@ class IssueAttachmentDetailAPIEndpoint(BaseAPIView):
         Triggers activity logging and metadata extraction.
         """
 
-        issue = Issue.objects.get(pk=issue_id, workspace__slug=slug, project_id=project_id)
-        # if the user is creator or admin then allow the upload
-        if not user_has_issue_permission(
-            request.user.id,
-            project_id=project_id,
-            issue=issue,
-            allowed_roles=[ROLE.ADMIN.value, ROLE.MEMBER.value, ROLE.GUEST.value],
-            allow_creator=True,
-        ):
-            return Response(
-                {"error": "You are not allowed to upload this attachment"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        issue_attachment = FileAsset.objects.get(
-            pk=pk, workspace__slug=slug, project_id=project_id, issue_id=issue_id, is_deleted=False,
+        issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
+        issue_attachment = get_object_or_404(
+            FileAsset.objects.select_for_update(),
+            pk=pk, workspace_id=issue.workspace_id, project_id=issue.project_id, issue_id=issue.id,
+            entity_type=FileAsset.EntityTypeContext.ISSUE_ATTACHMENT, is_deleted=False,
         )
         issue_attachment, completed = complete_attachment_asset(issue_attachment, request.user)
         if not completed:
@@ -2571,6 +2551,7 @@ class IssueRelationListCreateAPIEndpoint(BaseAPIView):
             404: ISSUE_NOT_FOUND_RESPONSE,
         },
     )
+    @transaction.atomic
     def post(self, request, slug, project_id, issue_id):
         """Create work item relation
 
@@ -2584,6 +2565,10 @@ class IssueRelationListCreateAPIEndpoint(BaseAPIView):
 
         relation_type = serializer.validated_data["relation_type"]
         issues = serializer.validated_data["issues"]
+        # Cross-project relations require write access to both endpoints.
+        # Acquire the complete set in stable order before checking the URL anchor.
+        lock_issue_write_scope(request.user, slug, [issue_id, *issues])
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
         project = Project.objects.get(pk=project_id, workspace__slug=slug)
 
         actual_relation = get_actual_relation(relation_type)

@@ -14,6 +14,7 @@ import type {
   TInboxDuplicateIssueDetails,
 } from "@plane/types";
 import { EInboxIssueStatus } from "@plane/types";
+import { getIntakePermissions } from "@/helpers/issue-workflow";
 // helpers
 // services
 import { InboxIssueService } from "@/services/inbox";
@@ -96,7 +97,16 @@ export class InboxIssueStore implements IInboxIssueStore {
     });
   }
 
+  private getPermissions() {
+    return getIntakePermissions(
+      this.store.user.permission.getProjectRoleByWorkspaceSlugAndProjectId(this.workspaceSlug, this.projectId),
+      this.store.user.data?.id,
+      this.issue.created_by
+    );
+  }
+
   updateInboxIssueStatus = async (status: TInboxIssueStatus) => {
+    if (!this.getPermissions().canReview) throw new Error("Only administrators can review intake");
     const previousData: Partial<TInboxIssue> = {
       status: this.status,
     };
@@ -143,6 +153,7 @@ export class InboxIssueStore implements IInboxIssueStore {
   };
 
   updateInboxIssueDuplicateTo = async (issueId: string) => {
+    if (!this.getPermissions().canReview) throw new Error("Only administrators can review intake");
     const inboxStatus = EInboxIssueStatus.DUPLICATE;
     const previousData: Partial<TInboxIssue> = {
       status: this.status,
@@ -180,6 +191,7 @@ export class InboxIssueStore implements IInboxIssueStore {
   };
 
   updateInboxIssueSnoozeTill = async (date: Date | undefined) => {
+    if (!this.getPermissions().canReview) throw new Error("Only administrators can review intake");
     const inboxStatus = date ? EInboxIssueStatus.SNOOZED : EInboxIssueStatus.PENDING;
     const previousData: Partial<TInboxIssue> = {
       status: this.status,
@@ -217,6 +229,7 @@ export class InboxIssueStore implements IInboxIssueStore {
   };
 
   updateIssue = async (issue: Partial<TIssue>) => {
+    if (!this.getPermissions().canEdit) throw new Error("You do not have permission to edit this intake item");
     const inboxIssue = clone(this.issue);
     try {
       if (!this.issue.id) return;
@@ -236,6 +249,7 @@ export class InboxIssueStore implements IInboxIssueStore {
   };
 
   updateProjectIssue = async (issue: Partial<TIssue>) => {
+    if (!this.getPermissions().canReview) throw new Error("Only administrators can review intake");
     const inboxIssue = clone(this.issue);
     try {
       if (!this.issue.id) return;

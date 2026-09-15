@@ -7,6 +7,7 @@ from .base import BaseSerializer
 from django.db import transaction
 from .issue import IssueSerializer, IssueExpandSerializer
 from plane.db.models import IntakeIssue, Issue, State, StateGroup
+from plane.utils.issue_permissions import require_project_admin_access
 from rest_framework import serializers
 
 
@@ -116,6 +117,9 @@ class IntakeIssueUpdateSerializer(BaseSerializer):
         instance = IntakeIssue.objects.select_for_update().get(pk=instance.pk)
         issue = Issue.objects.select_for_update().get(pk=instance.issue_id)
         instance.issue = issue
+        require_project_admin_access(
+            getattr(self.context.get("request"), "user", None), issue.project_id, issue.workspace_id
+        )
         issue_data = validated_data.pop("issue", {})
         if validated_data.get("status") == 1 and issue.state and issue.state.group == StateGroup.TRIAGE.value:
             default_state = State.objects.filter(project_id=issue.project_id, default=True).first()

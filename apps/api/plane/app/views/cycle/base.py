@@ -26,7 +26,8 @@ from django.db.models import (
     Sum,
     FloatField,
 )
-from django.db import models
+from django.db import models, transaction
+from plane.utils.issue_write_scope import authorize_cycle_transfer
 from django.db.models.functions import Coalesce, Cast, Concat
 from django.utils import timezone
 from django.core.serializers.json import DjangoJSONEncoder
@@ -593,6 +594,7 @@ class CycleFavoriteViewSet(BaseViewSet):
 
 class TransferCycleIssueEndpoint(BaseAPIView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
+    @transaction.atomic
     def post(self, request, slug, project_id, cycle_id):
         new_cycle_id = request.data.get("new_cycle_id", False)
 
@@ -602,6 +604,7 @@ class TransferCycleIssueEndpoint(BaseAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        authorize_cycle_transfer(request.user, slug, project_id, cycle_id)
         # Transfer cycle issues and create progress snapshot
         result = transfer_cycle_issues(
             slug=slug,

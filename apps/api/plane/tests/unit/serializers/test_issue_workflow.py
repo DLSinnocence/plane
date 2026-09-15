@@ -10,7 +10,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from plane.api.serializers.issue import IssueSerializer as APIIssueSerializer
 from plane.app.serializers.issue import IssueCreateSerializer
-from plane.db.models import Issue, IssueAssignee, Project, ProjectMember, State, User
+from plane.db.models import Issue, IssueAssignee, Project, ProjectMember, State, User, WorkspaceMember
 
 pytestmark = [pytest.mark.unit, pytest.mark.django_db]
 
@@ -29,6 +29,7 @@ def workflow(workspace, create_user):
     reviewer = User.objects.create(email="reviewer@example.com", username="workflow-reviewer")
     other = User.objects.create(email="other@example.com", username="workflow-other")
     for user in (developer, reviewer, other):
+        WorkspaceMember.objects.create(workspace=workspace, member=user, role=15, is_active=True)
         ProjectMember.objects.create(project=project, member=user, role=15, is_active=True)
     development = State.objects.create(name="开发中", group="started", project=project, default=True)
     acceptance = State.objects.create(name="开发完成/待验收", group="started", project=project)
@@ -87,6 +88,7 @@ def assert_denied(serializer):
 
 
 def test_current_responsible_can_transition_and_hands_off(endpoint, workflow):
+    workflow.issue.save(created_by_id=workflow.other.id)
     _, state_key, _ = endpoint
     issue = save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.acceptance.id)}))
     assert issue.state_id == workflow.acceptance.id
@@ -195,8 +197,8 @@ def test_owner_can_configure_after_handoff(endpoint, workflow, edit_kind):
         assert issue.state_assignees[str(workflow.acceptance.id)] == [str(workflow.developer.id)]
         save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.development.id)}))
     else:
-        # Editing other stages does not grant the creator a transition bypass.
-        assert_denied(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.development.id)}))
+        # Creator access is retained after handing the work item to another member.
+        save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.development.id)}))
 
 
 @pytest.mark.parametrize("edit_kind", ["plan", "current"])
@@ -234,6 +236,7 @@ def test_missing_destination_defaults_to_creator_but_explicit_empty_clears(endpo
 
 
 def test_explicit_empty_current_overrides_legacy_assignees(endpoint, workflow):
+    workflow.issue.save(created_by_id=workflow.other.id)
     workflow.issue.state_assignees = {str(workflow.development.id): []}
     workflow.issue.save()
     _, state_key, _ = endpoint
@@ -247,14 +250,15 @@ def test_admin_can_transition_unassigned_issue(endpoint, workflow):
     save(serializer_for(endpoint, workflow, workflow.admin, {state_key: str(workflow.acceptance.id)}))
 
 
-def test_active_project_lead_can_transition(endpoint, workflow):
+def test_project_lead_without_ownership_cannot_transition(endpoint, workflow):
     workflow.project.project_lead = workflow.other
     workflow.project.save()
     _, state_key, _ = endpoint
-    save(serializer_for(endpoint, workflow, workflow.other, {state_key: str(workflow.acceptance.id)}))
+    assert_denied(serializer_for(endpoint, workflow, workflow.other, {state_key: str(workflow.acceptance.id)}))
 
 
 def test_stale_instance_cannot_reuse_previous_responsibility(endpoint, workflow):
+    workflow.issue.save(created_by_id=workflow.other.id)
     stale = Issue.objects.get(pk=workflow.issue.pk)
     _, state_key, _ = endpoint
     save(serializer_for(endpoint, workflow, workflow.developer, {state_key: str(workflow.acceptance.id)}))
@@ -410,6 +414,7 @@ def test_fixed_stage_rejects_custom_assignment(endpoint, workflow, group, operat
     if operation == "update":
         serializer = serializer_for(endpoint, workflow, workflow.admin, data)
     else:
+        ProjectMember.objects.filter(project=workflow.project, member=workflow.developer).update(role=20)
         if operation == "create-direct":
             data = {assignee_key: [str(workflow.other.pk)]}
         data.update({"name": "Fixed-stage override", state_key: str(fixed.pk)})
@@ -445,6 +450,7 @@ def test_fixed_stage_handoff_normalizes_historic_custom_assignment(endpoint, wor
 
 @pytest.mark.parametrize("mode", ["default", "stages", "direct", "empty", "conflict"])
 def test_creation_materializes_every_stage(endpoint, workflow, mode):
+    ProjectMember.objects.filter(project=workflow.project, member=workflow.developer).update(role=20)
     State.objects.create(project=workflow.project, name="Triage", group="triage")
     fixed_states = [
         State.objects.create(project=workflow.project, name=group, group=group)
@@ -528,6 +534,7 @@ def test_new_stage_defaults_to_creator_and_deleted_stage_is_pruned(endpoint, wor
 
 
 def test_creation_applies_configured_initial_state(endpoint, workflow):
+    ProjectMember.objects.filter(project=workflow.project, member=workflow.developer).update(role=20)
     serializer_class, state_key, _ = endpoint
     serializer = serializer_class(
         data={

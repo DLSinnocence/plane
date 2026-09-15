@@ -31,6 +31,8 @@ from plane.db.models import (
 )
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.utils.issue_relation_mapper import get_actual_relation
+from django.db import transaction
+from plane.utils.issue_write_scope import lock_issue_write_scope
 from plane.utils.host import base_host
 
 
@@ -207,6 +209,7 @@ class IssueRelationViewSet(BaseViewSet):
 
         return Response(response_data, status=status.HTTP_200_OK)
 
+    @transaction.atomic
     def create(self, request, slug, project_id, issue_id):
         relation_type = request.data.get("relation_type", None)
         if relation_type is None:
@@ -216,16 +219,10 @@ class IssueRelationViewSet(BaseViewSet):
             )
 
         issues = request.data.get("issues", [])
-        project = Project.objects.get(pk=project_id)
-
-        # Scope to workspace to prevent cross-tenant IDOR
-        # Relations can cross projects so only workspace scope is enforced
-        issues = list(
-            Issue.issue_objects.filter(
-                workspace__slug=slug,
-                pk__in=issues,
-            ).values_list("id", flat=True)
-        )
+        # Relations can cross projects; the guard checks each target's membership.
+        lock_issue_write_scope(request.user, slug, [issue_id, *issues])
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
+        project = Project.objects.get(pk=project_id, workspace__slug=slug)
 
         issue_relation = IssueRelation.objects.bulk_create(
             [
@@ -269,8 +266,11 @@ class IssueRelationViewSet(BaseViewSet):
                 status=status.HTTP_201_CREATED,
             )
 
+    @transaction.atomic
     def remove_relation(self, request, slug, project_id, issue_id):
         related_issue = request.data.get("related_issue", None)
+        lock_issue_write_scope(request.user, slug, [issue_id, related_issue])
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
 
         issue_relations = IssueRelation.objects.filter(
             workspace__slug=slug,

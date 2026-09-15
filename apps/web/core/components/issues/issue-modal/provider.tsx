@@ -11,7 +11,8 @@ import type { ISearchIssueResponse, TIssue } from "@plane/types";
 // components
 import { IssueModalContext } from "@/components/issues/issue-modal/context";
 // hooks
-import { useUser } from "@/hooks/store/user/user-user";
+import { useParams } from "next/navigation";
+import { useUserPermissions } from "@/hooks/store/user";
 
 export type TIssueModalProviderProps = {
   templateId?: string;
@@ -25,15 +26,21 @@ export const IssueModalProvider = observer(function IssueModalProvider(props: TI
   // states
   const [selectedParentIssue, setSelectedParentIssue] = useState<ISearchIssueResponse | null>(null);
   // store hooks
-  const { projectsWithCreatePermissions } = useUser();
-  // derived values
-  const projectIdsWithCreatePermissions = Object.keys(projectsWithCreatePermissions ?? {});
+  const { workspaceSlug } = useParams();
+  const { getProjectRolesByWorkspaceSlug, canCreateIssue } = useUserPermissions();
+  const slug = workspaceSlug?.toString() ?? "";
+  const projectIdsWithCreatePermissions = Object.keys(getProjectRolesByWorkspaceSlug(slug)).filter((projectId) =>
+    canCreateIssue(slug, projectId)
+  );
 
   return (
     <IssueModalContext.Provider
       // oxlint-disable-next-line react/jsx-no-constructed-context-values
       value={{
-        allowedProjectIds: allowedProjectIds ?? projectIdsWithCreatePermissions,
+        allowedProjectIds:
+          props.dataForPreload?.id && props.dataForPreload.project_id
+            ? [props.dataForPreload.project_id]
+            : projectIdsWithCreatePermissions.filter((id) => !allowedProjectIds || allowedProjectIds.includes(id)),
         workItemTemplateId: null,
         setWorkItemTemplateId: () => {},
         isApplyingTemplate: false,

@@ -42,6 +42,8 @@ from plane.db.models import (
 
 from .base import BaseAPIView
 from plane.bgtasks.webhook_task import model_activity
+from django.db import transaction
+from plane.utils.issue_write_scope import lock_issue_write_scope
 from plane.utils.host import base_host
 from plane.utils.order_queryset import ISSUE_ORDER_BY_ALLOWLIST, MODULE_ORDER_BY_ALLOWLIST, sanitize_order_by
 from plane.utils.openapi import (
@@ -709,6 +711,7 @@ class ModuleIssueListCreateAPIEndpoint(BaseAPIView):
             404: MODULE_NOT_FOUND_RESPONSE,
         },
     )
+    @transaction.atomic
     def post(self, request, slug, project_id, module_id):
         """Add module work items
 
@@ -720,18 +723,18 @@ class ModuleIssueListCreateAPIEndpoint(BaseAPIView):
             return Response({"error": "Issues are required"}, status=status.HTTP_400_BAD_REQUEST)
         module = Module.objects.get(workspace__slug=slug, project_id=project_id, pk=module_id)
 
-        issues = Issue.objects.filter(workspace__slug=slug, project_id=project_id, pk__in=issues).values_list(
-            "id", flat=True
-        )
+        issues = [issue.id for issue in lock_issue_write_scope(request.user, slug, issues, project_id)]
 
-        module_issues = list(ModuleIssue.objects.filter(issue_id__in=issues))
+        module_issues = list(ModuleIssue.objects.filter(
+            issue_id__in=issues, project_id=project_id, workspace__slug=slug
+        ))
 
         update_module_issue_activity = []
         records_to_update = []
         record_to_create = []
 
         for issue in issues:
-            module_issue = [module_issue for module_issue in module_issues if str(module_issue.issue_id) in issues]
+            module_issue = [module_issue for module_issue in module_issues if module_issue.issue_id == issue]
 
             if len(module_issue):
                 if module_issue[0].module_id != module_id:
@@ -911,12 +914,14 @@ class ModuleIssueDetailAPIEndpoint(BaseAPIView):
             404: MODULE_ISSUE_NOT_FOUND_RESPONSE,
         },
     )
+    @transaction.atomic
     def delete(self, request, slug, project_id, module_id, issue_id):
         """Remove module work item
 
         Remove a work item from a module while keeping the work item in the project.
         Records the removal activity for tracking purposes.
         """
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
         module_issue = ModuleIssue.objects.get(
             workspace__slug=slug,
             project_id=project_id,

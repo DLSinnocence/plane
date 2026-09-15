@@ -77,7 +77,7 @@ export class IssueFilterHelperStore implements IIssueFilterHelperStore {
    */
   computedIssueFilters = (filters: IIssueFilters): IIssueFilters => ({
     richFilters: isEmpty(filters?.richFilters) ? {} : filters?.richFilters,
-    displayFilters: isEmpty(filters?.displayFilters) ? undefined : filters?.displayFilters,
+    displayFilters: isEmpty(filters?.displayFilters) ? undefined : { ...filters.displayFilters, sub_issue: true },
     displayProperties: isEmpty(filters?.displayProperties) ? undefined : filters?.displayProperties,
     kanbanFilters: isEmpty(filters?.kanbanFilters) ? undefined : filters?.kanbanFilters,
   });
@@ -100,10 +100,10 @@ export class IssueFilterHelperStore implements IIssueFilterHelperStore {
         ? EIssueGroupByToServerOptions[displayFilters.sub_group_by]
         : undefined,
       order_by: displayFilters?.order_by || undefined,
-      sub_issue: displayFilters?.sub_issue ?? true,
+      sub_issue: true,
     };
 
-    const issueFiltersParams: Partial<Record<TIssueParams, boolean | string>> = {};
+    const issueFiltersParams: Partial<Record<TIssueParams, boolean | string>> = { sub_issue: true };
     Object.keys(computedDisplayFilters).forEach((key) => {
       const _key = key as TIssueParams;
       const _value: string | boolean | string[] | undefined = computedDisplayFilters[_key];
@@ -218,7 +218,12 @@ export class IssueFilterHelperStore implements IIssueFilterHelperStore {
       );
       if (!currentFilterIndex && currentFilterIndex.length < 0) return undefined;
 
-      return storageFilters[currentFilterIndex]?.filters || {};
+      const filters = storageFilters[currentFilterIndex]?.filters || {};
+      return {
+        ...filters,
+        display_filters: { ...filters.display_filters, sub_issue: true },
+        kanban_filters: { group_by: [], sub_group_by: [] },
+      };
     },
 
     set: (
@@ -254,6 +259,13 @@ export class IssueFilterHelperStore implements IIssueFilterHelperStore {
             [filterType]: filters[filterType as keyof IIssueFiltersResponse],
           },
         };
+      // Child visibility is no longer a preference, including in existing saved records.
+      storageFilters.forEach(
+        (entry: { filters?: Partial<IIssueFiltersResponse> & { kanban_filters?: TIssueKanbanFilters } }) => {
+          if (entry.filters?.display_filters) entry.filters.display_filters.sub_issue = true;
+          if (entry.filters?.kanban_filters) entry.filters.kanban_filters = { group_by: [], sub_group_by: [] };
+        }
+      );
       // All group_by "filters" are stored in a single array, will cause inconsistency in case of duplicated values
       storage.set("issue_local_filters", JSON.stringify(storageFilters));
     },
@@ -309,6 +321,7 @@ export class IssueFilterHelperStore implements IIssueFilterHelperStore {
     // pagination params
     const paginationParams: Partial<Record<TIssueParams, string | boolean>> = {
       ...filterParams,
+      sub_issue: true,
       cursor: pageCursor,
       per_page: options.perPageCount.toString(),
     };

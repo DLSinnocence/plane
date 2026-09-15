@@ -21,6 +21,7 @@ import { WithDisplayPropertiesHOC } from "@/components/issues/issue-layouts/prop
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import { useProject } from "@/hooks/store/use-project";
 import useIssuePeekOverviewRedirection from "@/hooks/use-issue-peek-overview-redirection";
+import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
 import { usePlatformOS } from "@/hooks/use-platform-os";
 // components
 import { IssueIdentifier } from "@/components/issues/issue-detail/issue-identifier";
@@ -54,7 +55,7 @@ export const SubIssuesListItem = observer(function SubIssuesListItem(props: Prop
     rootIssueId,
     issueId,
     spacingLeft = 10,
-    canEdit,
+    canEdit: parentCanEdit,
     handleIssueCrudState,
     subIssueOperations,
     issueServiceType = EIssueServiceType.ISSUES,
@@ -76,6 +77,8 @@ export const SubIssuesListItem = observer(function SubIssuesListItem(props: Prop
   const { handleRedirection } = useIssuePeekOverviewRedirection();
   const { isMobile } = usePlatformOS();
   const issue = getIssueById(issueId);
+  const { canEdit: canEditChild } = useIssueWorkflow(issue, workspaceSlug);
+  const canEdit = parentCanEdit && canEditChild;
 
   // derived values
   const projectDetail = (issue && issue.project_id && project.getProjectById(issue.project_id)) || undefined;

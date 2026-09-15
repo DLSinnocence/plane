@@ -281,7 +281,11 @@ export const BaseKanBanRoot = observer(function BaseKanBanRoot(props: IBaseKanBa
                 enableQuickIssueCreate={enableQuickAdd}
                 showEmptyGroup={userDisplayFilters?.show_empty_groups ?? true}
                 quickAddCallback={quickAddIssue}
-                disableIssueCreation={!enableIssueCreation || !isEditingAllowed || isCompletedCycle}
+                disableIssueCreation={
+                  !enableIssueCreation ||
+                  !allowPermissions([EUserPermissions.ADMIN], EUserPermissionsLevel.PROJECT) ||
+                  isCompletedCycle
+                }
                 canEditProperties={canEditProperties}
                 addIssuesToView={addIssuesToView}
                 scrollableContainerRef={scrollableContainerRef}

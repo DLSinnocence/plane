@@ -69,7 +69,7 @@ export const RelationIssueProperty = observer(function RelationIssueProperty(pro
         <PriorityDropdown
           value={issue.priority}
           onChange={handlePriorityChange}
-          disabled={disabled}
+          disabled={disabled || !canTransition}
           buttonVariant="border-without-text"
           buttonClassName="border"
         />

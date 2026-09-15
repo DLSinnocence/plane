@@ -48,6 +48,8 @@ from plane.db.models import (
 )
 from plane.utils.cycle_transfer_issues import transfer_cycle_issues
 from plane.utils.order_queryset import CYCLE_ORDER_BY_ALLOWLIST, ISSUE_ORDER_BY_ALLOWLIST, sanitize_order_by
+from django.db import transaction
+from plane.utils.issue_write_scope import authorize_cycle_transfer, lock_cycle_write_scope, lock_issue_write_scope
 from plane.utils.host import base_host
 from .base import BaseAPIView
 from plane.bgtasks.webhook_task import model_activity
@@ -963,6 +965,7 @@ class CycleIssueListCreateAPIEndpoint(BaseAPIView):
             400: REQUIRED_FIELDS_RESPONSE,
         },
     )
+    @transaction.atomic
     def post(self, request, slug, project_id, cycle_id):
         """Add cycle issues
 
@@ -977,6 +980,8 @@ class CycleIssueListCreateAPIEndpoint(BaseAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        lock_cycle_write_scope(slug, project_id)
+        lock_issue_write_scope(request.user, slug, issues, project_id)
         cycle = Cycle.objects.get(workspace__slug=slug, project_id=project_id, pk=cycle_id)
 
         if cycle.end_date is not None and cycle.end_date < timezone.now():
@@ -989,7 +994,9 @@ class CycleIssueListCreateAPIEndpoint(BaseAPIView):
             )
 
         # Get all CycleWorkItems already created
-        cycle_issues = list(CycleIssue.objects.filter(~Q(cycle_id=cycle_id), issue_id__in=issues))
+        cycle_issues = list(CycleIssue.objects.filter(
+            ~Q(cycle_id=cycle_id), issue_id__in=issues, project_id=project_id, workspace__slug=slug
+        ))
         existing_issues = [
             str(cycle_issue.issue_id) for cycle_issue in cycle_issues if str(cycle_issue.issue_id) in issues
         ]
@@ -1139,12 +1146,15 @@ class CycleIssueDetailAPIEndpoint(BaseAPIView):
             204: DELETED_RESPONSE,
         },
     )
+    @transaction.atomic
     def delete(self, request, slug, project_id, cycle_id, issue_id):
         """Remove cycle work item
 
         Remove a work item from a cycle while keeping the work item in the project.
         Records the removal activity for tracking purposes.
         """
+        lock_cycle_write_scope(slug, project_id)
+        lock_issue_write_scope(request.user, slug, [issue_id], project_id)
         cycle_issue = CycleIssue.objects.get(
             issue_id=issue_id,
             workspace__slug=slug,
@@ -1220,6 +1230,7 @@ class TransferCycleIssueAPIEndpoint(BaseAPIView):
             ),
         },
     )
+    @transaction.atomic
     def post(self, request, slug, project_id, cycle_id):
         """Transfer cycle issues
 
@@ -1246,6 +1257,7 @@ class TransferCycleIssueAPIEndpoint(BaseAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        authorize_cycle_transfer(request.user, slug, project_id, cycle_id)
         # Call the utility function to handle the transfer
         result = transfer_cycle_issues(
             slug=slug,

@@ -3,7 +3,7 @@
     "state_assignees": {
       "title": "各阶段负责人",
       "description": "各阶段默认由创建者负责，可分别调整处理阶段的负责人。待规划、已完成、已取消固定由创建者负责；当前负责人随阶段自动切换。",
-      "permission_hint": "仅当前状态负责人或项目管理人员可以流转状态。",
+      "permission_hint": "仅工作项创建者、当前状态负责人或管理员可以流转状态。",
       "configuration_permission_hint": "仅工作项创建者或管理员可以修改阶段负责人。",
       "creator": "创建者",
       "unassigned": "未分配",

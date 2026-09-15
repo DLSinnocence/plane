@@ -290,11 +290,13 @@ def test_authorized_chat_uses_saved_config_and_session_identity_without_eager_to
             "model_config": {"api_key": "attacker-model-key"},
         },
         format="json",
+        HTTP_ACCEPT_ENCODING="gzip, deflate, br",
     )
     assert response.status_code == 200
     assert response.streaming
     assert response["Content-Type"] == "application/x-ndjson"
     assert response["Cache-Control"] == "no-store, no-transform"
+    assert "Content-Encoding" not in response
     assert response["X-Accel-Buffering"] == "no"
     assert captured["workspace_id"] == workspace.id
     assert captured["payload"]["user_id"] == str(create_user.id)

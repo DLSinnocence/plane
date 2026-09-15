@@ -10,6 +10,7 @@ import { observer } from "mobx-react";
 import { Collapsible } from "@makeplane/propel/components/collapsible";
 import type { TIssueServiceType } from "@plane/types";
 // hooks
+import { useUserPermissions } from "@/hooks/store/user";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 // local imports
 import { SubIssuesCollapsibleContent } from "./content";
@@ -28,6 +29,7 @@ export const SubIssuesCollapsible = observer(function SubIssuesCollapsible(props
   const { workspaceSlug, projectId, issueId, disabled = false, issueServiceType } = props;
   // store hooks
   const { openWidgets, toggleOpenWidget } = useIssueDetail(issueServiceType);
+  const { canCreateIssue } = useUserPermissions();
   // derived values
   const isCollapsibleOpen = openWidgets.includes("sub-work-items");
 
@@ -41,7 +43,7 @@ export const SubIssuesCollapsible = observer(function SubIssuesCollapsible(props
           <SubWorkItemTitleActions
             projectId={projectId}
             parentId={issueId}
-            disabled={disabled}
+            disabled={disabled || !canCreateIssue(workspaceSlug, projectId)}
             issueServiceType={issueServiceType}
           />
         ) : undefined

@@ -338,6 +338,10 @@ export class WorkspaceDraftIssues implements IWorkspaceDraftIssues {
   };
 
   moveIssue = async (workspaceSlug: string, issueId: string, payload: Partial<TWorkspaceDraftIssue>) => {
+    const projectId = payload.project_id ?? this.issuesMap[issueId]?.project_id;
+    if (!this.issueStore.rootStore.user.permission.canCreateIssue(workspaceSlug, projectId ?? undefined)) {
+      throw new Error("Only project administrators can publish work items");
+    }
     try {
       this.loader = "move";
 

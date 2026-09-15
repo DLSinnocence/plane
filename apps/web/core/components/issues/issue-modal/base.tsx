@@ -15,6 +15,7 @@ import type { TBaseIssue, TIssue } from "@plane/types";
 import { EIssuesStoreType } from "@plane/types";
 import { EModalPosition, EModalWidth, ModalCore } from "@plane/ui";
 // hooks
+import { useUserPermissions } from "@/hooks/store/user";
 import { useIssueModal } from "@/hooks/context/use-issue-modal";
 import { useCycle } from "@/hooks/store/use-cycle";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
@@ -74,7 +75,11 @@ export const CreateUpdateIssueModalBase = observer(function CreateUpdateIssueMod
   const { issues } = useIssues(storeType);
   const { issues: projectIssues } = useIssues(EIssuesStoreType.PROJECT);
   const { issues: draftIssues } = useIssues(EIssuesStoreType.WORKSPACE_DRAFT);
-  const { fetchIssue } = useIssueDetail();
+  const {
+    fetchIssue,
+    issue: { getIssueById },
+  } = useIssueDetail();
+  const { canCreateIssue: canCreateFormalIssue, getIssuePermissions } = useUserPermissions();
   const { allowedProjectIds, handleCreateUpdatePropertyValues, handleCreateSubWorkItem } = useIssueModal();
   const { getProjectByIdentifier } = useProject();
   // current store details
@@ -117,12 +122,20 @@ export const CreateUpdateIssueModalBase = observer(function CreateUpdateIssueMod
 
     // if data is not present, set active project to the first project in the allowedProjectIds array
     if (allowedProjectIds && allowedProjectIds.length > 0 && !activeProjectId)
-      setActiveProjectId(projectId?.toString() ?? allowedProjectIds?.[0]);
+      setActiveProjectId(projectId && allowedProjectIds.includes(projectId) ? projectId : allowedProjectIds[0]);
 
     // clearing up the description state when we leave the component
     return () => setDescription(undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.project_id, data?.id, data?.sourceIssueId, projectId, isOpen, activeProjectId]);
+  }, [
+    data?.project_id,
+    data?.id,
+    data?.sourceIssueId,
+    projectId,
+    isOpen,
+    activeProjectId,
+    allowedProjectIds.join(","),
+  ]);
 
   const addIssueToCycle = async (issue: TIssue, cycleId: string) => {
     if (!workspaceSlug || !issue.project_id) return;
@@ -162,6 +175,9 @@ export const CreateUpdateIssueModalBase = observer(function CreateUpdateIssueMod
     is_draft_issue: boolean = false
   ): Promise<TIssue | undefined> => {
     if (!workspaceSlug || !payload.project_id) return;
+    if (!is_draft_issue && !canCreateFormalIssue(workspaceSlug.toString(), payload.project_id)) {
+      throw new Error("Only project administrators can create work items");
+    }
 
     try {
       let response: TIssue | undefined;
@@ -323,6 +339,7 @@ export const CreateUpdateIssueModalBase = observer(function CreateUpdateIssueMod
 
   const handleUpdateIssue = async (payload: Partial<TIssue>): Promise<TIssue | undefined> => {
     if (!workspaceSlug || !payload.project_id || !data?.id) return;
+    if (!isDraft && !getIssuePermissions(workspaceSlug.toString(), getIssueById(data.id)).canEdit) return;
 
     try {
       if (isDraft) await draftIssues.updateIssue(workspaceSlug.toString(), data.id, payload);
@@ -387,7 +404,12 @@ export const CreateUpdateIssueModalBase = observer(function CreateUpdateIssueMod
   const handleDuplicateIssueModal = (value: boolean) => setIsDuplicateModalOpen(value);
 
   // don't open the modal if there are no projects
-  if (!allowedProjectIds || allowedProjectIds.length === 0 || !activeProjectId) return null;
+  if (!activeProjectId || !workspaceSlug) return null;
+  const canUseModal =
+    data?.id && !moveToIssue
+      ? isDraft || getIssuePermissions(workspaceSlug.toString(), getIssueById(data.id)).canEdit
+      : allowedProjectIds.includes(activeProjectId) && canCreateFormalIssue(workspaceSlug.toString(), activeProjectId);
+  if (!canUseModal) return null;
 
   const commonIssueModalProps: IssueFormProps = {
     issueTitleRef: issueTitleRef,

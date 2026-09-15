@@ -16,7 +16,7 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db import models
+from django.db import models, transaction
 from django.db.models.functions import Cast, Concat
 from django.utils import timezone
 
@@ -30,8 +30,10 @@ from plane.db.models import (
 from plane.utils.analytics_plot import burndown_plot
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.utils.host import base_host
+from plane.utils.issue_write_scope import lock_issue_write_scope
 
 
+@transaction.atomic
 def transfer_cycle_issues(
     slug,
     project_id,
@@ -432,14 +434,17 @@ def transfer_cycle_issues(
     current_cycle.save(update_fields=["progress_snapshot"])
 
     # Get issues to transfer (only incomplete issues)
-    cycle_issues = CycleIssue.objects.filter(
+    cycle_issues = list(CycleIssue.objects.filter(
         cycle_id=cycle_id,
         project_id=project_id,
         workspace__slug=slug,
         issue__archived_at__isnull=True,
         issue__is_draft=False,
         issue__state__group__in=["backlog", "unstarted", "started"],
-    )
+    ))
+    # Draft publication can add associations after the endpoint's preflight.
+    # Authorize the exact materialized set that bulk_update will move.
+    lock_issue_write_scope(request.user, slug, [row.issue_id for row in cycle_issues], project_id)
 
     updated_cycles = []
     update_cycle_issue_activity = []

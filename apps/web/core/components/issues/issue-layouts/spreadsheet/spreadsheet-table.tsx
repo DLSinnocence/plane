@@ -13,6 +13,8 @@ import type { IIssueDisplayFilterOptions, IIssueDisplayProperties, TIssue } from
 import { SpreadsheetIssueRowLoader } from "@/components/ui/loader/layouts/spreadsheet-layout-loader";
 // hooks
 import { useIntersectionObserver } from "@/hooks/use-intersection-observer";
+import { useIssues } from "@/hooks/store/use-issues";
+import { getListRootIssueIds } from "../list/hierarchy";
 import { useIssuesStore } from "@/hooks/use-issue-layout-store";
 import type { TSelectionHelper } from "@/hooks/use-multiple-select";
 import { useTableKeyboardNavigation } from "@/hooks/use-table-keyboard-navigation";
@@ -100,6 +102,8 @@ export const SpreadsheetTable = observer(function SpreadsheetTable(props: Props)
     };
   }, [handleScroll, containerRef]);
 
+  const { issueMap } = useIssues();
+  const rootIssueIds = isEpic ? issueIds : getListRootIssueIds(issueIds, issueMap);
   const isPaginating = !!getIssueLoader();
 
   useIntersectionObserver(containerRef, isPaginating ? null : intersectionElement, loadMoreIssues, `100% 0% 100% 0%`);
@@ -123,7 +127,7 @@ export const SpreadsheetTable = observer(function SpreadsheetTable(props: Props)
         isEpic={isEpic}
       />
       <tbody>
-        {issueIds.map((id) => (
+        {rootIssueIds.map((id) => (
           <SpreadsheetIssueRow
             key={id}
             issueId={id}

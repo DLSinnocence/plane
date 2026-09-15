@@ -3,7 +3,7 @@
     "state_assignees": {
       "title": "Owners by stage",
       "description": "Each stage defaults to the creator. Choose owners for the working stages; backlog, completed, and cancelled stages stay with the creator. Current assignees change automatically with the stage.",
-      "permission_hint": "Only the current state's owners or project managers can change the state.",
+      "permission_hint": "Only the creator, current state's owners, or an administrator can change the state.",
       "configuration_permission_hint": "Only the work item's creator or an administrator can change stage owners.",
       "creator": "Creator",
       "unassigned": "Unassigned",

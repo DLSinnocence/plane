@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
-from functools import partial
-
 from django.db import transaction
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
@@ -28,6 +26,7 @@ from plane.db.models import (
 )
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.utils.host import base_host
+from plane.utils.issue_permissions import has_project_admin_access, require_issue_write_access
 from .base import BaseAPIView
 
 
@@ -150,8 +149,8 @@ class IssueAttachmentSlotEndpoint(BaseAPIView):
 
     @transaction.atomic
     def post(self, request, slug, project_id, issue_id):
-        require_slot_role(request, slug, project_id, write=True)
         issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
         serializer = IssueAttachmentSlotSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         slots = scoped_slots(issue)
@@ -170,8 +169,8 @@ class IssueAttachmentSlotEndpoint(BaseAPIView):
 
     @transaction.atomic
     def patch(self, request, slug, project_id, issue_id, slot_id):
-        require_slot_role(request, slug, project_id, write=True)
         issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
         slot = get_object_or_404(scoped_slots(issue), pk=slot_id)
         serializer = IssueAttachmentSlotSerializer(slot, data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -181,8 +180,8 @@ class IssueAttachmentSlotEndpoint(BaseAPIView):
 
     @transaction.atomic
     def delete(self, request, slug, project_id, issue_id, slot_id):
-        require_slot_role(request, slug, project_id, write=True)
         issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
         slot = get_object_or_404(scoped_slots(issue).select_for_update(), pk=slot_id)
         attachments = FileAsset.objects.select_for_update().filter(
             attachment_slot=slot,
@@ -196,42 +195,37 @@ class IssueAttachmentSlotEndpoint(BaseAPIView):
         # files or slot. Keeping the FK makes late completion fail closed as well.
         files = list(attachments)
         if any(asset.created_by_id != request.user.id for asset in files):
-            if not ProjectMember.objects.filter(
-                workspace_id=issue.workspace_id,
-                project_id=issue.project_id,
-                member=request.user,
-                is_active=True,
-                role=ROLE.ADMIN.value,
-            ).exists():
+            if not has_project_admin_access(request.user, issue.project_id, issue.workspace_id):
                 raise PermissionDenied("Only the uploader or a project admin can delete these attachments.")
         deleted_ids = [str(asset.id) for asset in files]
         deleted_at = timezone.now()
         attachments.filter(pk__in=deleted_ids).update(is_deleted=True, deleted_at=deleted_at)
         IssueAttachmentSlot.objects.filter(pk=slot.pk).update(deleted_at=deleted_at)
-        for _ in files:
-            transaction.on_commit(
-                partial(
-                    issue_activity.delay,
-                    type="attachment.activity.deleted",
-                    requested_data=None,
-                    actor_id=str(request.user.id),
-                    issue_id=str(issue.id),
-                    project_id=str(issue.project_id),
-                    current_instance=None,
-                    epoch=int(deleted_at.timestamp()),
-                    notification=True,
-                    origin=base_host(request=request, is_app=True),
-                ),
-                robust=True,
+
+        def publish_attachment_deletion():
+            # Django's robust callback logger requires the callable's __qualname__.
+            issue_activity.delay(
+                type="attachment.activity.deleted",
+                requested_data=None,
+                actor_id=str(request.user.id),
+                issue_id=str(issue.id),
+                project_id=str(issue.project_id),
+                current_instance=None,
+                epoch=int(deleted_at.timestamp()),
+                notification=True,
+                origin=base_host(request=request, is_app=True),
             )
+
+        for _ in files:
+            transaction.on_commit(publish_attachment_deletion, robust=True)
         return Response({"slot_id": str(slot.id), "deleted_attachment_ids": deleted_ids})
 
 
 class ApplyAttachmentTemplateEndpoint(BaseAPIView):
     @transaction.atomic
     def post(self, request, slug, project_id, issue_id):
-        require_slot_role(request, slug, project_id, write=True)
         issue = scoped_issue(slug, project_id, issue_id, lock=True)
+        require_issue_write_access(request.user, issue)
         serializer = ApplyAttachmentTemplateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         template = get_object_or_404(

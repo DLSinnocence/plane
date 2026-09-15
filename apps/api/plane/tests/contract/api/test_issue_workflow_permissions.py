@@ -87,7 +87,8 @@ def workflow_issue(workspace, create_user):
         project=project,
         workspace=workspace,
     )
-    # Future responsibility and creator status do not grant current-state access.
+    # The actor is the creator and a future assignee; denial tests explicitly
+    # transfer ownership when isolating future-assignee access.
     WorkspaceMember.objects.filter(workspace=workspace, member=create_user).update(role=15)
     assert membership.role == 15
     assert project.project_lead_id is None
@@ -128,6 +129,7 @@ def assert_workflow_unchanged(workflow):
 
 
 def test_destination_assignee_cannot_change_current_state(workflow_endpoint, workflow_issue):
+    workflow_issue.issue.save(created_by_id=workflow_issue.current_owner.pk)
     endpoint = workflow_endpoint
     response = endpoint.client.patch(
         endpoint.url, {endpoint.state_field: str(workflow_issue.acceptance.pk)}, format="json"
@@ -141,6 +143,7 @@ def test_destination_assignee_cannot_change_current_state(workflow_endpoint, wor
 def test_self_assignment_cannot_authorize_same_request_state_change(
     workflow_endpoint, workflow_issue, assignment_source
 ):
+    workflow_issue.issue.save(created_by_id=workflow_issue.current_owner.pk)
     endpoint = workflow_endpoint
     actor_id = str(workflow_issue.actor.pk)
     payload = {endpoint.state_field: str(workflow_issue.acceptance.pk)}

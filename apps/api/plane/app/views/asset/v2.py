@@ -13,6 +13,7 @@ from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from plane.utils.attachment_rows import (
     create_attachment_asset, complete_attachment_asset, presign_attachment_upload, attachment_completion_data,
+    require_attachment_asset_write, is_work_item_attachment,
 )
 from plane.app.views.attachment import require_slot_role
 from plane.db.models import Issue
@@ -176,9 +177,11 @@ class UserAssetsV2Endpoint(BaseAPIView):
             status=status.HTTP_200_OK,
         )
 
+    @transaction.atomic
     def patch(self, request, asset_id):
         # get the asset id
         asset = FileAsset.objects.get(id=asset_id, user_id=request.user.id)
+        asset = require_attachment_asset_write(asset, request.user)
         # Slot completion must use the issue endpoint's transactional replacement.
         if asset.attachment_slot_id or (
             asset.issue_id and asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT
@@ -205,8 +208,10 @@ class UserAssetsV2Endpoint(BaseAPIView):
         asset.save(update_fields=["is_uploaded", "attributes"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @transaction.atomic
     def delete(self, request, asset_id):
         asset = FileAsset.objects.get(id=asset_id, user_id=request.user.id)
+        asset = require_attachment_asset_write(asset, request.user)
         asset.is_deleted = True
         asset.deleted_at = timezone.now()
         # get the entity and save the asset id for the request field
@@ -437,9 +442,11 @@ class WorkspaceFileAssetEndpoint(BaseAPIView):
         )
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
+    @transaction.atomic
     def patch(self, request, slug, asset_id):
         # get the asset id
         asset = FileAsset.objects.get(id=asset_id, workspace__slug=slug)
+        asset = require_attachment_asset_write(asset, request.user)
         # enforce project-level access for project-bound assets
         if not self.has_project_asset_access(request, asset):
             return Response(
@@ -473,8 +480,10 @@ class WorkspaceFileAssetEndpoint(BaseAPIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
+    @transaction.atomic
     def delete(self, request, slug, asset_id):
         asset = FileAsset.objects.get(id=asset_id, workspace__slug=slug)
+        asset = require_attachment_asset_write(asset, request.user)
         # enforce project-level access for project-bound assets
         if not self.has_project_asset_access(request, asset):
             return Response(
@@ -569,7 +578,7 @@ class AssetRestoreEndpoint(BaseAPIView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
     def post(self, request, slug, asset_id):
         asset = FileAsset.all_objects.get(id=asset_id, workspace__slug=slug)
-        if asset.attachment_slot_id or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
+        if is_work_item_attachment(asset) or asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT:
             return Response({"error": "Deleted work item attachments cannot be restored."}, status=400)
         asset.is_deleted = False
         asset.deleted_at = None
@@ -679,9 +688,11 @@ class ProjectAssetEndpoint(BaseAPIView):
         )
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
+    @transaction.atomic
     def patch(self, request, slug, project_id, pk):
         # get the asset id
         asset = FileAsset.objects.get(id=pk, workspace__slug=slug, project_id=project_id)
+        asset = require_attachment_asset_write(asset, request.user)
         # Slot completion must use the issue endpoint's transactional replacement.
         if asset.attachment_slot_id or (
             asset.issue_id and asset.entity_type == FileAsset.EntityTypeContext.ISSUE_ATTACHMENT
@@ -703,9 +714,11 @@ class ProjectAssetEndpoint(BaseAPIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
+    @transaction.atomic
     def delete(self, request, slug, project_id, pk):
         # Get the asset
         asset = FileAsset.objects.get(id=pk, workspace__slug=slug, project_id=project_id)
+        asset = require_attachment_asset_write(asset, request.user)
         # Check deleted assets
         asset.is_deleted = True
         asset.deleted_at = timezone.now()
@@ -763,7 +776,11 @@ class ProjectBulkAssetEndpoint(BaseAPIView):
             id__in=asset_ids,
             workspace__slug=slug,
             created_by=request.user,
-        ).filter(Q(project_id=project_id) | Q(project_id__isnull=True))
+        ).filter(Q(project_id=project_id) | Q(project_id__isnull=True)).filter(
+            attachment_slot__isnull=True,
+        ).exclude(entity_type=FileAsset.EntityTypeContext.ISSUE_ATTACHMENT).exclude(
+            Q(issue__isnull=False) & (Q(entity_type__isnull=True) | Q(entity_type=""))
+        )
 
         # Get the first asset
         asset = assets.first()

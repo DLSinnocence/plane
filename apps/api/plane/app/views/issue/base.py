@@ -35,6 +35,8 @@ from rest_framework.response import Response
 
 # Module imports
 from plane.app.permissions import ROLE, allow_permission
+from plane.utils.issue_permissions import require_issue_write_access
+from plane.utils.issue_write_scope import lock_issue_delete_scope
 from plane.app.serializers import (
     IssueCreateSerializer,
     IssueDetailSerializer,
@@ -405,7 +407,7 @@ class IssueViewSet(BaseViewSet):
                 on_results=lambda issues: issue_on_results(group_by=group_by, issues=issues, sub_group_by=sub_group_by),
             )
 
-    @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
+    @allow_permission([ROLE.ADMIN])
     def create(self, request, slug, project_id):
         project = Project.objects.get(pk=project_id)
 
@@ -745,8 +747,9 @@ class IssueViewSet(BaseViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @allow_permission([ROLE.ADMIN], creator=True, model=Issue)
+    @transaction.atomic
     def destroy(self, request, slug, project_id, pk=None):
-        issue = Issue.objects.get(workspace__slug=slug, project_id=project_id, pk=pk)
+        issue = lock_issue_delete_scope(request.user, slug, pk, project_id)
 
         issue.delete()
         # delete the issue from recent visits
@@ -1156,14 +1159,19 @@ class IssueBulkUpdateDateEndpoint(BaseAPIView):
         return True
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
+    @transaction.atomic
     def post(self, request, slug, project_id):
         updates = request.data.get("updates", [])
 
         issue_ids = [update["id"] for update in updates]
         epoch = int(timezone.now().timestamp())
 
-        # Fetch all relevant issues in a single query
-        issues = list(Issue.objects.filter(id__in=issue_ids, workspace__slug=slug, project_id=project_id))
+        # Lock and authorize the entire batch before changing any dates.
+        issues = list(Issue.objects.select_for_update().filter(
+            id__in=issue_ids, workspace__slug=slug, project_id=project_id
+        ).order_by("pk"))
+        for issue in issues:
+            require_issue_write_access(request.user, issue)
         issues_dict = {str(issue.id): issue for issue in issues}
         issues_to_update = []
         activity_events = []

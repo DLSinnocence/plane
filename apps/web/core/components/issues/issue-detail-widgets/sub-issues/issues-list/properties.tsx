@@ -46,10 +46,20 @@ const handleEventPropagation = (e: SyntheticEvent<HTMLDivElement>) => {
 };
 
 export const SubIssuesListItemProperties = observer(function SubIssuesListItemProperties(props: Props) {
-  const { workspaceSlug, parentIssueId, issueId, canEdit, updateSubIssue, displayProperties, issue } = props;
+  const {
+    workspaceSlug,
+    parentIssueId,
+    issueId,
+    canEdit: parentCanEdit,
+    updateSubIssue,
+    displayProperties,
+    issue,
+  } = props;
+  const workflow = useIssueWorkflow(issue, workspaceSlug);
+  const canEdit = parentCanEdit && workflow.canEdit;
   const { t } = useTranslation();
   const { getStateById } = useProjectState();
-  const { canTransition } = useIssueWorkflow(issue, workspaceSlug);
+  const { canTransition } = workflow;
 
   const handleStartDate = (date: Date | null) => {
     if (issue.project_id) {

@@ -9,7 +9,6 @@ import { observer } from "mobx-react";
 import { usePathname } from "next/navigation";
 // Plane imports
 import useSWR from "swr";
-import { EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
 import { TOAST_TYPE, setPromiseToast, setToast } from "@plane/propel/toast";
 import type { IWorkItemPeekOverview, TIssue } from "@plane/types";
@@ -35,7 +34,7 @@ export const IssuePeekOverview = observer(function IssuePeekOverview(props: IWor
   // router
   const pathname = usePathname();
   // store hook
-  const { allowPermissions } = useUserPermissions();
+  const { getIssuePermissions } = useUserPermissions();
 
   const {
     issues: { restoreIssue },
@@ -43,7 +42,7 @@ export const IssuePeekOverview = observer(function IssuePeekOverview(props: IWor
   const {
     peekIssue,
     setPeekIssue,
-    issue: { fetchIssue },
+    issue: { fetchIssue, getIssueById },
     fetchActivities,
   } = useIssueDetail();
   const issueStoreType = useIssueStoreType();
@@ -228,12 +227,7 @@ export const IssuePeekOverview = observer(function IssuePeekOverview(props: IWor
   if (!peekIssue?.workspaceSlug || !peekIssue?.projectId || !peekIssue?.issueId) return <></>;
 
   // Check if issue is editable, based on user role
-  const isEditable = allowPermissions(
-    [EUserPermissions.ADMIN, EUserPermissions.MEMBER],
-    EUserPermissionsLevel.PROJECT,
-    peekIssue?.workspaceSlug,
-    peekIssue?.projectId
-  );
+  const isEditable = getIssuePermissions(peekIssue.workspaceSlug, getIssueById(peekIssue.issueId)).canEdit;
 
   return (
     <IssueView

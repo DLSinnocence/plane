@@ -24,7 +24,8 @@ import { EIssuesStoreType, EIssueLayoutTypes } from "@plane/types";
 import { Spinner } from "@plane/ui";
 import { renderFormattedPayloadDate, cn } from "@plane/utils";
 // constants
-import { MONTHS_LIST } from "@plane/constants";
+import { MONTHS_LIST, EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
+import { useUserPermissions } from "@/hooks/store/user";
 // helpers
 // hooks
 import { useIssues } from "@/hooks/store/use-issues";
@@ -103,7 +104,10 @@ export const CalendarChart = observer(function CalendarChart(props: Props) {
 
   const [windowWidth] = useSize();
 
-  const { enableIssueCreation, enableQuickAdd } = viewFlags || {};
+  const { allowPermissions } = useUserPermissions();
+  const { enableIssueCreation: creationEnabled, enableQuickAdd } = viewFlags || {};
+  const enableIssueCreation =
+    creationEnabled && allowPermissions([EUserPermissions.ADMIN], EUserPermissionsLevel.PROJECT);
 
   const calendarPayload = issueCalendarView.calendarPayload;
 

@@ -8,7 +8,6 @@ import { useRef, useState } from "react";
 import { observer } from "mobx-react";
 import { useParams } from "next/navigation";
 // plane imports
-import { EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
 import { AddWorkItemOutline } from "@makeplane/propel/icons";
 import type { TIssue } from "@plane/types";
@@ -35,15 +34,11 @@ export const SidebarQuickActions = observer(function SidebarQuickActions() {
   // store hooks
   const { toggleCreateIssueModal } = useCommandPalette();
   const { joinedProjectIds } = useProject();
-  const { allowPermissions } = useUserPermissions();
+  const { canCreateIssue } = useUserPermissions();
   // local storage
   const { storedValue, setValue } = useLocalStorage<Record<string, Partial<TIssue>>>("draftedIssue", {});
   // derived values
-  const canCreateIssue = allowPermissions(
-    [EUserPermissions.ADMIN, EUserPermissions.MEMBER],
-    EUserPermissionsLevel.WORKSPACE
-  );
-  const disabled = joinedProjectIds.length === 0 || !canCreateIssue;
+  const disabled = !workspaceSlug || !joinedProjectIds.some((projectId) => canCreateIssue(workspaceSlug, projectId));
   const workspaceDraftIssue = workspaceSlug ? (storedValue?.[workspaceSlug] ?? undefined) : undefined;
 
   const handleMouseEnter = () => {

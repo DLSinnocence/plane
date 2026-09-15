@@ -83,8 +83,15 @@ python3 -m venv .venv-mcp
 
 把 `.venv-mcp/bin/plane-mcp-server` 的**绝对路径**填写到 `apps/live/.env` 的 `PLANE_MCP_COMMAND`。API 和 Live 需要能够相互访问；若 API 在 Docker、Live 在宿主机，API 的 `AI_AGENT_URL` 必须使用容器能访问的宿主机地址及 Live 路径，不能填容器自身的 localhost。
 
+## 排查回复中断
+
+如果发送消息后没有正文，最后显示 `Assistant response interrupted before completion`，需要检查聊天响应是否被 gzip 压缩。项目使用的 Django 5.2 会将异步流的每一块压成独立 gzip 成员，浏览器可能只读取第一块空白心跳，丢弃后面的正文、错误事件和 `done`（[Django #36656](https://code.djangoproject.com/ticket/36656)）。
+
+API 的压缩中间件遵守聊天响应已有的 `Cache-Control: no-store, no-transform`，使聊天流直接输出；普通响应仍可压缩。AIO 部署需要使用包含此修复的新镜像并重新创建 `plane` 容器，仅刷新网页或重启旧镜像不会加载新代码。可在浏览器网络面板检查 `/api/workspaces/<slug>/agent/chat/`：响应应为 `application/x-ndjson`，不含 `Content-Encoding: gzip`，正文应逐步出现事件并以 `done` 结束。自定义反向代理也应保留 `no-transform`、避免缓冲聊天流。
+
 ## 验证
 
+- 压缩回归：`python3 apps/api/tests/unit/test_streaming_gzip.py`（只需安装 API 使用的 Django，无需数据库或模型服务）。
 - Web：`node --test apps/web/helpers/agent-*.test.mjs`
 - UI 渲染器：`pnpm --filter @plane/ui test:chat-markdown`
 - 浏览器：`pnpm --filter web test:browser ai-assistant.spec.ts settings-navigation.spec.ts --workers=1`

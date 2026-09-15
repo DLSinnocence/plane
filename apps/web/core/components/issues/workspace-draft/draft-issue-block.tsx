@@ -19,6 +19,7 @@ import { cn } from "@plane/utils";
 // hooks
 import { useAppTheme } from "@/hooks/store/use-app-theme";
 import { useProject } from "@/hooks/store/use-project";
+import { useUserPermissions } from "@/hooks/store/user";
 import { useWorkspaceDraftIssues } from "@/hooks/store/workspace-draft";
 // local imports
 import { IdentifierText } from "../issue-detail/identifier-text";
@@ -41,6 +42,7 @@ export const DraftIssueBlock = observer(function DraftIssueBlock(props: Props) {
   const [issueToEdit, setIssueToEdit] = useState<TWorkspaceDraftIssue | undefined>(undefined);
   const [deleteIssueModal, setDeleteIssueModal] = useState(false);
   // hooks
+  const { canCreateIssue } = useUserPermissions();
   const { getIssueById, updateIssue, deleteIssue } = useWorkspaceDraftIssues();
   const { sidebarCollapsed: isSidebarCollapsed } = useAppTheme();
   const { getProjectIdentifierById } = useProject();
@@ -81,6 +83,7 @@ export const DraftIssueBlock = observer(function DraftIssueBlock(props: Props) {
     {
       key: "move-to-issues",
       title: "move_to_project",
+      shouldRender: canCreateIssue(workspaceSlug, issue.project_id ?? undefined),
       icon: SquareStackIcon,
       action: () => {
         setMoveToIssue(true);

@@ -530,6 +530,9 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     id?: string,
     shouldUpdateList = true
   ) {
+    if (!this.rootIssueStore.rootStore.user.permission.canCreateIssue(workspaceSlug, projectId)) {
+      throw new Error("Only project administrators can create work items");
+    }
     // Optimistic issues carry an empty assignee list; creation must use workflow defaults.
     const { assignee_ids: _assigneeIds, ...payload } = data;
     const response = await this.issueService.createIssue(workspaceSlug, projectId, payload);
@@ -553,6 +556,19 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
    * @param shouldSync If False then only issue is to be updated in the store not call API to update
    * @returns
    */
+  protected assertCanEditIssue(workspaceSlug: string, projectId: string, issueId: string, data?: Partial<TIssue>) {
+    const issue = this.rootIssueStore.issues.getIssueById(issueId);
+    const permissions = this.rootIssueStore.rootStore.user.permission.getIssuePermissions(workspaceSlug, issue);
+    if (
+      !issue ||
+      issue.project_id !== projectId ||
+      !permissions.canEdit ||
+      (data?.state_assignees !== undefined && !permissions.canManageAssignments)
+    ) {
+      throw new Error("You do not have permission to edit this work item");
+    }
+  }
+
   async issueUpdate(
     workspaceSlug: string,
     projectId: string,
@@ -560,6 +576,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     data: Partial<TIssue>,
     shouldSync = true
   ) {
+    if (shouldSync) this.assertCanEditIssue(workspaceSlug, projectId, issueId, data);
     // Store Before state of the issue
     const issueBeforeUpdate = clone(this.rootIssueStore.issues.getIssueById(issueId));
     const optimisticIssue = { ...issueBeforeUpdate, ...data } as TIssue;
@@ -737,6 +754,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
       throw new Error("Current assignees are determined by stage configuration and workflow transitions");
     }
     const issueIds = data.issue_ids;
+    issueIds.forEach((issueId) => this.assertCanEditIssue(workspaceSlug, projectId, issueId));
     // make request to update issue properties
     await this.issueService.bulkOperations(workspaceSlug, projectId, data);
     // update issues in the store
@@ -775,6 +793,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     projectId?: string
   ) {
     if (!projectId) return;
+    updates.forEach(({ id }) => this.assertCanEditIssue(workspaceSlug, projectId, id));
     const issueDatesBeforeChange: { id: string; start_date?: string; target_date?: string }[] = [];
     try {
       const getIssueById = this.rootIssueStore.issues.getIssueById;
@@ -831,6 +850,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     issueIds: string[],
     fetchAddedIssues = true
   ) {
+    issueIds.forEach((issueId) => this.assertCanEditIssue(workspaceSlug, projectId, issueId));
     // Perform an APi call to add issue to cycle
     await this.issueService.addIssueToCycle(workspaceSlug, projectId, cycleId, {
       issues: issueIds,
@@ -864,6 +884,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
    * @param issueId
    */
   async removeIssueFromCycle(workspaceSlug: string, projectId: string, cycleId: string, issueId: string) {
+    this.assertCanEditIssue(workspaceSlug, projectId, issueId);
     const issueBeforeRemoval = clone(this.rootIssueStore.issues.getIssueById(issueId));
 
     // update parent stats optimistically
@@ -894,6 +915,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
    * @returns
    */
   addCycleToIssue = async (workspaceSlug: string, projectId: string, cycleId: string, issueId: string) => {
+    this.assertCanEditIssue(workspaceSlug, projectId, issueId);
     const issueCycleId = this.rootIssueStore.issues.getIssueById(issueId)?.cycle_id;
 
     if (issueCycleId === cycleId) return;
@@ -945,6 +967,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
    * @returns
    */
   removeCycleFromIssue = async (workspaceSlug: string, projectId: string, issueId: string) => {
+    this.assertCanEditIssue(workspaceSlug, projectId, issueId);
     const issueBeforeRemoval = clone(this.rootIssueStore.issues.getIssueById(issueId));
     const issueCycleId = this.rootIssueStore.issues.getIssueById(issueId)?.cycle_id;
     if (!issueCycleId) return;
@@ -995,6 +1018,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     issueIds: string[],
     fetchAddedIssues = true
   ) {
+    issueIds.forEach((issueId) => this.assertCanEditIssue(workspaceSlug, projectId, issueId));
     // Perform an APi call to add issue to module
     await this.moduleService.addIssuesToModule(workspaceSlug, projectId, moduleId, {
       issues: issueIds,
@@ -1029,6 +1053,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
    * @returns
    */
   async removeIssuesFromModule(workspaceSlug: string, projectId: string, moduleId: string, issueIds: string[]) {
+    issueIds.forEach((issueId) => this.assertCanEditIssue(workspaceSlug, projectId, issueId));
     // Perform an APi call to remove issue to module
     const response = await this.moduleService.removeIssuesFromModuleBulk(workspaceSlug, projectId, moduleId, issueIds);
 
@@ -1061,6 +1086,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
    * @param moduleIds array of modules to be added
    */
   async addModulesToIssue(workspaceSlug: string, projectId: string, issueId: string, moduleIds: string[]) {
+    this.assertCanEditIssue(workspaceSlug, projectId, issueId);
     // keep a copy of the original module ids
     const originalModuleIds = get(this.rootIssueStore.issues.issuesMap, [issueId, "module_ids"]) ?? [];
     //Perform API call
@@ -1101,6 +1127,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     addModuleIds: string[],
     removeModuleIds: string[]
   ) {
+    this.assertCanEditIssue(workspaceSlug, projectId, issueId);
     // keep a copy of the original module ids
     const issueBeforeChanges = clone(this.rootIssueStore.issues.getIssueById(issueId));
     const originalModuleIds = get(this.rootIssueStore.issues.issuesMap, [issueId, "module_ids"]) ?? [];
@@ -1228,9 +1255,6 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     const issueId = issue?.id ?? issueBeforeUpdate?.id;
     if (!issueId) return;
 
-    // Get display filters to check if 'Show sub Work items' is enabled - Do not add Work item to main list if disabled.
-    const isShowWorkItemsEnabled = this.issueFilterStore.issueFilters?.displayFilters?.sub_issue ?? false;
-
     // get issueUpdates from another method by passing down the three arguments
     // issueUpdates is nothing but an array of objects that contain the path of the issueId list that need updating and also the action that needs to be performed at the path
     const issueUpdates = this.getUpdateDetails(issue, issueBeforeUpdate, action);
@@ -1240,8 +1264,6 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
       for (const issueUpdate of issueUpdates) {
         //if update is add, add it at a particular path
         if (issueUpdate.action === EIssueGroupedAction.ADD) {
-          const isSubIssue = issue?.parent_id;
-          if (isSubIssue && !isShowWorkItemsEnabled) continue;
           // add issue Id at the path
           update(this, ["groupedIssueIds", ...issueUpdate.path], (issueIds: string[] = []) =>
             this.issuesSortWithOrderBy(uniq(concat(issueIds, issueId)), this.orderBy)
