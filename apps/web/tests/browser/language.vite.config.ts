@@ -16,6 +16,7 @@ const baseAliases = Array.isArray(baseConfig.resolve?.alias) ? baseConfig.resolv
 export default defineConfig({
   ...baseConfig,
   root: path("./language-fixtures/"),
+  cacheDir: path("../../node_modules/.vite-browser-language"),
   resolve: {
     ...baseConfig.resolve,
     alias: [

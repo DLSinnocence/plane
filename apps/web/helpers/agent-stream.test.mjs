@@ -11,6 +11,49 @@ const stream = (parts) =>
       controller.close();
     },
   });
+test("delivers thinking and answer chunks while the connection remains open", async () => {
+  let writer;
+  let finished = false;
+  const received = [];
+  const next = new Map();
+  const arrival = (type) => new Promise((resolve) => next.set(type, resolve));
+  const thinking = arrival("thinking");
+  const text = arrival("text");
+  const pending = readAgentStream(
+    new ReadableStream({
+      start(controller) {
+        writer = controller;
+      },
+    }),
+    (event) => {
+      received.push(event);
+      next.get(event.type)?.();
+    }
+  ).then(() => {
+    finished = true;
+    return undefined;
+  });
+  writer.enqueue(encoder.encode('{"type":"thinking","text":"检查中"}\n'));
+  await thinking;
+  assert.equal(finished, false);
+  writer.enqueue(encoder.encode('{"type":"text","text":"你好"}\n'));
+  await text;
+  assert.equal(finished, false);
+  writer.enqueue(encoder.encode('{"type":"text","text":"，世界"}\n{"type":"done","reason":"complete"}\n'));
+  await pending;
+  assert.deepEqual(
+    received.map((event) => event.type),
+    ["thinking", "text", "text", "done"]
+  );
+  assert.equal(
+    received
+      .filter((event) => event.type === "text")
+      .map((event) => event.text)
+      .join(""),
+    "你好，世界"
+  );
+});
+
 test("native thinking and projected tool details are preserved independently", async () => {
   const ref = {
     id: "12345678-1234-4234-8234-123456789abc",

@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent, AgentOptions } from "@mariozechner/pi-agent-core";
-import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
+import { createAssistantMessageEventStream, getModel } from "@mariozechner/pi-ai";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { createChatModel, runAiChat } from "@/services/ai/runtime";
 import type { AiStreamEvent } from "@/services/ai/types";
@@ -45,6 +45,35 @@ function harness(prompt?: (event: (value: AgentEvent) => Promise<void>, options:
   return { agent, events, connection, dependencies, emit };
 }
 
+function assistantMessage(
+  model: { api: AssistantMessage["api"]; provider: string; id: string },
+  content: AssistantMessage["content"],
+  stopReason: AssistantMessage["stopReason"] = "stop"
+): AssistantMessage {
+  return {
+    role: "assistant",
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    timestamp: Date.now(),
+    content,
+    stopReason,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+  };
+}
+
+const completionChunk = (delta: Record<string, string>, finish_reason: string | null = null) =>
+  `data: ${JSON.stringify({ id: "local", choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+const anthropicChunk = (event: { type: string; [key: string]: unknown }) =>
+  `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+
 afterEach(() => vi.useRealTimers());
 
 describe("ephemeral Pi runtime", () => {
@@ -59,6 +88,76 @@ describe("ephemeral Pi runtime", () => {
       id: "private-claude",
       reasoning: false,
     });
+  });
+
+  it.each([
+    { model: "deepseek-v4-flash", base_url: "https://api.deepseek.com" },
+    { model: "deepseek-v4-pro", base_url: "https://example.com/v1" },
+    { model: "deepseek/deepseek-v4-pro", base_url: "https://example.com/gateway" },
+  ])("keeps the configured transport while resolving effort metadata for $model", ({ model, base_url }) => {
+    const resolved = createChatModel({ ...input.model_config, model, base_url, supports_reasoning: true });
+    expect(resolved).toMatchObject({
+      id: model,
+      baseUrl: base_url,
+      provider: "openai",
+      api: "openai-completions",
+      maxTokens: 16_384,
+      thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", xhigh: "max" },
+    });
+    expect(resolved.compat).toEqual({
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: undefined,
+      supportsStrictMode: false,
+      maxTokensField: "max_tokens",
+    });
+  });
+
+  it.each([
+    { base_url: "https://api.openai.com/v1", maxTokensField: "max_completion_tokens" },
+    { base_url: "https://example.com/gateway/v1", maxTokensField: "max_tokens" },
+  ])("ignores empty SDK endpoints when resolving o3 on $base_url", ({ base_url, maxTokensField }) => {
+    expect(getModel("azure-openai-responses", "o3").baseUrl).toBe("");
+    const resolved = createChatModel({ ...input.model_config, model: "o3", base_url, supports_reasoning: true });
+    expect(resolved).toMatchObject({
+      id: "o3",
+      baseUrl: base_url,
+      provider: "openai",
+      api: "openai-completions",
+      reasoning: true,
+      compat: { maxTokensField },
+    });
+    if (base_url === "https://api.openai.com/v1")
+      expect(resolved.thinkingLevelMap).toEqual(getModel("openai", "o3").thinkingLevelMap);
+  });
+
+  it.each(["custom-model", "deepseek-v4-pro-private"])("does not guess reasoning metadata for %s", (model) => {
+    const resolved = createChatModel({ ...input.model_config, model, supports_reasoning: true });
+    expect(resolved.id).toBe(model);
+    expect(resolved.thinkingLevelMap).toBeUndefined();
+  });
+
+  it("enables thinking only for models with known support and leaves room for the answer", async () => {
+    const h = harness();
+    await runAiChat(
+      { ...input, model_config: { ...input.model_config, supports_reasoning: true } },
+      "http://api:8000",
+      h.emit,
+      new AbortController().signal,
+      h.dependencies
+    );
+    expect(h.dependencies.createAgent.mock.calls[0][0].initialState).toMatchObject({
+      thinkingLevel: "low",
+      model: { reasoning: true, maxTokens: 16_384 },
+    });
+    expect(createChatModel(input.model_config)).toMatchObject({ reasoning: false, maxTokens: 4096 });
+    expect(
+      createChatModel({
+        ...input.model_config,
+        base_url: "https://api.openai.com/v1",
+        supports_reasoning: true,
+      }).compat
+    ).toMatchObject({ maxTokensField: "max_completion_tokens", supportsReasoningEffort: undefined });
   });
 
   it("forwards only text and safe tool metadata; constructs sequential tools and closes the process", async () => {
@@ -203,6 +302,222 @@ describe("ephemeral Pi runtime", () => {
           resolve();
         });
       });
+    }
+  });
+
+  it.each([
+    { field: "reasoning_content", supports_reasoning: undefined },
+    { field: "reasoning", supports_reasoning: undefined },
+    { field: "reasoning_text", supports_reasoning: undefined },
+    { field: "reasoning_content", supports_reasoning: true },
+  ])(
+    "streams native $field before provider completion (supported=$supports_reasoning)",
+    async ({ field, supports_reasoning }) => {
+      const h = harness();
+      let receivedThinking: (() => void) | undefined;
+      const thinkingDelivered = new Promise<void>((resolve) => {
+        receivedThinking = resolve;
+      });
+      let requestBody: Record<string, unknown> | undefined;
+      let providerEnded = false;
+      const server = createServer(async (req, res) => {
+        let body = "";
+        for await (const chunk of req) body += String(chunk);
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write(completionChunk({ [field]: "Checking your project. " }));
+        // A real handshake: the provider cannot send an answer or finish until
+        // Plane has delivered thinking, so buffering until done fails this test.
+        await thinkingDelivered;
+        res.write(completionChunk({ content: "Your project is ready." }));
+        providerEnded = true;
+        res.end(completionChunk({}, "stop") + "data: [DONE]\n\n");
+      });
+      server.listen(0, "127.0.0.1");
+      await once(server, "listening");
+      try {
+        await runAiChat(
+          {
+            ...input,
+            model_config: {
+              ...input.model_config,
+              supports_reasoning,
+              base_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
+            },
+          },
+          "http://api:8000",
+          async (event) => {
+            if (event.type === "thinking") {
+              expect(providerEnded).toBe(false);
+              receivedThinking?.();
+            }
+            await h.emit(event);
+          },
+          new AbortController().signal,
+          { ...h.dependencies, runMs: 2000, createAgent: (options) => new Agent(options) }
+        );
+        expect(requestBody).toMatchObject({ stream: true, max_tokens: supports_reasoning ? 16_384 : 4096 });
+        if (supports_reasoning) expect(requestBody).toHaveProperty("reasoning_effort", "low");
+        else expect(requestBody).not.toHaveProperty("reasoning_effort");
+        expect(h.events).toEqual([
+          { type: "thinking", text: "Checking your project. " },
+          { type: "text", text: "Your project is ready." },
+          { type: "done", reason: "complete" },
+        ]);
+      } finally {
+        receivedThinking?.();
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    }
+  );
+
+  it.each(["deepseek-v4-flash", "deepseek-v4-pro"])("sends a supported effort to native %s", async (model) => {
+    const h = harness();
+    let requestBody: Record<string, unknown> | undefined;
+    let requestUrl: string | undefined;
+    // Intercept transport only: keep the native origin so Pi uses its DeepSeek format.
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const request = new Request(url, init);
+      requestUrl = request.url;
+      requestBody = (await request.json()) as Record<string, unknown>;
+      return new Response(
+        completionChunk({ reasoning_content: "Checking your project. " }) +
+          completionChunk({ content: "Your project is ready." }) +
+          completionChunk({}, "stop") +
+          "data: [DONE]\n\n",
+        { headers: { "Content-Type": "text/event-stream" } }
+      );
+    });
+    const createAgent = vi.fn((options: AgentOptions) => new Agent(options));
+    try {
+      await runAiChat(
+        {
+          ...input,
+          model_config: {
+            ...input.model_config,
+            model,
+            base_url: "https://api.deepseek.com",
+            supports_reasoning: true,
+          },
+        },
+        "http://api:8000",
+        h.emit,
+        new AbortController().signal,
+        { ...h.dependencies, createAgent }
+      );
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(requestUrl).toBe("https://api.deepseek.com/chat/completions");
+      expect(requestBody).toMatchObject({
+        model,
+        stream: true,
+        thinking: { type: "enabled" },
+        reasoning_effort: "high",
+        max_tokens: 16_384,
+      });
+      expect(createAgent.mock.calls[0][0].initialState?.thinkingLevel).toBe("high");
+      expect(h.events).toEqual([
+        { type: "thinking", text: "Checking your project. " },
+        { type: "text", text: "Your project is ready." },
+        { type: "done", reason: "complete" },
+      ]);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  it.each([
+    { model: "claude-sonnet-4-5", thinking: { type: "enabled", budget_tokens: 2048 } },
+    { model: "claude-sonnet-4-6", thinking: { type: "adaptive" } },
+  ])("streams Anthropic thinking before completion for $model", async ({ model, thinking }) => {
+    const h = harness();
+    let receivedThinking: (() => void) | undefined;
+    const thinkingDelivered = new Promise<void>((resolve) => {
+      receivedThinking = resolve;
+    });
+    let requestBody: Record<string, unknown> | undefined;
+    let requestPath: string | undefined;
+    let providerEnded = false;
+    const server = createServer(async (req, res) => {
+      let body = "";
+      for await (const part of req) body += String(part);
+      requestBody = JSON.parse(body);
+      requestPath = req.url;
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(
+        anthropicChunk({
+          type: "message_start",
+          message: {
+            id: "msg-local",
+            type: "message",
+            role: "assistant",
+            model,
+            content: [],
+            stop_reason: null,
+            usage: { input_tokens: 10, output_tokens: 0 },
+          },
+        }) +
+          anthropicChunk({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }) +
+          anthropicChunk({
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "thinking_delta", thinking: "Checking your project. " },
+          })
+      );
+      await thinkingDelivered;
+      res.write(
+        anthropicChunk({ type: "content_block_stop", index: 0 }) +
+          anthropicChunk({ type: "content_block_start", index: 1, content_block: { type: "text", text: "" } }) +
+          anthropicChunk({
+            type: "content_block_delta",
+            index: 1,
+            delta: { type: "text_delta", text: "Your project is ready." },
+          }) +
+          anthropicChunk({ type: "content_block_stop", index: 1 })
+      );
+      providerEnded = true;
+      res.end(
+        anthropicChunk({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 20 } }) +
+          anthropicChunk({ type: "message_stop" })
+      );
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    try {
+      await runAiChat(
+        {
+          ...input,
+          model_config: {
+            ...input.model_config,
+            provider: "anthropic",
+            model,
+            base_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+            supports_reasoning: true,
+          },
+        },
+        "http://api:8000",
+        async (event) => {
+          if (event.type === "thinking") {
+            expect(providerEnded).toBe(false);
+            receivedThinking?.();
+          }
+          await h.emit(event);
+        },
+        new AbortController().signal,
+        { ...h.dependencies, runMs: 2000, createAgent: (options) => new Agent(options) }
+      );
+      expect(requestPath).toBe("/v1/messages");
+      expect(requestBody).toMatchObject({ model, stream: true, max_tokens: 16_384, thinking });
+      if (thinking.type === "adaptive") expect(requestBody).toHaveProperty("output_config.effort", "low");
+      expect(h.events).toEqual([
+        { type: "thinking", text: "Checking your project. " },
+        { type: "text", text: "Your project is ready." },
+        { type: "done", reason: "complete" },
+      ]);
+    } finally {
+      receivedThinking?.();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
@@ -467,6 +782,166 @@ describe("ephemeral Pi runtime", () => {
       expect(h.events.at(-1)).toEqual({ type: "done", reason: "complete" });
     }
   );
+
+  it.each([
+    { action: "list", final: "empty" },
+    { action: "create", final: "empty" },
+    { action: "create", final: "thinking" },
+    { action: "create", final: "answer" },
+  ])("checks the final assistant message after $action with $final content", async ({ action, final }) => {
+    const h = harness();
+    let modelCalls = 0;
+    let sawToolResult = false;
+    const announcement = "I will check that. ";
+    await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, {
+      ...h.dependencies,
+      createAgent: (options) =>
+        new Agent({
+          ...options,
+          streamFn: (model, context) => {
+            const first = modelCalls++ === 0;
+            if (!first) sawToolResult = context.messages.some((message) => message.role === "toolResult");
+            const finalContent: AssistantMessage["content"] =
+              final === "answer"
+                ? [{ type: "text", text: "Done." }]
+                : final === "thinking"
+                  ? [{ type: "thinking", thinking: "Checked." }]
+                  : [];
+            const message = assistantMessage(
+              model,
+              first
+                ? [
+                    { type: "text", text: announcement },
+                    {
+                      type: "toolCall",
+                      id: "call-1",
+                      name: "workitem",
+                      arguments: { action, project_id: input.project_id },
+                    },
+                  ]
+                : finalContent,
+              first ? "toolUse" : "stop"
+            );
+            const stream = createAssistantMessageEventStream();
+            if (first) {
+              stream.push({ type: "start", partial: message });
+              stream.push({ type: "text_delta", contentIndex: 0, delta: announcement, partial: message });
+              stream.push({ type: "text_end", contentIndex: 0, content: announcement, partial: message });
+            }
+            // The second message has no deltas and reuses index 0 with shorter content.
+            stream.push({ type: "done", reason: first ? "toolUse" : "stop", message });
+            return stream;
+          },
+        }),
+    });
+    expect(modelCalls).toBe(2);
+    expect(sawToolResult).toBe(true);
+    expect(h.connection.client.callTool).toHaveBeenCalledOnce();
+    expect(h.connection.client.callTool.mock.calls[0][0]).toEqual({
+      name: "workitem",
+      arguments: { action, project_id: input.project_id },
+    });
+    expect(h.events).toContainEqual(expect.objectContaining({ type: "tool", action, status: "complete" }));
+    expect(h.events.filter((event) => event.type === "text")).toEqual([
+      { type: "text", text: announcement },
+      ...(final === "answer" ? [{ type: "text", text: "Done." }] : []),
+    ]);
+    if (final === "thinking") expect(h.events).toContainEqual({ type: "thinking", text: "Checked." });
+    if (final === "answer") {
+      expect(h.events.some((event) => event.type === "error")).toBe(false);
+      expect(h.events.at(-1)).toEqual({ type: "done", reason: "complete" });
+    } else {
+      expect(h.events.at(-2)).toMatchObject({
+        type: "error",
+        code: "ai_empty_response",
+        may_have_changes: action === "create",
+      });
+      expect(h.events.at(-1)).toEqual({ type: "done", reason: "error" });
+    }
+  });
+
+  it.each(["none", "partial", "all"] as const)(
+    "reconciles final assistant blocks without duplicating %s streamed text",
+    async (deltas) => {
+      const h = harness();
+      const createAgent = (options: AgentOptions) =>
+        new Agent({
+          ...options,
+          streamFn: (model) => {
+            const message = assistantMessage(model, [
+              { type: "thinking", thinking: "Checking model-secret. " },
+              { type: "text", text: "Found model-secret." },
+              { type: "text", text: " Done." },
+            ]);
+            const stream = createAssistantMessageEventStream();
+            stream.push({ type: "start", partial: message });
+            if (deltas !== "none") {
+              stream.push({ type: "thinking_delta", contentIndex: 0, delta: "Checking model-se", partial: message });
+              stream.push({
+                type: "text_delta",
+                contentIndex: 1,
+                delta: deltas === "all" ? "Found model-secret." : "Found model-se",
+                partial: message,
+              });
+            }
+            stream.push({ type: "text_end", contentIndex: 1, content: "Found model-secret.", partial: message });
+            stream.push({ type: "done", reason: "stop", message });
+            return stream;
+          },
+        });
+      await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, {
+        ...h.dependencies,
+        createAgent,
+      });
+      expect(
+        h.events
+          .filter((event) => event.type === "text")
+          .map((event) => event.text)
+          .join("")
+      ).toBe("Found [redacted]. Done.");
+      expect(
+        h.events
+          .filter((event) => event.type === "thinking")
+          .map((event) => event.text)
+          .join("")
+      ).toBe("Checking [redacted]. ");
+      expect(h.events.at(-1)).toEqual({ type: "done", reason: "complete" });
+      expect(JSON.stringify(h.events)).not.toContain("model-secret");
+    }
+  );
+
+  it.each([
+    { stopReason: "stop", text: "", reason: "error", code: "ai_empty_response" },
+    { stopReason: "stop", text: "  ", reason: "error", code: "ai_empty_response" },
+    { stopReason: "length", text: "", reason: "limit", code: "ai_run_limit" },
+    { stopReason: "length", text: "Partial answer", reason: "limit", code: "ai_run_limit" },
+  ] as const)("reports $stopReason with '$text' as $code", async ({ stopReason, text, reason, code }) => {
+    const h = harness();
+    await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, {
+      ...h.dependencies,
+      createAgent: (options) =>
+        new Agent({
+          ...options,
+          streamFn: (model) => {
+            const message = assistantMessage(
+              model,
+              [
+                { type: "thinking", thinking: "Checking the project." },
+                { type: "text", text },
+              ],
+              stopReason
+            );
+            const stream = createAssistantMessageEventStream();
+            stream.push({ type: "done", reason: stopReason, message });
+            return stream;
+          },
+        }),
+    });
+    expect(h.events).toContainEqual({ type: "thinking", text: "Checking the project." });
+    if (text) expect(h.events).toContainEqual({ type: "text", text });
+    expect(h.events.at(-2)).toMatchObject({ type: "error", code, may_have_changes: false });
+    expect(h.events.at(-1)).toEqual({ type: "done", reason });
+  });
 
   it("serializes slow stream writes before delivering done", async () => {
     const h = harness(async (event) => {

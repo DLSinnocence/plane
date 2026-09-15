@@ -111,6 +111,38 @@ describe("internal AI controller", () => {
     expect(res.end).toHaveBeenCalledOnce();
   });
 
+  it("writes thinking and text frames while the runtime is still running", async () => {
+    let finish: (() => void) | undefined;
+    let emitted: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const framesReady = new Promise<void>((resolve) => {
+      emitted = resolve;
+    });
+    vi.mocked(runAiChat).mockImplementation(async (_input, _url, emit) => {
+      await emit({ type: "thinking", text: "Checking the project." });
+      await emit({ type: "text", text: "Found it." });
+      emitted?.();
+      await waiting;
+      await emit({ type: "done", reason: "complete" });
+    });
+    const res = new FakeResponse();
+    const running = new AiController().chat(request(), res as unknown as Response);
+    try {
+      await framesReady;
+      expect(res.write.mock.calls).toEqual([
+        [JSON.stringify({ type: "thinking", text: "Checking the project." }) + "\n"],
+        [JSON.stringify({ type: "text", text: "Found it." }) + "\n"],
+      ]);
+      expect(res.end).not.toHaveBeenCalled();
+      expect(res.headers["X-Accel-Buffering"]).toBe("no");
+    } finally {
+      finish?.();
+      await running;
+    }
+  });
+
   it("aborts upstream work on response disconnect and frees its slot", async () => {
     const res = new FakeResponse();
     let upstreamSignal: AbortSignal | undefined;

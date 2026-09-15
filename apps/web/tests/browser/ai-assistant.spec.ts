@@ -52,6 +52,61 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("streams visible thinking and answer before completion and updates the current phase", async ({ page }) => {
+  await mockSettings(page);
+  await page.goto("/?ai-assistant");
+  await open(page);
+  await send(page, "Explain this task");
+  const status = page.locator(".agent-live-status");
+  await expect(status).toContainText("Loading");
+  await expect(status).not.toContainText("Writing a response");
+
+  await frames(page, [{ type: "thinking", text: "Checking the request" }]);
+  const thoughts = page.locator('[data-agent-part="native-thinking"]');
+  await expect(thoughts.getByText("Checking the request", { exact: true })).toBeVisible();
+  await expect(status).toContainText("Thinking");
+  await expect(page.getByRole("button", { name: "Jump to latest" })).toHaveCount(0);
+  await frames(page, [{ type: "thinking", text: " step by step." }]);
+  await expect(thoughts).toContainText("Checking the request step by step.");
+
+  await frames(page, [{ type: "text", text: "The answer is" }]);
+  const answer = page.locator(".agent-turn--assistant .agent-message-content");
+  await expect(answer.getByText("The answer is", { exact: true })).toBeVisible();
+  await expect(status).toContainText("Writing a response");
+  await expect(status).not.toContainText("Thinking");
+  await frames(page, [{ type: "text", text: " ready." }]);
+  await expect(answer.getByText("The answer is ready.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+
+  await frames(page, [{ type: "done", reason: "complete" }]);
+  await expect(status).toHaveCount(0);
+  await expect(answer.getByText("The answer is ready.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await send(page, "Continue");
+  const request = await page.evaluate(() => window.aiFixture.requests[1].body);
+  expect(JSON.stringify(request)).toContain("The answer is ready.");
+  expect(JSON.stringify(request)).not.toContain("Checking the request");
+});
+
+test("streams tagged thoughts visibly and respects a manually collapsed disclosure", async ({ page }) => {
+  await mockSettings(page);
+  await page.goto("/?ai-assistant");
+  await open(page);
+  await send(page, "Think then answer");
+  await frames(page, [{ type: "text", text: "<think>Reviewing the context" }]);
+  const thoughts = page.locator('[data-agent-part="thinking"]');
+  await expect(thoughts.getByText("Reviewing the context", { exact: true })).toBeVisible();
+  await expect(page.locator(".agent-live-status")).toContainText("Thinking");
+  await thoughts.locator("summary").click();
+  await frames(page, [{ type: "text", text: " and the task" }]);
+  await expect(thoughts).not.toHaveAttribute("open");
+  await frames(page, [{ type: "text", text: "</think><answer>Here is the result" }]);
+  await expect(page.getByText("Here is the result", { exact: true })).toBeVisible();
+  await expect(page.locator(".agent-live-status")).toContainText("Writing a response");
+  await frames(page, [{ type: "text", text: ".</answer>" }, { type: "done" }]);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
 test("sidebar is docked, keeps the workspace interactive and retains memory while hidden", async ({ page }) => {
   await mockSettings(page);
   await page.setViewportSize({ width: 1440, height: 960 });
@@ -158,8 +213,14 @@ test("Chinese sidebar presents a complete Agent conversation beside the workspac
       type: "text",
       text: "已创建 **ENG-42：修复登录超时**，优先级设为高。\n\n### 验收标准\n\n- 登录请求超时后显示明确的错误提示\n- 用户可以直接重试，无需刷新页面\n- 正常网络下登录流程保持可用\n\n已经补充复现步骤和预期结果，你可以打开工作项继续完善。",
     },
-    { type: "done" },
   ]);
+  await expect(
+    aside.getByText("先检查项目中是否已有相同的问题，再整理复现步骤和验收标准。", { exact: true })
+  ).toBeVisible();
+  await expect(aside.locator(".agent-live-status")).toContainText("正在生成回复");
+  await expect(aside.getByRole("heading", { name: "验收标准" })).toBeVisible();
+  await page.screenshot({ path: "test-results/ai-sidebar-streaming-zh.png", fullPage: true });
+  await frames(page, [{ type: "done" }]);
   await expect(aside.getByRole("link", { name: "ENG-42", exact: true })).toBeVisible();
   await expect(aside.getByRole("button", { name: "模型设置: GPT-4o" })).toBeVisible();
   await page.screenshot({ path: "test-results/ai-sidebar-zh.png", fullPage: true });
@@ -492,7 +553,7 @@ test("cancellation preserves the interrupted turn and offers verification withou
   await expect.poll(() => page.evaluate(() => window.aiFixture.aborted)).toBe(2);
 });
 
-for (const failure of ["model-error", "interrupted-stream"] as const) {
+for (const failure of ["model-error", "interrupted-stream", "empty-response", "run-limit"] as const) {
   test(`${failure} after a write preserves results and supports a verification follow-up`, async ({ page }) => {
     await mockSettings(page);
     await page.goto("/?ai-assistant");
@@ -507,7 +568,21 @@ for (const failure of ["model-error", "interrupted-stream"] as const) {
       await frames(page, [
         { type: "error", message: "Model connection ended while verifying the write.", may_have_changes: true },
       ]);
-    else await page.evaluate(() => window.aiFixture.finish());
+    else if (failure === "interrupted-stream") await page.evaluate(() => window.aiFixture.finish());
+    else {
+      await frames(page, [
+        {
+          type: "error",
+          code: failure === "empty-response" ? "ai_empty_response" : "ai_run_limit",
+          message: "Provider stopped without completing its answer.",
+          may_have_changes: true,
+        },
+        { type: "done", reason: failure === "empty-response" ? "error" : "limit" },
+      ]);
+      await expect(page.getByRole("alert")).toContainText(
+        failure === "empty-response" ? "The assistant completed without a response." : "execution limit"
+      );
+    }
     const panel = page.getByRole("complementary");
     await expect(panel).toContainText("Create the release work item");
     await expect(panel).toContainText("The work item was created; checking the result…");
@@ -578,9 +653,9 @@ test("separates streamed native thoughts and tagged thoughts from the final answ
   const dialog = page.getByRole("complementary");
   await expect(dialog).not.toContainText("<thi");
   await expect(dialog.locator('[data-agent-part="native-thinking"]')).toHaveCount(1);
-  await expect(dialog.getByText("Native thought preview", { exact: true })).not.toBeVisible();
+  await expect(dialog.getByText("Native thought preview", { exact: true })).toBeVisible();
   await frames(page, [{ type: "text", text: "nk>Tagged thought preview</thi" }]);
-  await expect(dialog.getByText("Tagged thought preview", { exact: true })).not.toBeVisible();
+  await expect(dialog.getByText("Tagged thought preview", { exact: true })).toBeVisible();
   await frames(page, [{ type: "text", text: "nk><final>**Final answer**</final>" }, { type: "done" }]);
   await expect(dialog.locator("strong")).toHaveText("Final answer");
   await dialog.locator('[data-agent-part="thinking"] summary').click();

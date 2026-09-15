@@ -26,7 +26,7 @@ import { AgentRequestError, getAISettings, startAgentChat } from "@/services/age
 import type { AISettings } from "@/helpers/agent-settings";
 import { AgentStreamError, readAgentStream } from "@/helpers/agent-stream";
 import type { AgentImage, AgentMessage } from "@/helpers/agent-stream";
-import { agentAnswerContent } from "@/helpers/agent-content";
+import { agentAnswerContent, parseAgentContent } from "@/helpers/agent-content";
 import { agentWorkItemHref, canSendAgentMessage, collectAgentWorkItems, updateAgentTools } from "@/helpers/agent-chat";
 import type { AgentToolProgress } from "@/helpers/agent-chat";
 import { canAddAgentImages, readAgentImage } from "@/helpers/agent-images";
@@ -54,6 +54,7 @@ const errorKeys: Record<string, string> = {
   ai_busy: "service_busy",
   ai_run_limit: "run_limit",
   ai_model_error: "model_error",
+  ai_empty_response: "empty_response",
   ai_tools_unavailable: "tools_unavailable",
   ai_connection_interrupted: "connection_error",
 };
@@ -125,6 +126,7 @@ const ScopedAssistant = observer(function ScopedAssistant({
   const [pendingUser, setPendingUser] = useState("");
   const [partial, setPartial] = useState("");
   const [thinking, setThinking] = useState("");
+  const [activity, setActivity] = useState<"thinking" | "text" | "tool" | null>(null);
   const [tools, setTools] = useState<AgentToolProgress[]>([]);
   const [busy, setBusy] = useState(false);
   const [imageLoading, setImageLoading] = useState(false);
@@ -202,15 +204,18 @@ const ScopedAssistant = observer(function ScopedAssistant({
     resize.observe(content.current);
     const element = conversation.current;
     const toggle = (event: Event) => {
-      if (event.target instanceof HTMLDetailsElement && event.target.open) {
+      const summary = event.target instanceof Element ? event.target.closest("summary") : null;
+      const details = summary?.parentElement;
+      // Only a user's expansion pauses following; streamed thoughts open automatically.
+      if (details instanceof HTMLDetailsElement && !details.open) {
         followLatest.current = false;
         setFollowing(false);
       }
     };
-    element?.addEventListener("toggle", toggle, true);
+    element?.addEventListener("click", toggle, true);
     return () => {
       resize.disconnect();
-      element?.removeEventListener("toggle", toggle, true);
+      element?.removeEventListener("click", toggle, true);
     };
   }, [open, loadingSettings]);
   const reset = () => {
@@ -225,6 +230,7 @@ const ScopedAssistant = observer(function ScopedAssistant({
     setPendingImages([]);
     setPartial("");
     setThinking("");
+    setActivity(null);
     setTools([]);
     setError(null);
     setImageError(null);
@@ -312,6 +318,7 @@ const ScopedAssistant = observer(function ScopedAssistant({
     setPendingImages(sentImages);
     setPartial("");
     setThinking("");
+    setActivity(null);
     setTools([]);
     startedAt.current = Date.now();
     setDuration(0);
@@ -320,6 +327,7 @@ const ScopedAssistant = observer(function ScopedAssistant({
     let text = "",
       thought = "";
     let turnTools: AgentToolProgress[] = [];
+    let turnActivity: typeof activity = null;
     let received = false;
     let mutationStarted = false;
     let renderTimer: number | undefined;
@@ -329,6 +337,7 @@ const ScopedAssistant = observer(function ScopedAssistant({
       if (run.current === request) {
         setPartial(text);
         setThinking(thought);
+        setActivity(turnActivity);
         setTools(turnTools);
       }
     };
@@ -348,16 +357,19 @@ const ScopedAssistant = observer(function ScopedAssistant({
         body,
         (event) => {
           if (request.signal.aborted) return;
-          if (event.type === "text") {
+          if (event.type === "text" && event.text) {
             text += event.text;
+            turnActivity = parseAgentContent(text, true).at(-1)?.kind === "thinking" ? "thinking" : "text";
             received = true;
           }
-          if (event.type === "thinking") {
+          if (event.type === "thinking" && event.text) {
             thought += event.text;
+            turnActivity = "thinking";
             received = true;
           }
           if (event.type === "tool") {
             turnTools = updateAgentTools(turnTools, event);
+            turnActivity = turnTools.some((tool) => tool.status === "running") ? "tool" : null;
             received = true;
             if (mutationActions.has(event.action ?? "")) mutationStarted = true;
           }
@@ -445,7 +457,6 @@ const ScopedAssistant = observer(function ScopedAssistant({
     setDraft(t("account_settings.ai.verify_prompt"));
     focusComposer();
   };
-  const toolRunning = tools.some((tool) => tool.status === "running");
   const suggestion = (key: string) => {
     setDraft(t(`account_settings.ai.${key}`));
     focusComposer();
@@ -614,15 +625,23 @@ const ScopedAssistant = observer(function ScopedAssistant({
               <div className="agent-live-status" role="status">
                 <span className="agent-live-dot" />
                 {t(
-                  toolRunning
+                  activity === "tool"
                     ? "account_settings.ai.working_tools"
-                    : thinking
+                    : activity === "thinking"
                       ? "account_settings.ai.working_thinking"
-                      : "account_settings.ai.working_answer"
+                      : activity === "text"
+                        ? "account_settings.ai.working_answer"
+                        : "account_settings.ai.loading"
                 )}
                 <span>{elapsed(duration)}</span>
               </div>
-              <AgentMessageContent content={partial} thinking={thinking} streaming workItems={workItems} />
+              <AgentMessageContent
+                content={partial}
+                thinking={thinking}
+                streaming
+                thinkingActive={activity === "thinking"}
+                workItems={workItems}
+              />
               <AgentToolDetails tools={tools} workspaceSlug={workspaceSlug} />
             </article>
           )}

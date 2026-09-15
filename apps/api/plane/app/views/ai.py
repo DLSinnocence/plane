@@ -37,6 +37,7 @@ from plane.utils.ai import (
 )
 
 
+from plane.utils.ai_model_metadata import registry_metadata
 from plane.utils.ai_models import DISCOVERY_ERROR, ModelDiscoveryError, discover_models, lookup_model_metadata
 
 
@@ -340,6 +341,10 @@ class WorkspaceAgentChatEndpoint(BaseAPIView):
                 "supports_images": supports_images,
             },
         }
+        metadata = registry_metadata(config.model, config.base_url)
+        reasoning = metadata.get("reasoning") if metadata else None
+        if isinstance(reasoning, bool):
+            payload["model_config"]["supports_reasoning"] = reasoning
         response = StreamingHttpResponse(stream_agent_turn(payload, workspace.id), content_type="application/x-ndjson")
         response["Cache-Control"] = "no-store, no-transform"
         response["X-Accel-Buffering"] = "no"

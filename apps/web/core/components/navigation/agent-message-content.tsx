@@ -36,11 +36,13 @@ export const AgentMessageContent = memo(function AgentMessageContent({
   content,
   thinking = "",
   streaming = false,
+  thinkingActive = streaming,
   workItems,
 }: {
   content: string;
   thinking?: string;
   streaming?: boolean;
+  thinkingActive?: boolean;
   workItems?: ChatWorkItemReference[];
 }) {
   const { t } = useTranslation();
@@ -49,9 +51,14 @@ export const AgentMessageContent = memo(function AgentMessageContent({
   return (
     <div className="agent-message-content min-w-0 space-y-3">
       {thinking && (
-        <details data-agent-part="native-thinking" className="agent-semantic-block rounded-lg border border-subtle">
+        <details
+          data-agent-part="native-thinking"
+          className="agent-semantic-block rounded-lg border border-subtle"
+          open={streaming}
+        >
           <summary className="cursor-pointer px-3 py-2 text-body-xs-medium text-secondary">
             {t("account_settings.ai.thinking")}
+            {thinkingActive ? ` · ${t("account_settings.ai.receiving")}` : ""}
           </summary>
           <div className="max-h-80 overflow-auto border-t border-subtle p-3">
             <ChatMarkdown content={thinking} labels={labels} />
@@ -68,6 +75,7 @@ export const AgentMessageContent = memo(function AgentMessageContent({
             key={`${part.kind}-${index}`}
             data-agent-part={part.kind}
             className="agent-semantic-block rounded-lg border border-subtle"
+            open={streaming && part.kind === "thinking"}
           >
             <summary className="cursor-pointer px-3 py-2 text-body-xs-medium text-secondary">
               {t(

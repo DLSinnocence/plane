@@ -39,6 +39,7 @@ export const aiChatSchema = z
         model: z.string().trim().min(1).max(255),
         api_key: z.string().min(1).max(4096),
         supports_images: z.boolean().optional(),
+        supports_reasoning: z.boolean().optional(),
       })
       .strict(),
     plane_api_token: z.string().min(1).max(255),

@@ -163,6 +163,52 @@ def test_missing_shared_secret_never_starts_execution(settings):
     }
 
 
+@pytest.mark.parametrize(
+    "model,reasoning",
+    [("o3", True), ("gpt-4o", False), ("private-unknown-model", None)],
+)
+def test_chat_payload_forwards_only_known_reasoning_capability(monkeypatch, settings, model, reasoning):
+    settings.AI_AGENT_URL = "http://live.internal"
+    settings.LIVE_SERVER_SECRET_KEY = "internal-secret"
+    config = SimpleNamespace(
+        provider="openai",
+        base_url="https://gateway.example/v1",
+        model=model,
+        api_key_encrypted="encrypted-key",
+        supports_images=False,
+    )
+    configs = Mock()
+    configs.filter.return_value.first.return_value = config
+    monkeypatch.setattr(ai.UserAISettings, "objects", configs)
+    workspaces = Mock()
+    workspaces.get.return_value = SimpleNamespace(id="workspace-id")
+    monkeypatch.setattr(ai.Workspace, "objects", workspaces)
+    monkeypatch.setattr(ai, "validate_model_url", lambda value: value)
+    monkeypatch.setattr(ai, "decrypt_model_key", lambda value: "model-secret")
+    monkeypatch.setattr(ai.httpx, "Client", Mock(side_effect=AssertionError("No metadata network calls")))
+    stream = Mock(return_value=iter(()))
+    monkeypatch.setattr(ai, "stream_agent_turn", stream)
+    request = SimpleNamespace(
+        user=SimpleNamespace(id="user-id"),
+        data={"messages": [{"role": "user", "content": "hello"}]},
+    )
+    response = ai.WorkspaceAgentChatEndpoint.post.__wrapped__(ai.WorkspaceAgentChatEndpoint(), request, "alpha")
+    assert response.status_code == 200
+    sent, workspace_id = stream.call_args.args
+    assert workspace_id == "workspace-id"
+    expected = {
+        "provider": "openai",
+        "base_url": config.base_url,
+        "model": model,
+        "api_key": "model-secret",
+        "supports_images": False,
+    }
+    if reasoning is not None:
+        expected["supports_reasoning"] = reasoning
+    assert sent["model_config"] == expected
+    assert sent["messages"] == request.data["messages"]
+
+
 def test_stream_never_started_creates_no_authority(stream_boundary):
     async def scenario():
         stream = ai.stream_agent_turn(payload(), "workspace-id")
