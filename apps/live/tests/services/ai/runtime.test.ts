@@ -98,7 +98,7 @@ describe("ephemeral Pi runtime", () => {
     const resolved = createChatModel({ ...input.model_config, model, base_url, supports_reasoning: true });
     expect(resolved).toMatchObject({
       id: model,
-      baseUrl: base_url,
+      baseUrl: base_url === "https://api.deepseek.com" ? `${base_url}/v1` : base_url,
       provider: "openai",
       api: "openai-completions",
       maxTokens: 16_384,
@@ -306,21 +306,45 @@ describe("ephemeral Pi runtime", () => {
   });
 
   it.each([
-    { field: "reasoning_content", supports_reasoning: undefined },
-    { field: "reasoning", supports_reasoning: undefined },
-    { field: "reasoning_text", supports_reasoning: undefined },
-    { field: "reasoning_content", supports_reasoning: true },
+    { field: "reasoning_content", supports_reasoning: undefined, path: "", route: "/v1/chat/completions" },
+    { field: "reasoning", supports_reasoning: undefined, path: "/", route: "/v1/chat/completions" },
+    { field: "reasoning_text", supports_reasoning: undefined, path: "/v1", route: "/v1/chat/completions" },
+    {
+      field: "reasoning_content",
+      supports_reasoning: true,
+      path: "/v1/chat/completions",
+      route: "/v1/chat/completions",
+    },
+    { field: "reasoning_content", supports_reasoning: true, path: "/chat/completions", route: "/chat/completions" },
+    { field: "reasoning_content", supports_reasoning: true, path: "/models", route: "/chat/completions" },
+    {
+      field: "reasoning_content",
+      supports_reasoning: true,
+      path: "/proxy/openai",
+      route: "/proxy/openai/chat/completions",
+    },
   ])(
-    "streams native $field before provider completion (supported=$supports_reasoning)",
-    async ({ field, supports_reasoning }) => {
+    "streams native $field before completion using $path (supported=$supports_reasoning)",
+    async ({ field, supports_reasoning, path, route }) => {
       const h = harness();
       let receivedThinking: (() => void) | undefined;
       const thinkingDelivered = new Promise<void>((resolve) => {
         receivedThinking = resolve;
       });
+      let receivedText: (() => void) | undefined;
+      const textDelivered = new Promise<void>((resolve) => {
+        receivedText = resolve;
+      });
+      const requests: { method: string | undefined; path: string | undefined; authorization: string | undefined }[] =
+        [];
       let requestBody: Record<string, unknown> | undefined;
       let providerEnded = false;
       const server = createServer(async (req, res) => {
+        requests.push({ method: req.method, path: req.url, authorization: req.headers.authorization });
+        if (req.url !== route) {
+          res.writeHead(404).end();
+          return;
+        }
         let body = "";
         for await (const chunk of req) body += String(chunk);
         requestBody = JSON.parse(body);
@@ -330,6 +354,7 @@ describe("ephemeral Pi runtime", () => {
         // Plane has delivered thinking, so buffering until done fails this test.
         await thinkingDelivered;
         res.write(completionChunk({ content: "Your project is ready." }));
+        await textDelivered;
         providerEnded = true;
         res.end(completionChunk({}, "stop") + "data: [DONE]\n\n");
       });
@@ -342,7 +367,9 @@ describe("ephemeral Pi runtime", () => {
             model_config: {
               ...input.model_config,
               supports_reasoning,
-              base_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
+              // Deliberately select Anthropic for explicit OpenAI endpoints.
+              provider: path.endsWith("/chat/completions") ? "anthropic" : "openai",
+              base_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}${path}`,
             },
           },
           "http://api:8000",
@@ -351,12 +378,21 @@ describe("ephemeral Pi runtime", () => {
               expect(providerEnded).toBe(false);
               receivedThinking?.();
             }
+            if (event.type === "text") {
+              expect(providerEnded).toBe(false);
+              receivedText?.();
+            }
             await h.emit(event);
           },
           new AbortController().signal,
           { ...h.dependencies, runMs: 2000, createAgent: (options) => new Agent(options) }
         );
-        expect(requestBody).toMatchObject({ stream: true, max_tokens: supports_reasoning ? 16_384 : 4096 });
+        expect(requests).toEqual([{ method: "POST", path: route, authorization: "Bearer model-secret" }]);
+        expect(requestBody).toMatchObject({
+          model: input.model_config.model,
+          stream: true,
+          max_tokens: supports_reasoning ? 16_384 : 4096,
+        });
         if (supports_reasoning) expect(requestBody).toHaveProperty("reasoning_effort", "low");
         else expect(requestBody).not.toHaveProperty("reasoning_effort");
         expect(h.events).toEqual([
@@ -366,6 +402,7 @@ describe("ephemeral Pi runtime", () => {
         ]);
       } finally {
         receivedThinking?.();
+        receivedText?.();
         server.closeAllConnections();
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
@@ -407,7 +444,7 @@ describe("ephemeral Pi runtime", () => {
         { ...h.dependencies, createAgent }
       );
       expect(fetch).toHaveBeenCalledOnce();
-      expect(requestUrl).toBe("https://api.deepseek.com/chat/completions");
+      expect(requestUrl).toBe("https://api.deepseek.com/v1/chat/completions");
       expect(requestBody).toMatchObject({
         model,
         stream: true,
@@ -427,22 +464,51 @@ describe("ephemeral Pi runtime", () => {
   });
 
   it.each([
-    { model: "claude-sonnet-4-5", thinking: { type: "enabled", budget_tokens: 2048 } },
-    { model: "claude-sonnet-4-6", thinking: { type: "adaptive" } },
-  ])("streams Anthropic thinking before completion for $model", async ({ model, thinking }) => {
+    { model: "claude-sonnet-4-5", thinking: { type: "enabled", budget_tokens: 2048 }, path: "", route: "/v1/messages" },
+    { model: "claude-sonnet-4-6", thinking: { type: "adaptive" }, path: "/v1", route: "/v1/messages" },
+    {
+      model: "claude-sonnet-4-5",
+      thinking: { type: "enabled", budget_tokens: 2048 },
+      path: "/v1/messages",
+      route: "/v1/messages",
+    },
+    {
+      model: "claude-sonnet-4-5",
+      thinking: { type: "enabled", budget_tokens: 2048 },
+      path: "/proxy/v1/messages",
+      route: "/proxy/v1/messages",
+    },
+    {
+      model: "claude-sonnet-4-5",
+      thinking: { type: "enabled", budget_tokens: 2048 },
+      path: "/proxy/v1",
+      route: "/proxy/v1/messages",
+    },
+    {
+      model: "claude-sonnet-4-5",
+      thinking: { type: "enabled", budget_tokens: 2048 },
+      path: "/messages",
+      route: "/v1/messages",
+    },
+  ])("streams Anthropic thinking for $model using $path", async ({ model, thinking, path, route }) => {
     const h = harness();
     let receivedThinking: (() => void) | undefined;
     const thinkingDelivered = new Promise<void>((resolve) => {
       receivedThinking = resolve;
     });
     let requestBody: Record<string, unknown> | undefined;
-    let requestPath: string | undefined;
+    const requests: { method: string | undefined; path: string | undefined; apiKey: string | string[] | undefined }[] =
+      [];
     let providerEnded = false;
     const server = createServer(async (req, res) => {
+      requests.push({ method: req.method, path: req.url, apiKey: req.headers["x-api-key"] });
+      if (req.url !== route) {
+        res.writeHead(404).end();
+        return;
+      }
       let body = "";
       for await (const part of req) body += String(part);
       requestBody = JSON.parse(body);
-      requestPath = req.url;
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       res.write(
         anthropicChunk({
@@ -489,9 +555,9 @@ describe("ephemeral Pi runtime", () => {
           ...input,
           model_config: {
             ...input.model_config,
-            provider: "anthropic",
+            provider: path.endsWith("/messages") ? "openai" : "anthropic",
             model,
-            base_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+            base_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}${path}`,
             supports_reasoning: true,
           },
         },
@@ -506,7 +572,7 @@ describe("ephemeral Pi runtime", () => {
         new AbortController().signal,
         { ...h.dependencies, runMs: 2000, createAgent: (options) => new Agent(options) }
       );
-      expect(requestPath).toBe("/v1/messages");
+      expect(requests).toEqual([{ method: "POST", path: route, apiKey: "model-secret" }]);
       expect(requestBody).toMatchObject({ model, stream: true, max_tokens: 16_384, thinking });
       if (thinking.type === "adaptive") expect(requestBody).toHaveProperty("output_config.effort", "low");
       expect(h.events).toEqual([
@@ -516,6 +582,152 @@ describe("ephemeral Pi runtime", () => {
       ]);
     } finally {
       receivedThinking?.();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it.each(["/responses", "/v1/responses", "/proxy/responses/"])(
+    "uses the real Responses adapter for %s with one POST",
+    async (path) => {
+      const h = harness();
+      const requests: { method: string | undefined; path: string | undefined; authorization: string | undefined }[] =
+        [];
+      let requestBody: Record<string, unknown> | undefined;
+      let receivedText: (() => void) | undefined;
+      const textDelivered = new Promise<void>((resolve) => {
+        receivedText = resolve;
+      });
+      let providerEnded = false;
+      const route = path.replace(/\/$/, "");
+      const item = {
+        id: "msg_local",
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: "Your project is ready.", annotations: [] }],
+      };
+      const server = createServer(async (req, res) => {
+        requests.push({ method: req.method, path: req.url, authorization: req.headers.authorization });
+        if (req.url !== route) {
+          res.writeHead(404).end();
+          return;
+        }
+        let body = "";
+        for await (const part of req) body += String(part);
+        requestBody = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write(
+          anthropicChunk({ type: "response.created", response: { id: "resp_local" } }) +
+            anthropicChunk({
+              type: "response.output_item.added",
+              output_index: 0,
+              item: { ...item, status: "in_progress", content: [] },
+            }) +
+            anthropicChunk({
+              type: "response.content_part.added",
+              output_index: 0,
+              content_index: 0,
+              part: { type: "output_text", text: "", annotations: [] },
+            }) +
+            anthropicChunk({
+              type: "response.output_text.delta",
+              output_index: 0,
+              content_index: 0,
+              delta: "Your project is ready.",
+            })
+        );
+        await textDelivered;
+        providerEnded = true;
+        res.end(
+          anthropicChunk({ type: "response.output_item.done", output_index: 0, item }) +
+            anthropicChunk({
+              type: "response.completed",
+              response: {
+                id: "resp_local",
+                status: "completed",
+                output: [item],
+                usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
+              },
+            })
+        );
+      });
+      server.listen(0, "127.0.0.1");
+      await once(server, "listening");
+      const config = Object.freeze({
+        ...input.model_config,
+        provider: "anthropic" as const,
+        model: "private-response-model",
+        base_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}${path}`,
+        supports_reasoning: true,
+      });
+      try {
+        const model = createChatModel(config);
+        expect(model).toMatchObject({ api: "openai-responses", provider: "openai", id: config.model });
+        expect(model.compat).toBeUndefined();
+        await runAiChat(
+          { ...input, model_config: config },
+          "http://api:8000",
+          async (event) => {
+            if (event.type === "text") {
+              expect(providerEnded).toBe(false);
+              receivedText?.();
+            }
+            await h.emit(event);
+          },
+          new AbortController().signal,
+          { ...h.dependencies, runMs: 2000, createAgent: (options) => new Agent(options) }
+        );
+        expect(requests).toEqual([{ method: "POST", path: route, authorization: "Bearer model-secret" }]);
+        expect(requestBody).toMatchObject({
+          model: config.model,
+          stream: true,
+          max_output_tokens: 16_384,
+          reasoning: { effort: "low" },
+          input: expect.any(Array),
+        });
+        expect(requestBody).not.toHaveProperty("max_tokens");
+        expect(requestBody).not.toHaveProperty("messages");
+        expect(config.base_url).toBe(`http://127.0.0.1:${(server.address() as AddressInfo).port}${path}`);
+        expect(h.events).toEqual([
+          { type: "text", text: "Your project is ready." },
+          { type: "done", reason: "complete" },
+        ]);
+      } finally {
+        receivedText?.();
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    }
+  );
+
+  it.each([404, 500])("does not retry or probe another endpoint after HTTP %s", async (status) => {
+    const h = harness();
+    const requests: { method: string | undefined; path: string | undefined; model: unknown }[] = [];
+    const server = createServer(async (req, res) => {
+      let body = "";
+      for await (const part of req) body += String(part);
+      requests.push({ method: req.method, path: req.url, model: JSON.parse(body).model });
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "Unavailable" } }));
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const config = Object.freeze({
+      ...input.model_config,
+      base_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    });
+    try {
+      await runAiChat({ ...input, model_config: config }, "http://api:8000", h.emit, new AbortController().signal, {
+        ...h.dependencies,
+        runMs: 2000,
+        createAgent: (options) => new Agent(options),
+      });
+      expect(requests).toEqual([{ method: "POST", path: "/v1/chat/completions", model: input.model_config.model }]);
+      expect(config.base_url).toBe(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+      expect(h.events.at(-2)).toMatchObject({ type: "error", code: "ai_model_error" });
+      expect(h.events.at(-1)).toEqual({ type: "done", reason: "error" });
+    } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

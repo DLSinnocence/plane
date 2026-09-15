@@ -8,6 +8,7 @@ import time
 
 import httpx
 
+from plane.utils.ai_endpoints import resolve_model_endpoint
 from plane.utils.ai_model_metadata import registry_metadata
 
 MAX_MODEL_PAGES = 5
@@ -88,12 +89,11 @@ def enriched_metadata(model, base_url):
 
 
 def discover_models(provider, base_url, api_key):
-    base = base_url.rstrip("/")
-    if provider == "anthropic" and not base.endswith("/v1"):
-        base += "/v1"
+    endpoint = resolve_model_endpoint(provider, base_url)
+    anthropic = endpoint.protocol == "anthropic-messages"
     headers = (
         {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-        if provider == "anthropic"
+        if anthropic
         else {"Authorization": f"Bearer {api_key}"}
     )
     models, seen, cursors = [], set(), set()
@@ -107,7 +107,7 @@ def discover_models(provider, base_url, api_key):
                 if remaining <= 0:
                     raise ModelDiscoveryError()
                 with client.stream(
-                    "GET", base + "/models", headers=headers, params=params, timeout=min(10, remaining)
+                    "GET", endpoint.models_url, headers=headers, params=params, timeout=min(10, remaining)
                 ) as response:
                     if response.status_code != 200:
                         raise ModelDiscoveryError()
@@ -150,7 +150,7 @@ def discover_models(provider, base_url, api_key):
                 if not isinstance(cursor, str) or not cursor or len(cursor) > 200 or cursor in cursors:
                     raise ModelDiscoveryError()
                 cursors.add(cursor)
-                params = {"after_id" if provider == "anthropic" else "after": cursor}
+                params = {"after_id" if anthropic else "after": cursor}
             return {"models": models, "truncated": True}
     except (httpx.HTTPError, httpx.InvalidURL, ValueError, TypeError, UnicodeError, RecursionError):
         raise ModelDiscoveryError() from None

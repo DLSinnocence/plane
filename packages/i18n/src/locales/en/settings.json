@@ -7,7 +7,7 @@
       "base_url": "Base URL (optional)",
       "model": "Model",
       "api_key": "API key",
-      "base_url_help": "Use any HTTP(S) provider endpoint, including enterprise or local gateways. Leave blank for the provider default.",
+      "base_url_help": "Enter a service root, API base path, or full chat/completions, responses, or messages URL. Standard paths and endpoint protocols are resolved automatically. Leave blank for provider defaults.",
       "fetch_models": "Fetch models",
       "model_select": "Select a model",
       "model_search": "Search models by name or ID",
