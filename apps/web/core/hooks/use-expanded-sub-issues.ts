@@ -35,12 +35,15 @@ export const useExpandedSubIssues = ({
   const [isExpanded, setExpanded] = useState(canExpand);
   const [loadState, setLoadState] = useState<TLoadState>();
   const [retryVersion, setRetryVersion] = useState(0);
-  const requests = useRef(new Map<string, Promise<unknown>>());
+  const requestRef = useRef<{ key: string; promise: Promise<unknown> } | undefined>(undefined);
   const key = JSON.stringify([workspaceSlug, projectId, issueId, subIssueCount]);
   const shouldLoad = Boolean(isExpanded && canExpand && workspaceSlug && projectId && issueId && subIssueCount);
   const retry = useCallback(() => setRetryVersion((version) => version + 1), []);
 
   useEffect(() => {
+    // Counts can return to an earlier value after deletion/creation. Only reuse
+    // the current snapshot, and invalidate it even when the parent becomes a leaf.
+    if (requestRef.current?.key !== key) requestRef.current = undefined;
     if (!shouldLoad || !workspaceSlug || !projectId) return;
     let disposed = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -48,13 +51,15 @@ export const useExpandedSubIssues = ({
 
     const load = async () => {
       setLoadState({ key, status: "loading" });
-      let request = requests.current.get(key);
+      let request = requestRef.current?.promise;
       if (!request) {
         // Keep the promise so a new effect can observe an already pending request.
         // A Set of requested keys loses that subscription after collapse/reopen.
         request = Promise.resolve().then(() => fetchSubIssues(workspaceSlug, projectId, issueId));
-        requests.current.set(key, request);
-        void request.catch(() => requests.current.delete(key));
+        requestRef.current = { key, promise: request };
+        void request.catch(() => {
+          if (requestRef.current?.promise === request) requestRef.current = undefined;
+        });
       }
       try {
         await request;
@@ -78,7 +83,7 @@ export const useExpandedSubIssues = ({
   }, [shouldLoad, workspaceSlug, projectId, issueId, key, fetchSubIssues, retryVersion]);
 
   return {
-    isExpanded: canExpand && isExpanded,
+    isExpanded: canExpand && isExpanded && Boolean(subIssueCount),
     setExpanded,
     isLoading: shouldLoad && (loadState?.key !== key || loadState.status === "loading"),
     hasError: shouldLoad && loadState?.key === key && loadState.status === "error",
