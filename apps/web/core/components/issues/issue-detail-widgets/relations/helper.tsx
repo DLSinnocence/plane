@@ -50,7 +50,8 @@ export const useRelationOperations = (
             type: TOAST_TYPE.SUCCESS,
             message: t("entity.update.success", { entity: entityName }),
           });
-        } catch (_error) {
+        } catch (error) {
+          if (data.state_id !== undefined) throw error;
           setToast({
             title: t("toast.error"),
             type: TOAST_TYPE.ERROR,

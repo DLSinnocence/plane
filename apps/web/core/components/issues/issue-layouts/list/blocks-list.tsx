@@ -47,6 +47,7 @@ export const IssueBlocksList = observer(function IssueBlocksList(props: Props) {
   } = props;
 
   const rootIssueIds = isEpic ? issueIds : getListRootIssueIds(issueIds, issuesMap);
+  const visibleIssueIds = new Set(issueIds);
 
   return (
     <div className="relative h-full w-full">
@@ -55,6 +56,7 @@ export const IssueBlocksList = observer(function IssueBlocksList(props: Props) {
           key={issueId}
           issueId={issueId}
           issuesMap={issuesMap}
+          visibleIssueIds={visibleIssueIds}
           updateIssue={updateIssue}
           quickActions={quickActions}
           canEditProperties={canEditProperties}

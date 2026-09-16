@@ -1,5 +1,8 @@
 {
   "workflows": {
+    "errors": {
+      "unfinished_sub_issues": "Some sub-work items are unfinished. Finish or cancel all sub-work items first."
+    },
     "state_assignees": {
       "title": "Owners by stage",
       "description": "Each stage defaults to the creator. Choose owners for the working stages; backlog, completed, and cancelled stages stay with the creator. Current assignees change automatically with the stage.",

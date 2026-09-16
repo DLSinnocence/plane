@@ -109,6 +109,9 @@
       "loading": "Loading states…",
       "load_error": "Unable to load states. Please try again.",
       "retry": "Retry"
+    },
+    "errors": {
+      "unfinished_sub_issues": "Some sub-work items are unfinished. Finish or cancel all sub-work items first."
     }
   }
 }

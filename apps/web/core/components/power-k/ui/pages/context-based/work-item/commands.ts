@@ -24,6 +24,7 @@ import { setToast, TOAST_TYPE } from "@plane/propel/toast";
 import type { ICycle, IIssueLabel, IModule, TIssue, TIssuePriorities } from "@plane/types";
 import { EIssueServiceType } from "@plane/types";
 import { copyTextToClipboard, copyUrlToClipboard } from "@plane/utils";
+import { getIssueUpdateErrorKey } from "@/helpers/issue-update-error";
 import { getWorkItemLinkTitle } from "@/helpers/work-item-link";
 // components
 import type { TPowerKCommandConfig } from "@/components/power-k/core/types";
@@ -81,15 +82,20 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
   const handleUpdateEntity = useCallback(
     async (formData: Partial<TIssue>) => {
       if (!workspaceSlug || !entityDetails || !entityDetails.project_id) return;
-      await updateEntity(workspaceSlug.toString(), entityDetails.project_id, entityDetails.id, formData).catch(() => {
-        setToast({
-          type: TOAST_TYPE.ERROR,
-          title: "Error!",
-          message: `${isEpic ? "Epic" : "Work item"} could not be updated. Please try again.`,
-        });
-      });
+      await updateEntity(workspaceSlug.toString(), entityDetails.project_id, entityDetails.id, formData).catch(
+        (error) => {
+          const errorKey = getIssueUpdateErrorKey(error);
+          setToast({
+            type: TOAST_TYPE.ERROR,
+            title: "Error!",
+            message: errorKey
+              ? t(errorKey)
+              : `${isEpic ? "Epic" : "Work item"} could not be updated. Please try again.`,
+          });
+        }
+      );
     },
-    [entityDetails, isEpic, updateEntity, workspaceSlug]
+    [entityDetails, isEpic, updateEntity, workspaceSlug, t]
   );
 
   const handleSubscription = useCallback(async () => {
@@ -130,6 +136,7 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
           type: TOAST_TYPE.SUCCESS,
           title: t("power_k.contextual_actions.work_item.copy_id_toast_success"),
         });
+        return;
       })
       .catch(() => {
         setToast({
@@ -147,6 +154,7 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
           type: TOAST_TYPE.SUCCESS,
           title: t("power_k.contextual_actions.work_item.copy_title_toast_success"),
         });
+        return;
       })
       .catch(() => {
         setToast({
@@ -172,6 +180,7 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
           type: TOAST_TYPE.SUCCESS,
           title: t("power_k.contextual_actions.work_item.copy_url_toast_success"),
         });
+        return;
       })
       .catch(() => {
         setToast({

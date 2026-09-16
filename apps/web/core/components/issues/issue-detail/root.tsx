@@ -59,7 +59,12 @@ export type TIssueDetailRoot = {
 
 export const IssueDetailRoot = observer(function IssueDetailRoot(props: TIssueDetailRoot) {
   const { t } = useTranslation();
-  const { workspaceSlug, projectId, issueId, is_archived = false } = props;
+  const {
+    workspaceSlug: detailWorkspaceSlug,
+    projectId: detailProjectId,
+    issueId: detailIssueId,
+    is_archived = false,
+  } = props;
   // router
   const router = useAppRouter();
   // hooks
@@ -94,6 +99,7 @@ export const IssueDetailRoot = observer(function IssueDetailRoot(props: TIssueDe
         try {
           await updateIssue(workspaceSlug, projectId, issueId, data);
         } catch (error) {
+          if (data.state_id !== undefined) throw error;
           console.log("Error in updating issue:", error);
           setToast({
             title: t("common.error.label"),
@@ -215,9 +221,9 @@ export const IssueDetailRoot = observer(function IssueDetailRoot(props: TIssueDe
   );
 
   // issue details
-  const issue = getIssueById(issueId);
+  const issue = getIssueById(detailIssueId);
   // checking if issue is editable, based on user role
-  const isEditable = getIssuePermissions(workspaceSlug, issue).canEdit;
+  const isEditable = getIssuePermissions(detailWorkspaceSlug, issue).canEdit;
 
   return (
     <>
@@ -228,16 +234,16 @@ export const IssueDetailRoot = observer(function IssueDetailRoot(props: TIssueDe
           description={t("issue.empty_state.issue_detail.description")}
           primaryButton={{
             text: t("issue.empty_state.issue_detail.primary_button.text"),
-            onClick: () => router.push(`/${workspaceSlug}/projects/${projectId}/issues`),
+            onClick: () => router.push(`/${detailWorkspaceSlug}/projects/${detailProjectId}/issues`),
           }}
         />
       ) : (
         <div className="flex h-full w-full overflow-hidden">
           <div className="h-full w-full space-y-6 overflow-y-auto px-9 py-5">
             <IssueMainContent
-              workspaceSlug={workspaceSlug}
-              projectId={projectId}
-              issueId={issueId}
+              workspaceSlug={detailWorkspaceSlug}
+              projectId={detailProjectId}
+              issueId={detailIssueId}
               issueOperations={issueOperations}
               isEditable={isEditable}
               isArchived={is_archived}
@@ -248,9 +254,9 @@ export const IssueDetailRoot = observer(function IssueDetailRoot(props: TIssueDe
             style={issueDetailSidebarCollapsed ? { right: `-${window?.innerWidth || 0}px` } : {}}
           >
             <IssueDetailsSidebar
-              workspaceSlug={workspaceSlug}
-              projectId={projectId}
-              issueId={issueId}
+              workspaceSlug={detailWorkspaceSlug}
+              projectId={detailProjectId}
+              issueId={detailIssueId}
               issueOperations={issueOperations}
               isEditable={!is_archived && isEditable}
             />

@@ -18,7 +18,11 @@ from plane.bgtasks.issue_activities_task import issue_activity
 from functools import partial
 from django.db import transaction
 from plane.db.models import Issue, IssueAssignee, Project, ProjectMember, State
-from plane.utils.issue_workflow import complete_workflow_plan
+from plane.utils.issue_workflow import (
+    UnfinishedSubIssuesError,
+    complete_workflow_plan,
+    validate_issue_completion,
+)
 from plane.utils.exception_logger import log_exception
 
 
@@ -129,6 +133,11 @@ def close_old_issues():
                     issue = Issue.objects.select_for_update().get(pk=issue_id)
                     # A user may have changed the issue after candidate selection.
                     if not issues.filter(pk=issue_id).exists():
+                        continue
+                    try:
+                        validate_issue_completion(issue, close_state)
+                    except UnfinishedSubIssuesError:
+                        # A blocked parent must not stop other eligible work items.
                         continue
                     assignee_key = str(close_state.id)
                     requested_data = {"closed_to": assignee_key}

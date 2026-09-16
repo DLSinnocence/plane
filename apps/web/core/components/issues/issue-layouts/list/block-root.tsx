@@ -34,6 +34,7 @@ import type { TRenderQuickActions } from "./list-view-types";
 type Props = {
   issueId: string;
   issuesMap: TIssueMap;
+  visibleIssueIds: ReadonlySet<string>;
   updateIssue: ((projectId: string | null, issueId: string, data: Partial<TIssue>) => Promise<void>) | undefined;
   quickActions: TRenderQuickActions;
   canEditProperties: (projectId: string | undefined) => boolean;
@@ -55,6 +56,7 @@ export const IssueBlockRoot = observer(function IssueBlockRoot(props: Props) {
   const {
     issueId,
     issuesMap,
+    visibleIssueIds,
     groupId,
     updateIssue,
     quickActions,
@@ -141,7 +143,9 @@ export const IssueBlockRoot = observer(function IssueBlockRoot(props: Props) {
 
   if (!issueId || !issuesMap[issueId]?.created_at) return null;
 
-  const subIssues = subIssuesStore.subIssuesByIssueId(issueId);
+  // The shared child response is unfiltered. Expansion must stay within this
+  // group's result set, including its filters and currently loaded pages.
+  const subIssues = subIssuesStore.subIssuesByIssueId(issueId)?.filter((id) => visibleIssueIds.has(id));
   return (
     <div className="relative" ref={issueBlockRef} id={getIssueBlockId(issueId, groupId)}>
       <DropIndicator classNames={"absolute top-0 z-[2]"} isVisible={instruction === "DRAG_OVER"} />
@@ -186,6 +190,7 @@ export const IssueBlockRoot = observer(function IssueBlockRoot(props: Props) {
             key={`${subIssueId}`}
             issueId={subIssueId}
             issuesMap={issuesMap}
+            visibleIssueIds={visibleIssueIds}
             updateIssue={updateIssue}
             quickActions={quickActions}
             canEditProperties={canEditProperties}

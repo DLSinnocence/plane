@@ -41,8 +41,8 @@ test("an ancestor outside the current filter, page or group does not hide the ch
   assert.deepEqual(getListRootIssueIds(["grandchild"], issuesMap), ["grandchild"]);
 });
 
-test("a cached intermediate parent still provides a path from a listed ancestor", () => {
-  assert.deepEqual(getListRootIssueIds(["grandchild", "parent"], fixture()), ["parent"]);
+test("a cached intermediate parent outside the group cannot hide a matching descendant", () => {
+  assert.deepEqual(getListRootIssueIds(["grandchild", "parent"], fixture()), ["grandchild", "parent"]);
 });
 
 const chain = (maxDepth) =>
@@ -61,13 +61,13 @@ test("descendants at depth three remain nested while depth four gets a reachable
 
 test("sparse results retain deep descendants even when intermediate ancestors are cached", () => {
   const issuesMap = chain(4);
-  assert.deepEqual(getListRootIssueIds(["level-0", "level-3"], issuesMap), ["level-0"]);
+  assert.deepEqual(getListRootIssueIds(["level-0", "level-3"], issuesMap), ["level-0", "level-3"]);
   assert.deepEqual(getListRootIssueIds(["level-0", "level-4"], issuesMap), ["level-0", "level-4"]);
 });
 
-test("an ancestor hidden beneath another root cannot reset the inline expansion depth", () => {
+test("a missing intermediate ancestor breaks the inline hierarchy", () => {
   const issuesMap = chain(4);
-  assert.deepEqual(getListRootIssueIds(["level-4", "level-3", "level-0"], issuesMap), ["level-4", "level-0"]);
+  assert.deepEqual(getListRootIssueIds(["level-4", "level-3", "level-0"], issuesMap), ["level-3", "level-0"]);
 });
 
 test("long chains reset the depth only at retained roots", () => {
@@ -81,7 +81,7 @@ test("long chains reset the depth only at retained roots", () => {
   assert.deepEqual(getListRootIssueIds(["level-0", "level-5", "level-8", "level-9"], issuesMap), [
     "level-0",
     "level-5",
-    "level-9",
+    "level-8",
   ]);
 });
 

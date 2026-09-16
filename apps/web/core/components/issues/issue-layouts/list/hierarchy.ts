@@ -19,6 +19,9 @@ export function getListRootIssueIds(issueIds: string[], issuesMap: TIssueMap): s
     let depth = 0;
 
     while (parentId) {
+      // An excluded ancestor is not rendered here, so it cannot provide a path
+      // to this work item even if its record is present in the shared cache.
+      if (!groupIssueIds.has(parentId)) break;
       // Keep malformed hierarchies accessible instead of hiding every member of a cycle.
       if (visited.has(parentId)) return true;
       visited.add(parentId);

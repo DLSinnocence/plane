@@ -9,6 +9,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
 from plane.db.models import Issue, IssueAssignee, ProjectMember, State
+from plane.db.models.state import StateGroup
 from plane.utils.issue_permissions import (
     FIXED_ASSIGNEE_STATE_GROUPS,
     project_access_role,
@@ -62,6 +63,39 @@ def complete_workflow_plan(issue, plan, *, validate_fixed=False, allow_triage=Fa
             members = list(default)
         result[key] = members
     return result
+
+
+class UnfinishedSubIssuesError(serializers.ValidationError):
+    default_code = "unfinished_sub_issues"
+    default_detail = {
+        "code": "unfinished_sub_issues",
+        "error": "Finish or cancel all sub-work items before completing this work item.",
+    }
+
+
+def validate_issue_completion(issue, next_state):
+    """Require the nondeleted subtree to be terminal before entering completed.
+
+    Cancelled descendants are resolved work, consistent with the project's
+    archive and active-work policies. A deleted branch is no longer part of
+    the tree, but a completed/cancelled intermediate node must still be walked.
+    """
+    if getattr(next_state, "group", None) != StateGroup.COMPLETED or getattr(next_state, "pk", None) == issue.state_id:
+        return
+
+    terminal_groups = {StateGroup.COMPLETED, StateGroup.CANCELLED}
+    visited = {issue.pk}
+    parents = {issue.pk}
+    while parents:
+        descendants = list(
+            Issue.objects.filter(workspace_id=issue.workspace_id, parent_id__in=parents)
+            .exclude(pk__in=visited)
+            .values_list("pk", "state__group")
+        )
+        if any(group not in terminal_groups for _, group in descendants):
+            raise UnfinishedSubIssuesError()
+        parents = {pk for pk, _ in descendants}
+        visited.update(parents)
 
 
 class IssueWorkflowSerializerMixin:
@@ -277,6 +311,7 @@ class IssueWorkflowSerializerMixin:
         next_state = validated_data.get("state", issue.state)
         if "state_assignees" not in validated_data and getattr(next_state, "pk", None) == issue.state_id:
             return self.update_workflow_issue(issue, validated_data)
+        validate_issue_completion(issue, next_state)
         plan = dict(validated_data.get("state_assignees", issue.state_assignees) or {})
         key = str(getattr(next_state, "pk", None))
         plan = complete_workflow_plan(

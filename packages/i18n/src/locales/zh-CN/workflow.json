@@ -1,5 +1,8 @@
 {
   "workflows": {
+    "errors": {
+      "unfinished_sub_issues": "仍有未完成的子工作项，请先完成或取消所有子工作项。"
+    },
     "state_assignees": {
       "title": "各阶段负责人",
       "description": "各阶段默认由创建者负责，可分别调整处理阶段的负责人。待规划、已完成、已取消固定由创建者负责；当前负责人随阶段自动切换。",
