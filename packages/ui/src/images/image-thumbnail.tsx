@@ -38,7 +38,7 @@ function ThumbnailImage({ src, name, loadingLabel, errorLabel }: ImageThumbnailP
         decoding="async"
         onLoad={() => setState("loaded")}
         onError={() => setState("error")}
-        className="block h-auto max-h-32 w-auto max-w-full rounded object-contain"
+        className="block h-auto max-h-48 w-auto max-w-full rounded object-contain"
         style={{ visibility: state === "loaded" ? "visible" : "hidden" }}
       />
       {state !== "loaded" && (
