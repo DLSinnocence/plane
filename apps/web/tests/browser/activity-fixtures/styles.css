@@ -1,0 +1,38 @@
+@import "@plane/tailwind-config/index.css";
+@source "../../../core/components/comments";
+@source "../../../core/components/issues/issue-detail/issue-activity";
+
+/* Real Tailwind/Propel styles determine disclosure visibility and layout.
+   Fixture CSS only sizes the host and the replacement rich-text leaf. */
+.fixture-page {
+  margin: 24px auto;
+  padding: 20px;
+  width: min(800px, 100%);
+}
+.fixture-page nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+.fixture-page nav button {
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.fixture-page h1 {
+  margin-bottom: 24px;
+}
+.fixture-editor {
+  width: 100%;
+  min-height: 90px;
+  padding: 12px;
+  border: 1px solid #aaa;
+}
+.fixture-description {
+  height: 1200px;
+}
+.fixture-page output {
+  display: block;
+  margin-top: 24px;
+}

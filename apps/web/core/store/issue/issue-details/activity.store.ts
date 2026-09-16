@@ -43,6 +43,7 @@ export interface IIssueActivityStore extends IIssueActivityStoreActions {
   // helper methods
   getActivitiesByIssueId: (issueId: string) => string[] | undefined;
   getActivityById: (activityId: string) => TIssueActivity | undefined;
+  getActivityItemsByIssueId: (issueId: string, sortOrder: E_SORT_ORDER) => TIssueActivityComment[] | undefined;
   getActivityAndCommentsByIssueId: (issueId: string, sortOrder: E_SORT_ORDER) => TIssueActivityComment[] | undefined;
 }
 
@@ -83,18 +84,11 @@ export class IssueActivityStore implements IIssueActivityStore {
     return this.activityMap[activityId] ?? undefined;
   };
 
-  protected buildActivityAndCommentItems(issueId: string): TIssueActivityComment[] | undefined {
-    if (!issueId) return undefined;
+  protected buildActivityItems(issueId: string): TIssueActivityComment[] | undefined {
+    const activities = this.getActivitiesByIssueId(issueId);
+    if (!activities) return undefined;
 
     const activityComments: TIssueActivityComment[] = [];
-
-    const currentStore =
-      this.serviceType === EIssueServiceType.EPICS ? this.store.issue.epicDetail : this.store.issue.issueDetail;
-
-    const activities = this.getActivitiesByIssueId(issueId);
-    const comments = currentStore.comment.getCommentsByIssueId(issueId);
-
-    if (!activities || !comments) return undefined;
 
     activities.forEach((activityId) => {
       const activity = this.getActivityById(activityId);
@@ -114,6 +108,19 @@ export class IssueActivityStore implements IIssueActivityStore {
       });
     });
 
+    return activityComments;
+  }
+
+  protected buildActivityAndCommentItems(issueId: string): TIssueActivityComment[] | undefined {
+    if (!issueId) return undefined;
+
+    const currentStore =
+      this.serviceType === EIssueServiceType.EPICS ? this.store.issue.epicDetail : this.store.issue.issueDetail;
+    const activityComments = this.buildActivityItems(issueId);
+    const comments = currentStore.comment.getCommentsByIssueId(issueId);
+
+    if (!activityComments || !comments) return undefined;
+
     comments.forEach((commentId) => {
       const comment = currentStore.comment.getCommentById(commentId);
       if (!comment) return;
@@ -130,6 +137,12 @@ export class IssueActivityStore implements IIssueActivityStore {
   protected sortActivityComments(items: TIssueActivityComment[], sortOrder: E_SORT_ORDER): TIssueActivityComment[] {
     return orderBy(items, (e) => new Date(e.created_at || 0), sortOrder);
   }
+
+  getActivityItemsByIssueId = computedFn((issueId: string, sortOrder: E_SORT_ORDER) => {
+    const items = this.buildActivityItems(issueId);
+    if (!items) return undefined;
+    return this.sortActivityComments(items, sortOrder);
+  });
 
   getActivityAndCommentsByIssueId = computedFn((issueId: string, sortOrder: E_SORT_ORDER) => {
     const baseItems = this.buildActivityAndCommentItems(issueId);

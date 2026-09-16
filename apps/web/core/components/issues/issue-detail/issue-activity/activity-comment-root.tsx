@@ -6,8 +6,9 @@
 
 import { observer } from "mobx-react";
 // plane imports
-import type { E_SORT_ORDER, TActivityFilters, EActivityFilterType } from "@plane/constants";
-import { BASE_ACTIVITY_FILTER_TYPES, filterActivityOnSelectedFilters } from "@plane/constants";
+import type { E_SORT_ORDER, TActivityFilters } from "@plane/constants";
+import { filterActivityOnSelectedFilters } from "@plane/constants";
+import { useTranslation } from "@plane/i18n";
 import type { TCommentsOperations } from "@plane/types";
 // components
 import { CommentCard } from "@/components/comments/card/root";
@@ -17,70 +18,87 @@ import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import { IssueActivityItem } from "./activity/activity-list";
 import { IssueActivityLoader } from "./loader";
 
-type TIssueActivityCommentRoot = {
+type TIssueCommentList = {
   workspaceSlug: string;
   projectId: string;
   isIntakeIssue: boolean;
   issueId: string;
-  selectedFilters: TActivityFilters[];
   activityOperations: TCommentsOperations;
   showAccessSpecifier?: boolean;
   disabled?: boolean;
   sortOrder: E_SORT_ORDER;
 };
 
-export const IssueActivityCommentRoot = observer(function IssueActivityCommentRoot(props: TIssueActivityCommentRoot) {
+export const IssueCommentList = observer(function IssueCommentList(props: TIssueCommentList) {
   const {
     workspaceSlug,
     isIntakeIssue,
     issueId,
-    selectedFilters,
     activityOperations,
     showAccessSpecifier,
     projectId,
     disabled,
     sortOrder,
   } = props;
-  // store hooks
+  const { t } = useTranslation();
   const {
-    activity: { getActivityAndCommentsByIssueId },
-    comment: { getCommentById },
+    comment: { getSortedCommentsByIssueId },
   } = useIssueDetail();
-  // derived values
-  const activityAndComments = getActivityAndCommentsByIssueId(issueId, sortOrder);
+  const comments = getSortedCommentsByIssueId(issueId, sortOrder);
 
-  if (!activityAndComments) return <IssueActivityLoader />;
-
-  if (activityAndComments.length <= 0) return null;
-
-  const filteredActivityAndComments = filterActivityOnSelectedFilters(activityAndComments, selectedFilters);
+  if (!comments) return <IssueActivityLoader />;
+  if (comments.length === 0)
+    return <p className="text-body-sm-regular text-tertiary">{t("activity_empty_state.no_comments")}</p>;
 
   return (
     <div>
-      {filteredActivityAndComments.map((activityComment, index) => {
-        const comment = getCommentById(activityComment.id);
-        return activityComment.activity_type === "COMMENT" ? (
-          <CommentCard
-            key={activityComment.id}
-            workspaceSlug={workspaceSlug}
-            entityId={issueId}
-            comment={comment}
-            activityOperations={activityOperations}
-            ends={index === 0 ? "top" : index === filteredActivityAndComments.length - 1 ? "bottom" : undefined}
-            showAccessSpecifier={!!showAccessSpecifier}
-            showCopyLinkOption={!isIntakeIssue}
-            disabled={disabled}
-            projectId={projectId}
-            enableReplies
-          />
-        ) : BASE_ACTIVITY_FILTER_TYPES.includes(activityComment.activity_type as EActivityFilterType) ? (
-          <IssueActivityItem
-            key={activityComment.id}
-            activityId={activityComment.id}
-            ends={index === 0 ? "top" : index === filteredActivityAndComments.length - 1 ? "bottom" : undefined}
-          />
-        ) : null;
-      })}
+      {comments.map((comment, index) => (
+        <CommentCard
+          key={comment.id}
+          workspaceSlug={workspaceSlug}
+          entityId={issueId}
+          comment={comment}
+          activityOperations={activityOperations}
+          ends={index === 0 ? "top" : index === comments.length - 1 ? "bottom" : undefined}
+          showAccessSpecifier={!!showAccessSpecifier}
+          showCopyLinkOption={!isIntakeIssue}
+          disabled={disabled}
+          projectId={projectId}
+          enableReplies
+        />
+      ))}
+    </div>
+  );
+});
+
+type TIssueActivityList = {
+  issueId: string;
+  selectedFilters: TActivityFilters[];
+  sortOrder: E_SORT_ORDER;
+};
+
+export const IssueActivityList = observer(function IssueActivityList(props: TIssueActivityList) {
+  const { issueId, selectedFilters, sortOrder } = props;
+  const { t } = useTranslation();
+  const {
+    activity: { getActivityItemsByIssueId },
+  } = useIssueDetail();
+  const activities = getActivityItemsByIssueId(issueId, sortOrder);
+
+  if (!activities) return <IssueActivityLoader />;
+  const filteredActivities = filterActivityOnSelectedFilters(activities, selectedFilters);
+  if (filteredActivities.length === 0)
+    return <p className="text-body-sm-regular text-tertiary">{t("activity_empty_state.no_activity")}</p>;
+
+  return (
+    <div>
+      {filteredActivities.map((activity, index) => (
+        <IssueActivityItem
+          key={activity.id}
+          activityId={activity.id}
+          ends={index === 0 ? "top" : index === filteredActivities.length - 1 ? "bottom" : undefined}
+        />
+      ))}
     </div>
   );
 });

@@ -9,7 +9,6 @@ import { FilterOutline, TickOutline } from "@makeplane/propel/icons";
 // plane imports
 import type { TActivityFilters, TActivityFilterOption } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
-import { IconButton } from "@plane/propel/icon-button";
 import { PopoverMenu } from "@plane/ui";
 // helper
 import { cn } from "@plane/utils";
@@ -28,25 +27,31 @@ export const ActivityFilter = observer(function ActivityFilter(props: TActivityF
 
   return (
     <PopoverMenu
-      buttonClassName="outline-none"
+      popoverClassName="w-auto"
+      buttonClassName="relative rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-accent-strong"
       button={
-        <>
-          <IconButton variant="tertiary" icon={FilterOutline} />
+        <span className="flex size-7 items-center justify-center rounded-sm text-secondary hover:bg-layer-1">
+          <FilterOutline className="size-4" aria-hidden="true" />
+          <span className="sr-only">{t("common.filters")}</span>
           {selectedFilters.length < filterOptions.length && (
             <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-accent-primary" />
           )}
-        </>
+        </span>
       }
       panelClassName="p-2 rounded-md border border-subtle bg-surface-1"
       data={filterOptions}
       keyExtractor={(item) => item.key}
       render={(item) => (
-        <div
+        <button
+          type="button"
           key={item.key}
-          className="flex cursor-pointer items-center gap-2 rounded-xs p-1 px-2 text-13 transition-all hover:bg-layer-1"
+          aria-pressed={item.isSelected}
+          disabled={item.isSelected && selectedFilters.length === 1}
+          className="flex w-full cursor-pointer items-center gap-2 rounded-xs p-1 px-2 text-13 transition-all hover:bg-layer-1 focus-visible:outline-accent-strong disabled:cursor-default"
           onClick={item.onClick}
         >
-          <div
+          <span
+            aria-hidden="true"
             className={cn(
               "flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-xs bg-surface-2 transition-all",
               {
@@ -57,11 +62,11 @@ export const ActivityFilter = observer(function ActivityFilter(props: TActivityF
             )}
           >
             {item.isSelected && <TickOutline className="h-2.5 w-2.5" />}
-          </div>
-          <div className={cn("whitespace-nowrap", item.isSelected ? "text-primary" : "text-secondary")}>
+          </span>
+          <span className={cn("whitespace-nowrap", item.isSelected ? "text-primary" : "text-secondary")}>
             {t(item.labelTranslationKey)}
-          </div>
-        </div>
+          </span>
+        </button>
       )}
     />
   );

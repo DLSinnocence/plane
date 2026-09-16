@@ -8,27 +8,23 @@
 import type { TActivityFilters, TActivityFilterOption } from "@plane/constants";
 import { ACTIVITY_FILTER_TYPE_OPTIONS } from "@plane/constants";
 // components
-import { ActivityFilter } from "@/components/issues/issue-detail/issue-activity";
+import { ActivityFilter } from "./activity-filter";
+import { ACTIVITY_RECORD_FILTERS } from "./preferences";
 
 export type TActivityFilterRoot = {
   selectedFilters: TActivityFilters[];
   toggleFilter: (filter: TActivityFilters) => void;
-  projectId: string;
-  isIntakeIssue?: boolean;
 };
 
 export function ActivityFilterRoot(props: TActivityFilterRoot) {
   const { selectedFilters, toggleFilter } = props;
 
-  const filters: TActivityFilterOption[] = Object.entries(ACTIVITY_FILTER_TYPE_OPTIONS).map(([key, value]) => {
-    const filterKey = key as TActivityFilters;
-    return {
-      key: filterKey,
-      labelTranslationKey: value.labelTranslationKey,
-      isSelected: selectedFilters.includes(filterKey),
-      onClick: () => toggleFilter(filterKey),
-    };
-  });
+  const filters: TActivityFilterOption[] = ACTIVITY_RECORD_FILTERS.map((filterKey) => ({
+    key: filterKey,
+    labelTranslationKey: ACTIVITY_FILTER_TYPE_OPTIONS[filterKey].labelTranslationKey,
+    isSelected: selectedFilters.includes(filterKey),
+    onClick: () => toggleFilter(filterKey),
+  }));
 
   return <ActivityFilter selectedFilters={selectedFilters} filterOptions={filters} />;
 }

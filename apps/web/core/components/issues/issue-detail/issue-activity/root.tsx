@@ -4,26 +4,23 @@
  * See the LICENSE file for details.
  */
 
-import { useMemo } from "react";
-import uniq from "lodash-es/uniq";
 import { observer } from "mobx-react";
 // plane package imports
 import type { TActivityFilters } from "@plane/constants";
-import { E_SORT_ORDER, defaultActivityFilters } from "@plane/constants";
+import { E_SORT_ORDER } from "@plane/constants";
 import { useLocalStorage } from "@plane/hooks";
-// i18n
 import { useTranslation } from "@plane/i18n";
-//types
 import type { TFileSignedURLResponse, TIssueComment } from "@plane/types";
 // components
 import { CommentCreate } from "@/components/comments/comment-create";
 // hooks
 import { useProject } from "@/hooks/store/use-project";
 // local imports
-import { IssueActivityCommentRoot } from "./activity-comment-root";
+import { IssueCommentList } from "./activity-comment-root";
+import { IssueActivityCollapsible } from "./activity-collapsible";
 import { useWorkItemCommentOperations } from "./helper";
 import { ActivitySortRoot } from "./sort-root";
-import { ActivityFilterRoot } from "./filter-root";
+import { ACTIVITY_RECORD_FILTERS, normalizeActivityFilters, normalizeActivitySortOrder } from "./preferences";
 
 type TIssueActivity = {
   workspaceSlug: string;
@@ -42,42 +39,51 @@ export type TActivityOperations = {
 
 export const IssueActivity = observer(function IssueActivity(props: TIssueActivity) {
   const { workspaceSlug, projectId, issueId, disabled = false, isIntakeIssue = false } = props;
-  // i18n
   const { t } = useTranslation();
-  // hooks
-  const { setValue: setFilterValue, storedValue: selectedFilters } = useLocalStorage(
+  const { setValue: setFilterValue, storedValue: storedFilters } = useLocalStorage(
     "issue_activity_filters",
-    defaultActivityFilters
+    ACTIVITY_RECORD_FILTERS
   );
-  const { setValue: setSortOrder, storedValue: sortOrder } = useLocalStorage("activity_sort_order", E_SORT_ORDER.ASC);
-
+  const { setValue: setSortOrder, storedValue: storedSortOrder } = useLocalStorage(
+    "activity_sort_order",
+    E_SORT_ORDER.ASC
+  );
   const { getProjectById } = useProject();
-
-  // toggle filter
-  const toggleFilter = (filter: TActivityFilters) => {
-    if (!selectedFilters) return;
-    let _filters = [];
-    if (selectedFilters.includes(filter)) {
-      if (selectedFilters.length === 1) return selectedFilters; // Ensure at least one filter is applied
-      _filters = selectedFilters.filter((f) => f !== filter);
-    } else {
-      _filters = [...selectedFilters, filter];
-    }
-
-    setFilterValue(uniq(_filters));
-  };
-
-  const toggleSortOrder = () => {
-    setSortOrder(sortOrder === E_SORT_ORDER.ASC ? E_SORT_ORDER.DESC : E_SORT_ORDER.ASC);
-  };
-
-  // helper hooks
   const activityOperations = useWorkItemCommentOperations(workspaceSlug, projectId, issueId);
+  const selectedFilters = normalizeActivityFilters(storedFilters);
+  const sortOrder = normalizeActivitySortOrder(storedSortOrder);
+  const issueKey = `${workspaceSlug}:${projectId}:${issueId}`;
+
+  const toggleFilter = (filter: TActivityFilters) => {
+    const isSelected = selectedFilters.some((selected) => selected === filter);
+    if (isSelected && selectedFilters.length === 1) return;
+    setFilterValue(
+      normalizeActivityFilters(
+        isSelected ? selectedFilters.filter((selected) => selected !== filter) : [...selectedFilters, filter]
+      )
+    );
+  };
 
   const project = getProjectById(projectId);
-  const renderCommentCreationBox = useMemo(
-    () => (
+  if (!project) return null;
+
+  // Keep keyed siblings when changing sort order so the editor retains its draft.
+  // A different work item gets a new editor to prevent drafts and uploads leaking across items.
+  const commentContents = [
+    <IssueCommentList
+      key={`comments:${issueKey}`}
+      projectId={projectId}
+      workspaceSlug={workspaceSlug}
+      isIntakeIssue={isIntakeIssue}
+      issueId={issueId}
+      activityOperations={activityOperations}
+      showAccessSpecifier={!!project.anchor}
+      disabled={disabled}
+      sortOrder={sortOrder}
+    />,
+    !disabled && (
       <CommentCreate
+        key={`create:${issueKey}`}
         workspaceSlug={workspaceSlug}
         entityId={issueId}
         activityOperations={activityOperations}
@@ -85,46 +91,31 @@ export const IssueActivity = observer(function IssueActivity(props: TIssueActivi
         projectId={projectId}
       />
     ),
-    [workspaceSlug, issueId, activityOperations, projectId]
-  );
-  if (!project) return <></>;
+  ];
 
   return (
-    <div className="space-y-4">
-      {/* header */}
-      <div className="flex items-center justify-between">
-        <div className="text-h5-medium text-primary">{t("common.activity")}</div>
-        <div className="flex items-center gap-2">
-          <ActivitySortRoot sortOrder={sortOrder || E_SORT_ORDER.ASC} toggleSort={toggleSortOrder} />
-          <ActivityFilterRoot
-            selectedFilters={selectedFilters || defaultActivityFilters}
-            toggleFilter={toggleFilter}
-            isIntakeIssue={isIntakeIssue}
-            projectId={projectId}
+    <div className="space-y-6">
+      <section aria-label={t("common.comments")} className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-h5-medium text-primary">{t("common.comments")}</h3>
+          <ActivitySortRoot
+            sortOrder={sortOrder}
+            toggleSort={() => setSortOrder(sortOrder === E_SORT_ORDER.ASC ? E_SORT_ORDER.DESC : E_SORT_ORDER.ASC)}
           />
         </div>
-      </div>
-
-      {/* rendering activity */}
-      <div className="space-y-3">
-        <div className="min-h-[200px]">
-          <div className="space-y-3">
-            {!disabled && sortOrder === E_SORT_ORDER.DESC && renderCommentCreationBox}
-            <IssueActivityCommentRoot
-              projectId={projectId}
-              workspaceSlug={workspaceSlug}
-              isIntakeIssue={isIntakeIssue}
-              issueId={issueId}
-              selectedFilters={selectedFilters || defaultActivityFilters}
-              activityOperations={activityOperations}
-              showAccessSpecifier={!!project.anchor}
-              disabled={disabled}
-              sortOrder={sortOrder || E_SORT_ORDER.ASC}
-            />
-            {!disabled && sortOrder === E_SORT_ORDER.ASC && renderCommentCreationBox}
-          </div>
+        <div className="space-y-3">
+          {sortOrder === E_SORT_ORDER.DESC ? [commentContents[1], commentContents[0]] : commentContents}
         </div>
-      </div>
+      </section>
+      <section aria-label={t("common.activity")} className="border-t border-subtle pt-4">
+        <IssueActivityCollapsible
+          key={issueKey}
+          issueId={issueId}
+          sortOrder={sortOrder}
+          selectedFilters={selectedFilters}
+          toggleFilter={toggleFilter}
+        />
+      </section>
     </div>
   );
 });

@@ -4,9 +4,11 @@
  * See the LICENSE file for details.
  */
 
-import { pull, concat, update, uniq, set } from "lodash-es";
+import { pull, concat, update, uniq, set, orderBy } from "lodash-es";
 import { action, makeObservable, observable, runInAction } from "mobx";
+import { computedFn } from "mobx-utils";
 // Plane Imports
+import type { E_SORT_ORDER } from "@plane/constants";
 import type { TIssueComment, TIssueCommentMap, TIssueCommentIdMap, TIssueServiceType } from "@plane/types";
 // services
 import { IssueCommentService } from "@/services/issue";
@@ -46,6 +48,7 @@ export interface IIssueCommentStore extends IIssueCommentStoreActions {
   // helper methods
   getCommentsByIssueId: (issueId: string) => string[] | undefined;
   getCommentById: (activityId: string) => TIssueComment | undefined;
+  getSortedCommentsByIssueId: (issueId: string, sortOrder: E_SORT_ORDER) => TIssueComment[] | undefined;
 }
 
 export class IssueCommentStore implements IIssueCommentStore {
@@ -89,6 +92,16 @@ export class IssueCommentStore implements IIssueCommentStore {
     return this.commentMap[commentId] ?? undefined;
   };
 
+  getSortedCommentsByIssueId = computedFn((issueId: string, sortOrder: E_SORT_ORDER): TIssueComment[] | undefined => {
+    const commentIds = this.getCommentsByIssueId(issueId);
+    if (!commentIds) return undefined;
+
+    const comments = commentIds
+      .map((commentId) => this.getCommentById(commentId))
+      .filter((comment): comment is TIssueComment => !!comment);
+    return orderBy(comments, (comment) => new Date(comment.created_at || 0), sortOrder);
+  });
+
   fetchComments = async (
     workspaceSlug: string,
     projectId: string,
@@ -108,9 +121,9 @@ export class IssueCommentStore implements IIssueCommentStore {
 
     const commentIds = comments.map((comment) => comment.id);
     runInAction(() => {
-      update(this.comments, issueId, (_commentIds) => {
-        if (!_commentIds) return commentIds;
-        return uniq(concat(_commentIds, commentIds));
+      update(this.comments, issueId, (currentCommentIds) => {
+        if (!currentCommentIds) return commentIds;
+        return uniq(concat(currentCommentIds, commentIds));
       });
       comments.forEach((comment) => {
         this.rootIssueDetail.commentReaction.applyCommentReactions(comment.id, comment?.comment_reactions || []);
