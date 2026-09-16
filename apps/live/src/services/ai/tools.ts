@@ -110,6 +110,19 @@ export function prepareCeArguments(name: string, raw: Record<string, unknown>, p
     (name === "workitem" && ["search", "retrieve_by_identifier"].includes(args.action));
   if (!workspaceAction && !args.project_id && projectId) args.project_id = projectId;
   if (!workspaceAction && !args.project_id) throw new Error("Select or supply a project first.");
+  // MCP makes labels optional. Require an explicit choice on creation so the
+  // model must resolve classification before it can leave an unlabelled item.
+  if (
+    name === "workitem" &&
+    args.action === "create" &&
+    (!Array.isArray(args.labels) || args.labels.some((id) => typeof id !== "string" || !uuid.test(id)))
+  ) {
+    throw new Error(
+      "Work item creation requires labels as an array of verified label UUIDs. " +
+        "Load writing-plane-requirements and resolve the requested classification using label/list in the target project. " +
+        "Use [] only when no labels are intended. No work item has been created."
+    );
+  }
   if (
     args.workitem_identifier !== undefined &&
     (typeof args.workitem_identifier !== "string" || !/^[a-zA-Z0-9_-]+-[0-9]+$/.test(args.workitem_identifier))
@@ -154,6 +167,9 @@ function ceDescription(tool: Tool, actions: readonly string[]): string {
     `${tool.name} in the current Plane workspace. Allowed actions: ${actions.join(", ")}. ` +
     "Use project_id for project resources. List IDs before writing. No PQL or workspace-wide workitem list. " +
     "Paginated results may be incomplete; follow next_cursor before claiming totals. " +
+    (tool.name === "workitem"
+      ? "For create, labels is required: pass an array of verified label UUIDs, or [] only when no labels are intended. Follow writing-plane-requirements for classification. "
+      : "") +
     allowedLines.join("\n")
   );
 }

@@ -270,6 +270,78 @@ describe("ephemeral Pi runtime", () => {
     expect(JSON.stringify(h.events)).not.toContain("model-secret");
   });
 
+  it("recovers from an omitted requirement label before creating a work item through the real agent loop", async () => {
+    const h = harness();
+    const targetProject = "aaaaaaaa-1234-4234-8234-123456789abc";
+    const requirementLabel = "bbbbbbbb-1234-4234-8234-123456789abc";
+    const workitemId = "cccccccc-1234-4234-8234-123456789abc";
+    const name = "登录失败时显示错误提示";
+    const create = { action: "create", project_id: targetProject, name };
+    const calls = [
+      { name: "workitem", arguments: create },
+      { name: "skill", arguments: { action: "load", name: "writing-plane-requirements" } },
+      { name: "label", arguments: { action: "list", project_id: targetProject } },
+      { name: "workitem", arguments: { ...create, labels: [requirementLabel] } },
+      { name: "workitem", arguments: { action: "retrieve", project_id: targetProject, workitem_id: workitemId } },
+    ];
+    const workitem = { id: workitemId, project_id: targetProject, name, labels: [requirementLabel] };
+    h.connection.client.callTool.mockImplementation(async (request) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            request.name === "label"
+              ? { results: [{ id: requirementLabel, name: "需求" }], next_cursor: null }
+              : workitem
+          ),
+        },
+      ],
+    }));
+    let modelCalls = 0;
+    const results: { isError: boolean; text: string }[] = [];
+    await runAiChat(
+      { ...input, messages: [{ role: "user", content: "在另一个项目提个需求，登录失败时显示错误提示。" }] },
+      "http://api:8000",
+      h.emit,
+      new AbortController().signal,
+      {
+        ...h.dependencies,
+        createAgent: (options) =>
+          new Agent({
+            ...options,
+            streamFn: (model, context) => {
+              const last = context.messages.at(-1);
+              if (last?.role === "toolResult") {
+                results.push({
+                  isError: last.isError,
+                  text: last.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n"),
+                });
+              }
+              const call = calls[modelCalls++];
+              const message = assistantMessage(
+                model,
+                call
+                  ? [{ type: "toolCall", id: `call-${modelCalls}`, ...call }]
+                  : [{ type: "text", text: "已创建并关联需求标签。" }],
+                call ? "toolUse" : "stop"
+              );
+              const stream = createAssistantMessageEventStream();
+              stream.push({ type: "done", reason: call ? "toolUse" : "stop", message });
+              return stream;
+            },
+          }),
+      }
+    );
+    expect(results[0]).toMatchObject({ isError: true, text: expect.stringContaining("labels") });
+    expect(results[1]).toEqual({ isError: false, text: BUILTIN_SKILLS[0].instructions });
+    expect(results.slice(2).every((result) => !result.isError)).toBe(true);
+    expect(JSON.parse(results.at(-1)!.text).labels).toEqual([requirementLabel]);
+    expect(h.connection.client.callTool.mock.calls.map(([request]) => request)).toEqual(calls.slice(2));
+    expect(h.events).toContainEqual(expect.objectContaining({ type: "tool", action: "create", status: "error" }));
+    expect(h.events).toContainEqual(expect.objectContaining({ type: "tool", action: "create", status: "complete" }));
+    expect(h.events.at(-1)).toEqual({ type: "done", reason: "complete" });
+  });
+
   it.each(["openai", "anthropic"] as const)(
     "round-trips a skill load through the %s HTTP adapter",
     async (provider) => {
@@ -1031,7 +1103,14 @@ describe("ephemeral Pi runtime", () => {
               model: model.id,
               timestamp: Date.now(),
               stopReason: "toolUse",
-              content: [{ type: "toolCall", id: "write-1", name: "workitem", arguments: { action, project_id } }],
+              content: [
+                {
+                  type: "toolCall",
+                  id: "write-1",
+                  name: "workitem",
+                  arguments: { action, project_id, ...(action === "create" ? { labels: [] } : {}) },
+                },
+              ],
               usage: {
                 input: 0,
                 output: 0,
@@ -1270,7 +1349,11 @@ describe("ephemeral Pi runtime", () => {
                       type: "toolCall",
                       id: "call-1",
                       name: "workitem",
-                      arguments: { action, project_id: input.project_id },
+                      arguments: {
+                        action,
+                        project_id: input.project_id,
+                        ...(action === "create" ? { labels: [] } : {}),
+                      },
                     },
                   ]
                 : finalContent,
@@ -1293,7 +1376,7 @@ describe("ephemeral Pi runtime", () => {
     expect(h.connection.client.callTool).toHaveBeenCalledOnce();
     expect(h.connection.client.callTool.mock.calls[0][0]).toEqual({
       name: "workitem",
-      arguments: { action, project_id: input.project_id },
+      arguments: { action, project_id: input.project_id, ...(action === "create" ? { labels: [] } : {}) },
     });
     expect(h.events).toContainEqual(expect.objectContaining({ type: "tool", action, status: "complete" }));
     expect(h.events.filter((event) => event.type === "text")).toEqual([

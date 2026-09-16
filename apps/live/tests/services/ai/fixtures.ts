@@ -26,6 +26,13 @@ export const catalogue = (): Tool[] =>
       properties: {
         action: { type: "string", enum: [...actions, "delete"] },
         project_id: { type: "string" },
+        ...(name === "workitem"
+          ? {
+              name: { type: "string" },
+              workitem_id: { type: "string" },
+              labels: { anyOf: [{ type: "array", items: { type: "string" } }, { type: "null" }], default: null },
+            }
+          : {}),
         pql: { type: "string" },
         type_id: { type: "string" },
       },

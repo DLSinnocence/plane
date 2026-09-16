@@ -67,6 +67,75 @@ describe("Plane CE MCP adapter", () => {
     expect(() => prepareCeArguments("project", { action: "list", per_page: 1000 }, null)).toThrow("Page size");
   });
 
+  it("rejects work item creation with an omitted label choice before writing", async () => {
+    const callTool = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+    const onMutationStarted = vi.fn();
+    const tool = createCeTools(
+      catalogue(),
+      { callTool },
+      projectId,
+      [],
+      () => undefined,
+      undefined,
+      onMutationStarted
+    ).find((entry) => entry.name === "workitem")!;
+
+    await expect(tool.execute("create", { action: "create", name: "登录失败时显示错误提示" })).rejects.toThrow(
+      /labels/
+    );
+    expect(callTool).not.toHaveBeenCalled();
+    expect(onMutationStarted).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "需求", ["需求"], [null], Array(17).fill(projectId)].map((labels) => ({ labels })))(
+    "rejects invalid creation labels before dispatch: $labels",
+    async ({ labels }) => {
+      const callTool = vi.fn();
+      const tool = createCeTools(catalogue(), { callTool }, projectId, [], () => undefined).find(
+        (entry) => entry.name === "workitem"
+      )!;
+      await expect(tool.execute("invalid-labels", { action: "create", name: "需求", labels })).rejects.toThrow();
+      expect(callTool).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([{ labels: [] }, { labels: [projectId, "aaaaaaaa-1234-4234-8234-123456789abc"] }])(
+    "preserves an explicit creation label choice: $labels",
+    async ({ labels }) => {
+      const callTool = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+      const tool = createCeTools(catalogue(), { callTool }, projectId, [], () => undefined).find(
+        (entry) => entry.name === "workitem"
+      )!;
+      await tool.execute("create", { action: "create", name: "工作项", labels });
+      expect(callTool).toHaveBeenCalledWith(
+        { name: "workitem", arguments: { action: "create", project_id: projectId, name: "工作项", labels } },
+        undefined,
+        expect.any(Object)
+      );
+    }
+  );
+
+  it("leaves label updates and metadata-only changes untouched", async () => {
+    const callTool = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+    const tools = createCeTools(catalogue(), { callTool }, projectId, [], () => undefined);
+    const workitem = tools.find((entry) => entry.name === "workitem")!;
+    const label = tools.find((entry) => entry.name === "label")!;
+    await workitem.execute("update", { action: "update", workitem_id: projectId, name: "改写标题" });
+    await workitem.execute("add", { action: "manage_label", workitem_id: projectId, add_label_id: projectId });
+    await label.execute("label-create", { action: "create", name: "需求" });
+    expect(callTool.mock.calls.map(([request]) => request)).toEqual([
+      {
+        name: "workitem",
+        arguments: { action: "update", project_id: projectId, workitem_id: projectId, name: "改写标题" },
+      },
+      {
+        name: "workitem",
+        arguments: { action: "manage_label", project_id: projectId, workitem_id: projectId, add_label_id: projectId },
+      },
+      { name: "label", arguments: { action: "create", project_id: projectId, name: "需求" } },
+    ]);
+  });
+
   it("passes cancellation and a fixed timeout, scrubs successful results and caps output", async () => {
     const callTool = vi
       .fn()
