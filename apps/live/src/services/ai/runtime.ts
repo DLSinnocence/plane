@@ -99,12 +99,12 @@ function historyMessages(input: AiChatInput, model: Model<Api>): AgentMessage[] 
 export interface AiRuntimeDependencies {
   createAgent: (options: AgentOptions) => Agent;
   connectMcp: typeof connectPlaneMcp;
-  runMs: number;
+  idleMs: number;
 }
 const defaults: AiRuntimeDependencies = {
   createAgent: (options) => new Agent(options),
   connectMcp: connectPlaneMcp,
-  runMs: AI_LIMITS.runMs,
+  idleMs: AI_LIMITS.idleMs,
 };
 
 // A request owns all context and credentials. Nothing is written to disk or a
@@ -163,6 +163,7 @@ export async function runAiChat(
     const delta = (type === "text" ? textRedactor : thinkingRedactor).push(fresh);
     outputChars += delta.length;
     if (outputChars > AI_LIMITS.outputChars) {
+      errorCode = "ai_output_limit";
       abort("limit");
       return;
     }
@@ -172,7 +173,10 @@ export async function runAiChat(
   const onDisconnect = () => abort("cancelled");
   externalSignal.addEventListener("abort", onDisconnect, { once: true });
   if (externalSignal.aborted) onDisconnect();
-  const timer = setTimeout(() => abort("limit"), dependencies.runMs);
+  const timer = setTimeout(() => {
+    errorCode = "ai_idle_timeout";
+    abort("error");
+  }, dependencies.idleMs);
   timer.unref();
   let rejectAborted: (() => void) | undefined;
   const aborted = new Promise<never>((_resolve, reject) => {
@@ -233,6 +237,7 @@ export async function runAiChat(
       });
       unsubscribe = agent.subscribe((event) => {
         if (!active || control.signal.aborted) return;
+        timer.refresh();
         if (event.type === "message_start" && event.message.role === "assistant") {
           streamedChars.clear();
           // Tool announcements in earlier turns are not a final answer.
@@ -252,7 +257,10 @@ export async function runAiChat(
             if (content.type === "text") streamContent("text", content.text, index, true);
             if (content.type === "thinking") streamContent("thinking", content.thinking, index, true);
           }
-          if (event.message.stopReason === "length") abort("limit");
+          if (!control.signal.aborted && event.message.stopReason === "length") {
+            errorCode = "ai_model_output_limit";
+            abort("limit");
+          }
           if (event.message.stopReason === "error" || event.message.stopReason === "aborted") outcome.reason = "error";
         }
         if (event.type === "tool_execution_start") {
@@ -335,16 +343,20 @@ export async function runAiChat(
   if (reason === "error" || reason === "limit") {
     await emit({
       type: "error",
-      code: reason === "limit" ? "ai_run_limit" : errorCode,
+      code: errorCode,
       may_have_changes: mayHaveChanges,
       message:
-        reason === "limit"
-          ? "The assistant reached its execution limit."
-          : errorCode === "ai_tools_unavailable"
-            ? "Plane tools are unavailable. Please try again later."
-            : errorCode === "ai_empty_response"
-              ? "The model finished without an answer. Try again or choose another model in your personal AI settings."
-              : "The model could not complete this request. Check your personal AI settings and try again.",
+        errorCode === "ai_idle_timeout"
+          ? "The assistant stopped because the model or tool did not respond for too long. Please try again."
+          : errorCode === "ai_model_output_limit"
+            ? "The model reached its response length limit before finishing. You can continue the conversation."
+            : errorCode === "ai_output_limit"
+              ? "The response is too large to display in one request. Ask to continue with a shorter answer."
+              : errorCode === "ai_tools_unavailable"
+                ? "Plane tools are unavailable. Please try again later."
+                : errorCode === "ai_empty_response"
+                  ? "The model finished without an answer. Try again or choose another model in your personal AI settings."
+                  : "The model could not complete this request. Check your personal AI settings and try again.",
     });
   }
   await emit({ type: "done", reason });

@@ -56,6 +56,7 @@ def stream_boundary(monkeypatch, settings):
         wait=False,
         entered=None,
         chunks=[b'{"type":"done"}\n'],
+        on_chunk=None,
     )
 
     class Client:
@@ -76,6 +77,8 @@ def stream_boundary(monkeypatch, settings):
                     state.entered.set()
                     await asyncio.Event().wait()
                 for chunk in state.chunks:
+                    if state.on_chunk:
+                        await state.on_chunk()
                     yield chunk
 
             yield SimpleNamespace(status_code=state.status, aiter_bytes=chunks)
@@ -355,24 +358,159 @@ def test_disconnect_while_token_creation_is_in_flight_still_revokes_token(stream
     assert not stream_boundary.cache_values
 
 
-def test_total_turn_deadline_cancels_stalled_upstream_and_revokes_token(stream_boundary, monkeypatch):
+def test_active_stream_has_no_total_turn_deadline(stream_boundary, monkeypatch):
     real_timeout = asyncio.timeout
-    budgets = []
+    monkeypatch.setattr(ai.asyncio, "timeout", lambda seconds: real_timeout(0.01))
 
-    def short_timeout(seconds):
-        budgets.append(seconds)
-        return real_timeout(0.01)
+    async def progress():
+        await asyncio.sleep(0.02)
 
-    monkeypatch.setattr(ai.asyncio, "timeout", short_timeout)
+    stream_boundary.on_chunk = progress
+    stream_boundary.chunks = [
+        b"\n",
+        b'{"type":"text","text":"still working"}\n',
+        b'{"type":"done","reason":"complete"}\n',
+    ]
+    chunks = asyncio.run(collect(ai.stream_agent_turn(payload(), "workspace-id")))
+    assert chunks == [b"\n", *stream_boundary.chunks]
+    stream_boundary.cleanup.assert_called_once_with("token-id")
+    assert not stream_boundary.cache_values
+
+
+def test_healthy_stream_renews_lease_beyond_token_and_lock_expiry(stream_boundary, monkeypatch):
+    clock = [0]
+    expires = {"token": 180, "lock": 150}
+    monkeypatch.setattr(ai, "monotonic", lambda: clock[0])
+
+    def renew(token_id, lock_key, lock_value):
+        assert token_id == "token-id"
+        assert stream_boundary.cache_values[lock_key] == lock_value
+        assert clock[0] < expires["token"] and clock[0] < expires["lock"]
+        expires.update(token=clock[0] + 180, lock=clock[0] + 150)
+
+    refresh = Mock(side_effect=renew)
+    monkeypatch.setattr(ai, "refresh_agent_lease", refresh)
+
+    async def progress():
+        clock[0] += 5
+        assert clock[0] < expires["token"] and clock[0] < expires["lock"]
+        if clock[0] == 450:
+            other = await collect(ai.stream_agent_turn(payload(), "workspace-id"))
+            assert json.loads(other[0])["code"] == "ai_busy"
+
+    stream_boundary.on_chunk = progress
+    stream_boundary.chunks = [b"\n"] * 120 + [b'{"type":"done","reason":"complete"}\n']
+    chunks = asyncio.run(collect(ai.stream_agent_turn(payload(), "workspace-id")))
+    assert chunks == [b"\n", *stream_boundary.chunks]
+    assert refresh.call_count == 20
+    stream_boundary.create.assert_called_once()
+    stream_boundary.cleanup.assert_called_once_with("token-id")
+    assert not stream_boundary.cache_values
+
+
+def test_lease_failure_stops_stream_without_recreating_authority(stream_boundary, monkeypatch):
+    clock = [0]
+    monkeypatch.setattr(ai, "monotonic", lambda: clock[0])
+    refresh = Mock(side_effect=RuntimeError("private lease error"))
+    monkeypatch.setattr(ai, "refresh_agent_lease", refresh)
+
+    async def progress():
+        clock[0] = 30
+
+    stream_boundary.on_chunk = progress
+    chunks = asyncio.run(collect(ai.stream_agent_turn(payload(), "workspace-id")))
+    assert json.loads(chunks[-2])["code"] == "ai_connection_interrupted"
+    assert json.loads(chunks[-1]) == {"type": "done", "reason": "error"}
+    assert b"private" not in b"".join(chunks)
+    refresh.assert_called_once()
+    stream_boundary.create.assert_called_once()
+    stream_boundary.cleanup.assert_called_once_with("token-id")
+    assert not stream_boundary.cache_values
+
+
+def test_disconnect_during_lease_renewal_waits_for_revocation(stream_boundary, monkeypatch):
+    clock = [0]
+    started, release = Event(), Event()
+    order = []
+    monkeypatch.setattr(ai, "monotonic", lambda: clock[0])
+
+    def slow_renew(*args):
+        started.set()
+        assert release.wait(timeout=2)
+        order.append("renewed")
+
+    monkeypatch.setattr(ai, "refresh_agent_lease", slow_renew)
+    stream_boundary.cleanup.side_effect = lambda token_id: order.append("revoked")
+
+    async def progress():
+        clock[0] = 30
+
+    stream_boundary.on_chunk = progress
 
     async def scenario():
-        stream_boundary.wait = True
-        stream_boundary.entered = asyncio.Event()
-        return await asyncio.wait_for(collect(ai.stream_agent_turn(payload(), "workspace-id")), timeout=2)
+        task = asyncio.create_task(collect(ai.stream_agent_turn(payload(), "workspace-id")))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            task.cancel()
+            await asyncio.sleep(0)
+        finally:
+            release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
 
-    chunks = asyncio.run(scenario())
-    assert budgets == [135]
-    assert stream_boundary.entered.is_set()
+    asyncio.run(scenario())
+    assert order == ["renewed", "revoked"]
+    stream_boundary.cleanup.assert_called_once_with("token-id")
+    assert not stream_boundary.cache_values
+
+
+@pytest.mark.parametrize("ownership,updated", [("owned", 1), ("owned", 0), ("replaced", 1), (None, 1)])
+def test_renewal_requires_owned_lock_and_active_unexpired_token(monkeypatch, ownership, updated):
+    now = timezone.now()
+    monkeypatch.setattr(ai.timezone, "now", lambda: now)
+    cache = Mock()
+    cache.get.return_value = ownership
+    cache.touch.return_value = ownership == "owned"
+    manager = Mock()
+    manager.filter.return_value.update.return_value = updated
+    monkeypatch.setattr(ai, "cache", cache)
+    monkeypatch.setattr(ai.APIToken, "objects", manager)
+    if ownership == "owned" and updated == 1:
+        ai.refresh_agent_lease("token-id", "lock-key", "owned")
+    else:
+        with pytest.raises(RuntimeError, match="lease lost"):
+            ai.refresh_agent_lease("token-id", "lock-key", "owned")
+    if ownership == "owned":
+        cache.touch.assert_called_once_with("lock-key", timeout=150)
+        manager.filter.assert_called_once_with(
+            id="token-id", is_service=True, label=AGENT_TOKEN_LABEL, is_active=True, expired_at__gt=now
+        )
+        manager.filter.return_value.update.assert_called_once_with(expired_at=now + timedelta(minutes=3))
+    else:
+        cache.touch.assert_not_called()
+        manager.filter.assert_not_called()
+    manager.create.assert_not_called()
+    cache.add.assert_not_called()
+
+
+def test_renewal_rejects_a_lock_that_expired_before_touch(monkeypatch):
+    cache = Mock()
+    cache.get.return_value = "owned"
+    cache.touch.return_value = False
+    manager = Mock()
+    monkeypatch.setattr(ai, "cache", cache)
+    monkeypatch.setattr(ai.APIToken, "objects", manager)
+    with pytest.raises(RuntimeError, match="lease lost"):
+        ai.refresh_agent_lease("token-id", "lock-key", "owned")
+    manager.filter.assert_not_called()
+
+
+def test_upstream_idle_timeout_interrupts_and_revokes_token(stream_boundary):
+    async def stalled():
+        raise httpx.ReadTimeout("private upstream details")
+
+    stream_boundary.on_chunk = stalled
+    chunks = asyncio.run(collect(ai.stream_agent_turn(payload(), "workspace-id")))
     assert json.loads(chunks[-2]) == {
         "type": "error",
         "code": "ai_connection_interrupted",
@@ -381,6 +519,7 @@ def test_total_turn_deadline_cancels_stalled_upstream_and_revokes_token(stream_b
     assert json.loads(chunks[-1]) == {"type": "done", "reason": "error"}
     stream_boundary.cleanup.assert_called_once_with("token-id")
     assert not stream_boundary.cache_values
+    assert stream_boundary.client.call_args.kwargs["timeout"].read == 20
 
 
 @pytest.mark.parametrize(

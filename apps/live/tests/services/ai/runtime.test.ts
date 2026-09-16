@@ -38,7 +38,7 @@ function harness(prompt?: (event: (value: AgentEvent) => Promise<void>, options:
       return agent as unknown as Agent;
     }),
     connectMcp: vi.fn().mockResolvedValue(connection),
-    runMs: 120_000,
+    idleMs: 120_000,
   };
   const emit = async (event: AiStreamEvent) => {
     events.push(event);
@@ -424,7 +424,7 @@ describe("ephemeral Pi runtime", () => {
           "http://api:8000",
           h.emit,
           new AbortController().signal,
-          { ...h.dependencies, runMs: 2000, createAgent: (options) => new Agent(options) }
+          { ...h.dependencies, idleMs: 2000, createAgent: (options) => new Agent(options) }
         );
         expect(bodies).toHaveLength(2);
         // Pi's Anthropic adapter forwards only type, properties, and required.
@@ -703,7 +703,7 @@ describe("ephemeral Pi runtime", () => {
             await h.emit(event);
           },
           new AbortController().signal,
-          { ...h.dependencies, runMs: 2000, createAgent: (options) => new Agent(options) }
+          { ...h.dependencies, idleMs: 2000, createAgent: (options) => new Agent(options) }
         );
         expect(requests).toEqual([{ method: "POST", path: route, authorization: "Bearer model-secret" }]);
         expect(requestBody).toMatchObject({
@@ -888,7 +888,7 @@ describe("ephemeral Pi runtime", () => {
           await h.emit(event);
         },
         new AbortController().signal,
-        { ...h.dependencies, runMs: 2000, createAgent: (options) => new Agent(options) }
+        { ...h.dependencies, idleMs: 2000, createAgent: (options) => new Agent(options) }
       );
       expect(requests).toEqual([{ method: "POST", path: route, apiKey: "model-secret" }]);
       expect(requestBody).toMatchObject({ model, stream: true, max_tokens: 16_384, thinking });
@@ -994,7 +994,7 @@ describe("ephemeral Pi runtime", () => {
             await h.emit(event);
           },
           new AbortController().signal,
-          { ...h.dependencies, runMs: 2000, createAgent: (options) => new Agent(options) }
+          { ...h.dependencies, idleMs: 2000, createAgent: (options) => new Agent(options) }
         );
         expect(requests).toEqual([{ method: "POST", path: route, authorization: "Bearer model-secret" }]);
         expect(requestBody).toMatchObject({
@@ -1038,7 +1038,7 @@ describe("ephemeral Pi runtime", () => {
     try {
       await runAiChat({ ...input, model_config: config }, "http://api:8000", h.emit, new AbortController().signal, {
         ...h.dependencies,
-        runMs: 2000,
+        idleMs: 2000,
         createAgent: (options) => new Agent(options),
       });
       expect(requests).toEqual([{ method: "POST", path: "/v1/chat/completions", model: input.model_config.model }]);
@@ -1181,7 +1181,32 @@ describe("ephemeral Pi runtime", () => {
     expect(h.connection.client.callTool).not.toHaveBeenCalled();
   });
 
-  it("bounds hanging providers by elapsed time and discards late output", async () => {
+  it.each([false, true])("keeps an active request running beyond two minutes (mutation=%s)", async (mutation) => {
+    vi.useFakeTimers();
+    const h = harness(async (event, options) => {
+      if (mutation) {
+        const tool = options.initialState!.tools!.find((entry) => entry.name === "workitem")!;
+        await tool.execute("update", { action: "update", workitem_id: input.user_id, name: "Updated" });
+      }
+      for (let index = 0; index < 15; index++) {
+        // eslint-disable-next-line no-await-in-loop -- simulate a slow but active provider
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
+        // eslint-disable-next-line no-await-in-loop -- real streaming emits successive events
+        await event({
+          type: "message_update",
+          message: {} as never,
+          assistantMessageEvent: { type: "text_delta", delta: ".", contentIndex: 0, partial: {} as never },
+        });
+      }
+    });
+    const running = runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
+    await vi.advanceTimersByTimeAsync(150_001);
+    await running;
+    expect(h.events.filter((event) => event.type === "error")).toEqual([]);
+    expect(h.events.at(-1)).toEqual({ type: "done", reason: "complete" });
+  });
+
+  it("bounds inactive providers and discards late output", async () => {
     vi.useFakeTimers();
     let sendLate: ((event: AgentEvent) => Promise<void>) | undefined;
     const h = harness(async (event) => {
@@ -1193,7 +1218,8 @@ describe("ephemeral Pi runtime", () => {
     await running;
     expect(h.agent.abort).toHaveBeenCalled();
     expect(h.connection.close).toHaveBeenCalledOnce();
-    expect(h.events.at(-1)).toEqual({ type: "done", reason: "limit" });
+    expect(h.events.at(-2)).toMatchObject({ type: "error", code: "ai_idle_timeout", may_have_changes: false });
+    expect(h.events.at(-1)).toEqual({ type: "done", reason: "error" });
     const count = h.events.length;
     await sendLate?.({
       type: "message_update",
@@ -1201,6 +1227,29 @@ describe("ephemeral Pi runtime", () => {
       assistantMessageEvent: { type: "text_delta", delta: "late", contentIndex: 0, partial: {} as never },
     });
     expect(h.events).toHaveLength(count);
+  });
+
+  it("times out from the last progress and preserves actual mutation tracking", async () => {
+    vi.useFakeTimers();
+    const h = harness(async (event, options) => {
+      const tool = options.initialState!.tools!.find((entry) => entry.name === "workitem")!;
+      await tool.execute("update", { action: "update", workitem_id: input.user_id, name: "Updated" });
+      await new Promise((resolve) => setTimeout(resolve, 110_000));
+      await event({
+        type: "message_update",
+        message: {} as never,
+        assistantMessageEvent: { type: "text_delta", delta: "Checking…", contentIndex: 0, partial: {} as never },
+      });
+      await new Promise(() => undefined);
+    });
+    const running = runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
+    await vi.advanceTimersByTimeAsync(120_001);
+    expect(h.events.some((event) => event.type === "done")).toBe(false);
+    await vi.advanceTimersByTimeAsync(110_000);
+    await running;
+    expect(h.events.at(-2)).toMatchObject({ code: "ai_idle_timeout", may_have_changes: true });
+    expect(h.events.at(-1)).toEqual({ type: "done", reason: "error" });
+    expect(h.connection.close).toHaveBeenCalledOnce();
   });
 
   it("cancels on disconnect without output and cleans the connection", async () => {
@@ -1459,8 +1508,8 @@ describe("ephemeral Pi runtime", () => {
   it.each([
     { stopReason: "stop", text: "", reason: "error", code: "ai_empty_response" },
     { stopReason: "stop", text: "  ", reason: "error", code: "ai_empty_response" },
-    { stopReason: "length", text: "", reason: "limit", code: "ai_run_limit" },
-    { stopReason: "length", text: "Partial answer", reason: "limit", code: "ai_run_limit" },
+    { stopReason: "length", text: "", reason: "limit", code: "ai_model_output_limit" },
+    { stopReason: "length", text: "Partial answer", reason: "limit", code: "ai_model_output_limit" },
   ] as const)("reports $stopReason with '$text' as $code", async ({ stopReason, text, reason, code }) => {
     const h = harness();
     await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, {
@@ -1576,6 +1625,7 @@ describe("ephemeral Pi runtime", () => {
     });
     await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
     expect(h.events.some((event) => event.type === "thinking")).toBe(false);
+    expect(h.events.at(-2)).toMatchObject({ type: "error", code: "ai_output_limit", may_have_changes: false });
     expect(h.events.at(-1)).toEqual({ type: "done", reason: "limit" });
   });
 

@@ -194,7 +194,10 @@
       "verify_changes": "Verify results",
       "verify_prompt": "Check the results of my previous request in Plane before making any further changes.",
       "capability_reasoning": "Reasoning",
-      "custom_model": "Custom model"
+      "custom_model": "Custom model",
+      "idle_timeout": "The model or tool has not responded for too long. The request was stopped; you can retry.",
+      "model_output_limit": "The model reached its response length limit before finishing. You can ask it to continue.",
+      "output_limit": "This response is too large to display in one request. You can ask to continue with a shorter answer."
     }
   },
   "profile": {

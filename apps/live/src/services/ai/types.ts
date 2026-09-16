@@ -2,7 +2,7 @@ import { z } from "zod";
 import { aiMessageSchema, MAX_CHAT_IMAGES } from "./images";
 
 export const AI_LIMITS = {
-  runMs: 120_000,
+  idleMs: 120_000,
   toolMs: 20_000,
   toolResultChars: 32_000,
   outputChars: 100_000,

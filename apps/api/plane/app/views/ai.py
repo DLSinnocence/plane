@@ -4,6 +4,7 @@
 import asyncio
 from datetime import timedelta
 import json
+from time import monotonic
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -176,6 +177,23 @@ def create_agent_token(user_id, workspace_id):
     )
 
 
+def refresh_agent_lease(token_id, lock_key, lock_value):
+    # Never reacquire a lost lock or reactivate a revoked/expired credential.
+    # Keeping the token short-lived also bounds authority after a worker crash.
+    if cache.get(lock_key) != lock_value or not cache.touch(lock_key, timeout=150):
+        raise RuntimeError("AI request lease lost.")
+    now = timezone.now()
+    updated = APIToken.objects.filter(
+        id=token_id,
+        is_service=True,
+        label=AGENT_TOKEN_LABEL,
+        is_active=True,
+        expired_at__gt=now,
+    ).update(expired_at=now + timedelta(minutes=3))
+    if updated != 1 or cache.get(lock_key) != lock_value:
+        raise RuntimeError("AI request lease lost.")
+
+
 async def stream_agent_turn(payload, workspace_id):
     """An ASGI-native stream: no transcript storage or blocking HTTP in the event loop."""
     lock_key = f"plane-ai-turn:{payload['user_id']}"
@@ -200,35 +218,40 @@ async def stream_agent_turn(payload, workspace_id):
         payload["plane_api_token"] = token.token
         # This first frame also makes disconnect observable before connecting upstream.
         yield b"\n"
-        async with asyncio.timeout(135):
-            async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=10), trust_env=False) as client:
-                async with client.stream(
-                    "POST",
-                    f"{settings.AI_AGENT_URL.rstrip('/')}/ai/chat",
-                    headers={"X-Plane-AI-Secret": settings.LIVE_SERVER_SECRET_KEY},
-                    json=payload,
-                ) as upstream:
-                    if upstream.status_code != 200:
-                        code = (
-                            "ai_service_auth"
-                            if upstream.status_code in (401, 403)
-                            else "ai_busy"
-                            if upstream.status_code == 429
-                            else "ai_service_unavailable"
-                        )
-                        yield encode_event(
-                            {
-                                "type": "error",
-                                "code": code,
-                                "may_have_changes": False,
-                                "message": "The AI service is unavailable. Please try again later.",
-                            }
-                        )
-                        yield encode_event({"type": "done", "reason": "error"})
-                        return
-                    upstream_started = True
-                    async for chunk in upstream.aiter_bytes():
-                        yield chunk
+        renewed_at = monotonic()
+        # Read timeout measures silence between chunks; Live sends heartbeats even
+        # during model/tool work. Healthy requests have no total duration limit.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=10), trust_env=False) as client:
+            async with client.stream(
+                "POST",
+                f"{settings.AI_AGENT_URL.rstrip('/')}/ai/chat",
+                headers={"X-Plane-AI-Secret": settings.LIVE_SERVER_SECRET_KEY},
+                json=payload,
+            ) as upstream:
+                if upstream.status_code != 200:
+                    code = (
+                        "ai_service_auth"
+                        if upstream.status_code in (401, 403)
+                        else "ai_busy"
+                        if upstream.status_code == 429
+                        else "ai_service_unavailable"
+                    )
+                    yield encode_event(
+                        {
+                            "type": "error",
+                            "code": code,
+                            "may_have_changes": False,
+                            "message": "The AI service is unavailable. Please try again later.",
+                        }
+                    )
+                    yield encode_event({"type": "done", "reason": "error"})
+                    return
+                upstream_started = True
+                async for chunk in upstream.aiter_bytes():
+                    if monotonic() - renewed_at >= 30:
+                        await sync_to_async(refresh_agent_lease)(token.id, lock_key, lock_value)
+                        renewed_at = monotonic()
+                    yield chunk
     except Exception:
         # Never forward provider responses, URLs, keys, or upstream error bodies.
         # Once accepted, the upstream may execute tools even before its first frame.

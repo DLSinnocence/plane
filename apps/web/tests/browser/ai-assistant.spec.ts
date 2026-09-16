@@ -596,6 +596,46 @@ for (const failure of ["model-error", "interrupted-stream", "empty-response", "r
   });
 }
 
+for (const [code, message] of [
+  ["ai_idle_timeout", "The model or tool has not responded for too long"],
+  ["ai_model_output_limit", "The model reached its response length limit"],
+  ["ai_output_limit", "This response is too large to display"],
+] as const) {
+  test(`${code} explains the interruption without claiming an execution limit`, async ({ page }) => {
+    await mockSettings(page);
+    await page.goto("/?ai-assistant");
+    await open(page);
+    await send(page, "Update and verify the work item");
+    await frames(page, [
+      { type: "tool", id: "write", name: "workitem", action: "update", status: "complete" },
+      { type: "error", code, message: "Provider interruption", may_have_changes: true },
+      { type: "done", reason: code === "ai_idle_timeout" ? "error" : "limit" },
+    ]);
+    await expect(page.getByRole("alert")).toContainText(message);
+    await expect(page.getByRole("alert")).not.toContainText("execution limit");
+    await expect(page.getByRole("alert")).toContainText("Some tool operations may have completed");
+    await expect(page.getByRole("button", { name: "Verify results", exact: true })).toBeVisible();
+  });
+}
+
+test("Chinese interruption identifies inactivity and keeps the write verification warning", async ({ page }) => {
+  await mockSettings(page);
+  await page.goto("/?ai-assistant&lang=zh");
+  await page.getByRole("button", { name: "AI 助手", exact: true }).click();
+  await page.getByRole("textbox", { name: "向助手发送消息" }).fill("修改后检查负责人");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.aiFixture.requests.length)).toBe(1);
+  await frames(page, [
+    { type: "tool", id: "update", name: "workitem_metadata", action: "update", status: "complete" },
+    { type: "error", code: "ai_idle_timeout", message: "Idle timeout", may_have_changes: true },
+    { type: "done", reason: "error" },
+  ]);
+  await expect(page.getByRole("alert")).toContainText("模型或工具长时间没有响应");
+  await expect(page.getByRole("alert")).not.toContainText("本次请求已达到执行上限");
+  await expect(page.getByRole("alert")).toContainText("部分工具操作可能已经完成");
+  await expect(page.getByRole("button", { name: "核对执行结果", exact: true })).toBeVisible();
+});
+
 test("pre-execution service configuration errors preserve the draft and never claim changes", async ({ page }) => {
   await mockSettings(page);
   await page.goto("/?ai-assistant");

@@ -76,7 +76,7 @@
   → Plane REST API（当前用户的短期令牌）
 ```
 
-聊天和模型 Key 不进入应用日志。每轮使用独立的短期 Plane API 凭据，绑定当前工作区，结束或断开后删除。单次执行不再设置模型轮次和工具调用次数上限；仍保留运行超时、输出大小和并发限制，可随时停止。不创建定时任务或持久化 Agent 会话。
+聊天和模型 Key 不进入应用日志。每轮使用独立的短期 Plane API 凭据，绑定当前工作区，结束或断开后删除。单次执行不设置模型轮次、工具调用次数或总时长上限；模型或工具持续有进展时继续执行，仅在连续 120 秒无进展时中断。API 代理按心跳续期当前请求的锁和临时令牌，仍保留连接／读取超时、输出大小和并发限制，可随时停止。不创建定时任务或持久化 Agent 会话。
 
 ## 从源码部署
 
@@ -102,6 +102,10 @@ python3 -m venv .venv-mcp
 把 `.venv-mcp/bin/plane-mcp-server` 的**绝对路径**填写到 `apps/live/.env` 的 `PLANE_MCP_COMMAND`。API 和 Live 需要能够相互访问；若 API 在 Docker、Live 在宿主机，API 的 `AI_AGENT_URL` 必须使用容器能访问的宿主机地址及 Live 路径，不能填容器自身的 localhost。
 
 ## 排查回复中断
+
+旧版本即使移除了轮次限制，仍会在 Live 执行满 120 秒时返回 `ai_run_limit`，API 也有 135 秒总超时。本修复移除了这两处总时长限制，并支持临时令牌和请求锁续期，需同时更新 API 和 Live；新的错误文案需要更新 Web。只拉取代码、刷新网页或只更新其中一个服务不会使完整修复生效。
+
+现在无响应超时返回 `ai_idle_timeout`，模型输出截断返回 `ai_model_output_limit`，累计输出过大返回 `ai_output_limit`，页面分别显示具体原因。“部分工具操作可能已经完成”表示中断前发起过写操作；应先核对结果，避免重复修改。
 
 如果发送消息后没有正文，最后显示 `Assistant response interrupted before completion`，需要检查聊天响应是否被 gzip 压缩。项目使用的 Django 5.2 会将异步流的每一块压成独立 gzip 成员，浏览器可能只读取第一块空白心跳，丢弃后面的正文、错误事件和 `done`（[Django #36656](https://code.djangoproject.com/ticket/36656)）。
 
