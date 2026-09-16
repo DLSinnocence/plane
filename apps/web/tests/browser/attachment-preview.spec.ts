@@ -31,7 +31,7 @@ const canonical = "/preview-assets/canonical?signature=keep%2Bexact&expires=123"
 const filename = "reference.PNG";
 const modal = (page: Page) => page.getByRole("dialog");
 const closeButton = (page: Page) => modal(page).getByRole("button", { name: "attachment.preview.close", exact: true });
-const fileLink = (page: Page, region: string, name = filename) =>
+const fileLink = (page: Page, region: string, name: string) =>
   page.getByTestId(`preview-${region}`).getByRole("link", {
     name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`),
   });
@@ -47,10 +47,8 @@ const attachmentRow = (page: Page, region: string, name = filename) =>
     ? page
         .getByTestId(`preview-${region}`)
         .locator('[data-testid^="attachment-slot-"]:has(> [data-testid^="attachment-slot-label-"])')
-        .filter({ has: page.getByRole("link", { name, exact: true }) })
-    : fileLink(page, region, name).locator('xpath=ancestor::div[.//button[@aria-haspopup="menu"]][1]');
-const downloadLink = (page: Page, region: string) =>
-  attachmentRow(page, region).getByRole("link", { name: "attachment.preview.download", exact: true });
+        .filter({ has: page.getByRole("button", { name, exact: true }).filter({ has: page.locator("img") }) })
+    : thumbnailButton(page, region, name).locator('xpath=ancestor::div[.//button[@aria-haspopup="menu"]][1]');
 const zoomButton = (page: Page, name: "zoom_in" | "zoom_out" | "reset_zoom") =>
   modal(page).getByRole("button", { name: `attachment.preview.${name}`, exact: true });
 const fixtureUrl = (params: Record<string, string> = {}) =>
@@ -184,7 +182,18 @@ for (const region of regions) {
       let choosers = 0;
       page.on("filechooser", () => choosers++);
       await page.goto(fixtureUrl({ filename: name }));
-      await Promise.all(regions.map((entry) => expect(fileLink(page, entry, name)).toBeVisible()));
+      await Promise.all(
+        regions.map(async (entry) => {
+          const source = thumbnailButton(page, entry, name);
+          await expect(source).toBeVisible();
+          await expect(source).toHaveAttribute("aria-label", name);
+          await expect(source).toHaveAttribute("title", name);
+          const row = attachmentRow(page, entry, name);
+          await expect(row).not.toContainText(name);
+          await expect(row.getByRole("link")).toHaveCount(0);
+          await expect(row.getByRole("button", { name: "attachment.preview.download", exact: true })).toHaveCount(0);
+        })
+      );
       const thumbnail = thumbnailImage(page, region, name);
       await expect(thumbnail).toBeVisible();
       await expect(thumbnail).toHaveJSProperty("naturalWidth", mime === "image/gif" ? 1 : 120);
@@ -195,8 +204,8 @@ for (const region of regions) {
         await expect.poll(async () => !(await thumbnail.screenshot()).equals(frame)).toBe(true);
       }
       expect(requests.length).toBeGreaterThan(0);
-      await expect(fileLink(page, region, name)).toHaveAttribute("href", canonical);
-      await thumbnail.click();
+      await expect(thumbnail).toHaveAttribute("src", canonical);
+      await thumbnailButton(page, region, name).click();
       await expect(modal(page)).toHaveAccessibleName(name);
       await expect(modal(page)).toHaveAttribute("aria-modal", "true");
       await expect(modal(page)).toHaveAttribute("data-prevent-outside-click");
@@ -271,7 +280,7 @@ for (const region of regions) {
       await page.goto(fixtureUrl(permissions));
       await expect(thumbnailImage(page, region)).toBeVisible();
       await expect(modal(page)).toHaveCount(0);
-      await fileLink(page, region).click();
+      await thumbnailButton(page, region).click();
       await expectLoaded(page);
       await closeButton(page).click();
       await expect(page.getByTestId("attachment-peek")).toBeVisible();
@@ -282,7 +291,7 @@ for (const region of regions) {
   }
 
   for (const readonly of [false, true]) {
-    test(`${region}: inline and menu actions download the real HTTP image${readonly ? " without edit permissions" : ""}`, async ({
+    test(`${region}: menu actions download the real HTTP image${readonly ? " without edit permissions" : ""}`, async ({
       page,
     }) => {
       const { src, sourcePath, requests, close } = await serveDownload(page);
@@ -292,17 +301,10 @@ for (const region of regions) {
         await expect(thumbnailImage(page, region)).toHaveJSProperty("naturalWidth", 120);
         const row = attachmentRow(page, region);
         const before = await page.getByTestId("preview-state").textContent();
-        const inline = downloadLink(page, region);
-        await expect(inline).toBeVisible();
-        await expect(inline).toHaveAttribute("href", src);
-        await expect(inline).toHaveAttribute("download", filename);
-        await expect(inline).toHaveAttribute("target", "_blank");
-        await expect(inline).toHaveAttribute("rel", "noopener noreferrer");
-        const inlineEvent = page.waitForEvent("download");
-        await inline.click();
-        const inlineDownload = await inlineEvent;
-        expect(inlineDownload.suggestedFilename()).toBe(filename);
-        expect(await inlineDownload.failure()).toBeNull();
+        await expect(row).not.toContainText(filename);
+        await expect(row.getByRole("link")).toHaveCount(0);
+        await expect(row.getByRole("button", { name: "attachment.preview.download", exact: true })).toHaveCount(0);
+        await expect(thumbnailButton(page, region)).toHaveAttribute("title", filename);
         await expect(modal(page)).toHaveCount(0);
         await row.locator('button[aria-haspopup="menu"]').click();
         const items = page.getByRole("menuitem");
@@ -322,7 +324,7 @@ for (const region of regions) {
         await expect(modal(page)).toHaveCount(0);
         await expect(page.getByTestId("attachment-peek")).toBeVisible();
         await expect(page.getByTestId("preview-state")).toHaveText(before!);
-        expect(requests.length).toBeGreaterThanOrEqual(3);
+        expect(requests.length).toBeGreaterThanOrEqual(2);
         expect(requests.every((request) => request.url === sourcePath)).toBe(true);
       } finally {
         await close();
@@ -350,7 +352,7 @@ for (const region of regions) {
     await expect(modal(page)).toHaveCount(0);
     await openedDocument.close();
 
-    const modifiedLink = fileLink(page, region);
+    const modifiedLink = document;
     await modifiedLink.evaluate((element) => {
       window.addEventListener(
         "click",
@@ -362,7 +364,7 @@ for (const region of regions) {
     await expect(modifiedLink).toHaveAttribute("data-click-prevented", "false");
     await expect(modal(page)).toHaveCount(0);
 
-    await fileLink(page, region).click();
+    await thumbnailButton(page, region).click();
     await expectLoaded(page);
     const original = modal(page).getByRole("link", { name: "attachment.preview.download", exact: true });
     await expect(original).toHaveAttribute("href", canonical);
@@ -394,7 +396,7 @@ for (const region of regions) {
       });
       const requested = page.waitForRequest("**/preview-assets/**");
       await page.goto(fixtureUrl());
-      await fileLink(page, region).click();
+      await thumbnailButton(page, region).click();
       await requested;
       await expect(modal(page).getByRole("status")).toHaveText("attachment.preview.loading");
       try {
@@ -407,16 +409,19 @@ for (const region of regions) {
       await completed;
       await expect(modal(page)).toHaveCount(0);
       if (mutation === "remove") {
-        await expect(fileLink(page, region)).toHaveCount(0);
+        await expect(thumbnailButton(page, region)).toHaveCount(0);
       } else {
         if (mutation === "switch-issue") {
           await mutate(page, "switch-issue");
           await expect(page.getByTestId("preview-issue")).toHaveText("issue");
           await expect(modal(page)).toHaveCount(0);
         } else {
-          await expect(fileLink(page, region)).toHaveAttribute("href", "/preview-assets/replaced?signature=unchanged");
+          await expect(thumbnailImage(page, region)).toHaveAttribute(
+            "src",
+            "/preview-assets/replaced?signature=unchanged"
+          );
         }
-        await fileLink(page, region).click();
+        await thumbnailButton(page, region).click();
         const image = await expectLoaded(page);
         await expect(image).toHaveAttribute(
           "src",
@@ -434,7 +439,7 @@ test("legacy row padding does not open the enclosing upload filechooser", async 
   await page.goto(fixtureUrl());
   await expect(thumbnailImage(page, "legacy")).toBeVisible();
   const requestCount = requests.length;
-  const row = fileLink(page, "legacy").locator(
+  const row = thumbnailButton(page, "legacy").locator(
     'xpath=ancestor::div[@role="presentation" and contains(concat(" ", normalize-space(@class), " "), " group ")][1]'
   );
   await expect(row).toHaveAttribute("role", "presentation");
@@ -444,7 +449,7 @@ test("legacy row padding does not open the enclosing upload filechooser", async 
   await expect(modal(page)).toHaveCount(0);
   expect(choosers).toBe(0);
   expect(requests).toHaveLength(requestCount);
-  await fileLink(page, "legacy").click();
+  await thumbnailButton(page, "legacy").click();
   await expectLoaded(page);
   expect(choosers).toBe(0);
 });
@@ -474,7 +479,8 @@ test("failed thumbnails retain the file entry and enlarged preview can retry the
     release();
   }
   await expect(source.getByRole("status")).toHaveText("attachment.preview.error");
-  await expect(fileLink(page, "slots")).toHaveText(filename);
+  await expect(source).toHaveAttribute("title", filename);
+  await expect(source).toHaveAccessibleName(filename);
   await source.click();
   await expect(modal(page).getByRole("alert")).toHaveText("attachment.preview.error");
   available = true;
@@ -490,7 +496,7 @@ test("a corrupt image response offers retry and the original file without showin
     route.fulfill({ status: 200, contentType: "image/png", body: "This is not an image" })
   );
   await page.goto(fixtureUrl());
-  await fileLink(page, "slots").click();
+  await thumbnailButton(page, "slots").click();
   await expect(modal(page).getByRole("alert")).toHaveText("attachment.preview.error");
   await expect(modal(page).getByRole("img")).toHaveCount(0);
   await expect(modal(page).getByRole("button", { name: "attachment.preview.retry" })).toBeEnabled();
@@ -511,7 +517,7 @@ test("a decoded cached source is displayed immediately on first open and reopen"
     await image.decode();
   }, src);
   const openAndClose = async () => {
-    await fileLink(page, "legacy").click();
+    await thumbnailButton(page, "legacy").click();
     await expectLoaded(page);
     await closeButton(page).click();
   };
@@ -531,7 +537,7 @@ test("cookie-authenticated redirect previews an attachment-disposition image and
     await page.goto(fixtureUrl({ src }));
     await expect(thumbnailImage(page, "inbox")).toBeVisible();
     await expect(modal(page)).toHaveCount(0);
-    await fileLink(page, "inbox").click();
+    await thumbnailButton(page, "inbox").click();
     const image = await expectLoaded(page);
     await expect(image).toHaveAttribute("src", src);
     expect(requests.length).toBeGreaterThan(0);
@@ -550,7 +556,7 @@ test("cookie-authenticated redirect previews an attachment-disposition image and
     // Start a fresh document: an already decoded image can remain available in
     // the old document even after its session cookie is removed.
     await page.reload();
-    await fileLink(page, "inbox").click();
+    await thumbnailButton(page, "inbox").click();
     await expect(modal(page).getByRole("alert")).toHaveText("attachment.preview.error");
     expect(requests.at(-1)?.cookie).not.toContain("preview_session=authorized");
   } finally {
@@ -570,7 +576,8 @@ for (const [width, height] of [
     const thumbnail = thumbnailImage(page, "slots");
     await expect(thumbnail).toBeVisible();
     const thumbnailBox = (await thumbnail.boundingBox())!;
-    expect(thumbnailBox.height).toBeLessThanOrEqual(128);
+    expect(thumbnailBox.height).toBeLessThanOrEqual(192);
+    if (height > width) expect(thumbnailBox.height).toBeGreaterThan(180);
     const contentBox = (await page.getByTestId("attachment-slot-content-design").boundingBox())!;
     expect(thumbnailBox.width).toBeLessThanOrEqual(contentBox.width + 1);
     expect(thumbnailBox.width / thumbnailBox.height).toBeCloseTo(width / height, 1);
@@ -607,7 +614,7 @@ test("a long filename stays accessible while the narrow viewer header truncates 
   const labels = englishMessages.attachment.preview;
   const name = "unbroken-filename-".repeat(18) + ".PNG";
   await page.goto(fixtureUrl({ filename: name, "preview-labels": "", lang: "en" }));
-  await fileLink(page, "inbox", name).click();
+  await thumbnailButton(page, "inbox", name).click();
   await expectLoaded(page, name);
   await expect(modal(page)).toHaveAccessibleName(name);
   const title = modal(page).getByRole("heading", { name, exact: true });
@@ -629,7 +636,7 @@ test("a long filename stays accessible while the narrow viewer header truncates 
   const close = modal(page).getByRole("button", { name: labels.close, exact: true });
   await expect(close).toBeInViewport();
   await close.click();
-  await expect(fileLink(page, "inbox", name)).toBeFocused();
+  await expect(thumbnailButton(page, "inbox", name)).toBeFocused();
 });
 
 test("zoom reports actual scale, pans without closing, and resets to the original fit", async ({ page }) => {
@@ -733,7 +740,12 @@ test("real Chinese labels render a dark viewer and frameless inline image artifa
   await expect(source.locator("img")).toHaveJSProperty("naturalWidth", 1000);
   await expect(source.locator("img")).toHaveJSProperty("naturalHeight", 650);
   const row = attachmentRow(page, "slots", name);
-  await expect(row.getByRole("link", { name: labels.download, exact: true })).toBeVisible();
+  await expect(row.getByRole("link")).toHaveCount(0);
+  await expect(row).not.toContainText(name);
+  await expect(source).toHaveAttribute("title", name);
+  const thumbnailBounds = (await source.locator("img").boundingBox())!;
+  expect(thumbnailBounds.height).toBeGreaterThan(180);
+  expect(thumbnailBounds.height).toBeLessThanOrEqual(192);
   const section = page.getByTestId("preview-slots");
   await expect(
     section.getByRole("button", { name: new RegExp(`^${chineseMessages.common.attachments}`) })

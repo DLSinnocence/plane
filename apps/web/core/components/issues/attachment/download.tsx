@@ -12,25 +12,6 @@ import { getFileURL } from "@plane/utils";
 
 type Props = { attachment: TIssueAttachment };
 
-export function AttachmentDownloadLink({ attachment }: Props) {
-  const { t } = useTranslation();
-  const href = getFileURL(attachment.asset_url);
-  if (!href) return null;
-  return (
-    <a
-      href={href}
-      download={attachment.attributes.name}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={(event) => event.stopPropagation()}
-      className="inline-flex shrink-0 items-center gap-1.5 rounded border border-strong bg-layer-2 px-2 py-1 text-11 font-medium text-secondary hover:bg-layer-2-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-    >
-      <Download aria-hidden="true" className="size-3.5" />
-      {t("attachment.preview.download")}
-    </a>
-  );
-}
-
 export function AttachmentDownloadMenuItem({ attachment }: Props) {
   const { t } = useTranslation();
   const href = getFileURL(attachment.asset_url);
