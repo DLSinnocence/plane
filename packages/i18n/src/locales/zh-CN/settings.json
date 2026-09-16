@@ -60,6 +60,8 @@
       "action_create": "创建",
       "action_update": "更新",
       "action_run": "操作",
+      "action_load": "加载",
+      "entity_skill": "写作规范",
       "entity_project": "项目",
       "entity_member": "成员",
       "entity_workitem": "工作项",

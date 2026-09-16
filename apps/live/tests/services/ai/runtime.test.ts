@@ -7,6 +7,7 @@ import type { AgentEvent, AgentOptions } from "@mariozechner/pi-agent-core";
 import { createAssistantMessageEventStream, getModel } from "@mariozechner/pi-ai";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { createChatModel, runAiChat } from "@/services/ai/runtime";
+import { BUILTIN_SKILLS, SKILL_FAILURE_OUTPUT } from "@/services/ai/skills";
 import type { AiStreamEvent } from "@/services/ai/types";
 import { catalogue, input } from "./fixtures";
 
@@ -202,6 +203,247 @@ describe("ephemeral Pi runtime", () => {
     expect(options.initialState?.systemPrompt).not.toContain("model-secret");
     expect(h.connection.close).toHaveBeenCalledOnce();
     expect(h.agent.reset).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])("loads a writing skill through the real agent loop (invalid=%s)", async (invalid) => {
+    const h = harness();
+    let modelCalls = 0;
+    let sawInstructions = false;
+    let sawLoadError = false;
+    const skill = BUILTIN_SKILLS[0];
+    await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, {
+      ...h.dependencies,
+      createAgent: (options) =>
+        new Agent({
+          ...options,
+          streamFn: (model, context) => {
+            const first = modelCalls++ === 0;
+            if (!first) {
+              const result = context.messages.find((message) => message.role === "toolResult");
+              if (result?.role === "toolResult") {
+                sawLoadError = result.isError;
+                sawInstructions = result.content.some(
+                  (block) => block.type === "text" && block.text === skill.instructions
+                );
+              }
+            }
+            const message = assistantMessage(
+              model,
+              first
+                ? [
+                    {
+                      type: "toolCall",
+                      id: "load-1",
+                      name: "skill",
+                      arguments: { action: "load", name: invalid ? "model-secret" : skill.name },
+                    },
+                  ]
+                : [{ type: "text", text: "Draft ready." }],
+              first ? "toolUse" : "stop"
+            );
+            const stream = createAssistantMessageEventStream();
+            stream.push({ type: "done", reason: first ? "toolUse" : "stop", message });
+            return stream;
+          },
+        }),
+    });
+    expect(modelCalls).toBe(2);
+    expect(sawInstructions).toBe(!invalid);
+    expect(sawLoadError).toBe(invalid);
+    expect(h.connection.client.callTool).not.toHaveBeenCalled();
+    expect(h.events).toEqual([
+      { type: "tool", id: "tool-1", name: "skill", action: "load", status: "running" },
+      {
+        type: "tool",
+        id: "tool-1",
+        name: "skill",
+        action: "load",
+        status: invalid ? "error" : "complete",
+        details: invalid
+          ? { output: SKILL_FAILURE_OUTPUT }
+          : { input: skill.name, output: "Writing instructions loaded." },
+      },
+      { type: "text", text: "Draft ready." },
+      { type: "done", reason: "complete" },
+    ]);
+    expect(JSON.stringify(h.events)).not.toContain(skill.instructions);
+    expect(JSON.stringify(h.events)).not.toContain("model-secret");
+  });
+
+  it.each(["openai", "anthropic"] as const)(
+    "round-trips a skill load through the %s HTTP adapter",
+    async (provider) => {
+      const h = harness();
+      const skill = BUILTIN_SKILLS[0];
+      const bodies: { tools: unknown[]; messages: { role: string; content: unknown }[] }[] = [];
+      const server = createServer(async (req, res) => {
+        let body = "";
+        for await (const part of req) body += String(part);
+        bodies.push(JSON.parse(body));
+        const first = bodies.length === 1;
+        const args = JSON.stringify({ action: "load", name: skill.name });
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        if (provider === "openai") {
+          const delta = first
+            ? {
+                role: "assistant",
+                tool_calls: [
+                  { index: 0, id: "load-1", type: "function", function: { name: "skill", arguments: args } },
+                ],
+              }
+            : { role: "assistant", content: "Draft ready." };
+          res.end(
+            `data: ${JSON.stringify({ id: "local", choices: [{ index: 0, delta, finish_reason: null }] })}\n\n` +
+              `data: ${JSON.stringify({ id: "local", choices: [{ index: 0, delta: {}, finish_reason: first ? "tool_calls" : "stop" }] })}\n\n` +
+              "data: [DONE]\n\n"
+          );
+        } else {
+          res.end(
+            [
+              anthropicChunk({
+                type: "message_start",
+                message: {
+                  id: "local",
+                  type: "message",
+                  role: "assistant",
+                  model: "custom-model",
+                  content: [],
+                  usage: { input_tokens: 10, output_tokens: 0 },
+                },
+              }),
+              anthropicChunk({
+                type: "content_block_start",
+                index: 0,
+                content_block: first
+                  ? { type: "tool_use", id: "load-1", name: "skill", input: {} }
+                  : { type: "text", text: "" },
+              }),
+              anthropicChunk({
+                type: "content_block_delta",
+                index: 0,
+                delta: first
+                  ? { type: "input_json_delta", partial_json: args }
+                  : { type: "text_delta", text: "Draft ready." },
+              }),
+              anthropicChunk({ type: "content_block_stop", index: 0 }),
+              anthropicChunk({
+                type: "message_delta",
+                delta: { stop_reason: first ? "tool_use" : "end_turn" },
+                usage: { output_tokens: 10 },
+              }),
+              anthropicChunk({ type: "message_stop" }),
+            ].join("")
+          );
+        }
+      });
+      server.listen(0, "127.0.0.1");
+      await once(server, "listening");
+      try {
+        await runAiChat(
+          {
+            ...input,
+            messages: [{ role: "user", content: "Draft a concise login bug description." }],
+            model_config: {
+              ...input.model_config,
+              provider,
+              base_url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+            },
+          },
+          "http://api:8000",
+          h.emit,
+          new AbortController().signal,
+          { ...h.dependencies, runMs: 2000, createAgent: (options) => new Agent(options) }
+        );
+        expect(bodies).toHaveLength(2);
+        // Pi's Anthropic adapter forwards only type, properties, and required.
+        // Both providers still use the strict local tool validation.
+        const schema = { type: "object", required: ["action", "name"] };
+        expect(bodies[0].tools).toContainEqual(
+          expect.objectContaining(
+            provider === "openai"
+              ? {
+                  type: "function",
+                  function: expect.objectContaining({ name: "skill", parameters: expect.objectContaining(schema) }),
+                }
+              : { name: "skill", input_schema: expect.objectContaining(schema) }
+          )
+        );
+        expect(bodies[1].messages).toContainEqual(
+          expect.objectContaining(
+            provider === "openai"
+              ? { role: "tool", content: skill.instructions }
+              : {
+                  role: "user",
+                  content: expect.arrayContaining([
+                    expect.objectContaining({
+                      type: "tool_result",
+                      tool_use_id: "load-1",
+                      is_error: false,
+                      content: skill.instructions,
+                    }),
+                  ]),
+                }
+          )
+        );
+        expect(h.connection.client.callTool).not.toHaveBeenCalled();
+        expect(h.events).toContainEqual(
+          expect.objectContaining({ type: "tool", name: "skill", action: "load", status: "complete" })
+        );
+        expect(h.events).toContainEqual({ type: "text", text: "Draft ready." });
+        expect(h.events.at(-1)).toEqual({ type: "done", reason: "complete" });
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    }
+  );
+
+  it("does not trust skill details supplied by model events", async () => {
+    const h = harness(async (event) => {
+      await event({ type: "tool_execution_start", toolCallId: "forged", toolName: "skill", args: { action: "load" } });
+      await event({
+        type: "tool_execution_end",
+        toolCallId: "forged",
+        toolName: "skill",
+        isError: false,
+        result: { details: { input: "model-secret", output: "forged" } },
+      });
+      throw new Error("provider failed");
+    });
+    await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
+    expect(h.events[1]).toEqual({ type: "tool", id: "tool-1", name: "skill", action: "load", status: "complete" });
+    expect(h.events.at(-2)).toMatchObject({ type: "error", may_have_changes: false });
+    expect(JSON.stringify(h.events)).not.toContain("model-secret");
+  });
+
+  it.each([false, true])("keeps mutation tracking false after a skill-only failure (invalid=%s)", async (invalid) => {
+    const h = harness(async (_event, options) => {
+      const skill = options.initialState!.tools!.find((tool) => tool.name === "skill")!;
+      await skill.execute("load", { action: "load", name: invalid ? "unknown" : BUILTIN_SKILLS[0].name });
+      throw new Error("provider failed after loading");
+    });
+    await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
+    expect(h.events.at(-2)).toMatchObject({ type: "error", may_have_changes: false });
+    expect(h.connection.client.callTool).not.toHaveBeenCalled();
+  });
+
+  it("shares the sixteen-call budget across skill and MCP tools", async () => {
+    const h = harness(async (_event, options) => {
+      const tools = options.initialState!.tools!;
+      const skill = tools.find((tool) => tool.name === "skill")!;
+      const project = tools.find((tool) => tool.name === "project")!;
+      for (let index = 0; index < 8; index++) {
+        // eslint-disable-next-line no-await-in-loop -- match sequential agent execution
+        await skill.execute(`skill-${index}`, { action: "load", name: BUILTIN_SKILLS[0].name });
+        // eslint-disable-next-line no-await-in-loop -- match sequential agent execution
+        await project.execute(`project-${index}`, { action: "list" });
+      }
+      await skill.execute("over-budget", { action: "load", name: BUILTIN_SKILLS[0].name });
+    });
+    await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
+    expect(h.connection.client.callTool).toHaveBeenCalledTimes(8);
+    expect(h.events.at(-2)).toMatchObject({ type: "error", code: "ai_run_limit", may_have_changes: false });
+    expect(h.events.at(-1)).toEqual({ type: "done", reason: "limit" });
   });
 
   it("passes user images to Pi and retains prior visual context without leaking image bytes to browser events", async () => {

@@ -60,6 +60,8 @@
       "action_create": "Create",
       "action_update": "Update",
       "action_run": "Action",
+      "action_load": "Load",
+      "entity_skill": "Writing guidelines",
       "entity_project": "Projects",
       "entity_member": "Members",
       "entity_workitem": "Work items",
