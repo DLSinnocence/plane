@@ -42,8 +42,10 @@ export function agentToolLabelKeys(tool: AgentToolEvent): { action: string; enti
     "workitem_link",
     "cycle",
     "module",
+    "skill",
   ];
   const actions: Record<string, string> = {
+    load: "load",
     list: "read",
     retrieve: "read",
     retrieve_by_identifier: "read",

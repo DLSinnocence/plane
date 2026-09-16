@@ -130,6 +130,25 @@ test("preserves canonical text and tool statuses with stable IDs", async () => {
   assert.equal(events[1].action, "list");
 });
 
+test("preserves skill loading progress and safe details across stream chunks", async () => {
+  const loading = { type: "tool", id: "skill-1", name: "skill", action: "load", status: "running" };
+  const frames = [
+    loading,
+    {
+      ...loading,
+      status: "complete",
+      details: { input: "writing-plane-requirements", output: "Loaded writing-plane-requirements." },
+    },
+    { ...loading, id: "skill-2" },
+    { ...loading, id: "skill-2", status: "error", details: { output: "Skill unavailable." } },
+    { type: "done", reason: "complete" },
+  ];
+  const bytes = encoder.encode(frames.map((frame) => JSON.stringify(frame)).join("\n"));
+  const events = [];
+  await readAgentStream(stream(Array.from(bytes, (byte) => new Uint8Array([byte]))), (event) => events.push(event));
+  assert.deepEqual(events, frames);
+});
+
 test("rejects noncanonical text fields and tool statuses", async () => {
   const frames = [
     { type: "text", delta: "not canonical" },
