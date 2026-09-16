@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AiChatInput } from "./types";
+import { createMetadataCaller, workitemMetadataTool } from "./metadata";
 
 export interface AiMcpConnection {
   client: Pick<Client, "callTool">;
@@ -56,7 +57,17 @@ export async function connectPlaneMcp(
     }
     if (cursor || tools.length > 100) throw new Error("Unsupported tool catalogue.");
     signal.throwIfAborted();
-    return { client, tools, close };
+    const callMetadata = createMetadataCaller(input, apiBaseUrl);
+    return {
+      client: {
+        callTool: (params, schema, options) =>
+          params.name === workitemMetadataTool.name
+            ? callMetadata(params.arguments ?? {}, options?.signal)
+            : client.callTool(params, schema, options),
+      },
+      tools: [...tools.filter((tool) => tool.name !== workitemMetadataTool.name), workitemMetadataTool],
+      close,
+    };
   } catch {
     await close();
     throw new Error("Plane tools are unavailable.");

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   connect: vi.fn(),
   listTools: vi.fn(),
   close: vi.fn(),
+  callTool: vi.fn(),
 }));
 vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
   getDefaultEnvironment: () => ({ PATH: "/usr/bin" }),
@@ -19,6 +20,7 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
   Client: class {
     connect = mocks.connect;
     listTools = mocks.listTools;
+    callTool = mocks.callTool;
   },
 }));
 
@@ -56,6 +58,37 @@ describe("official Plane MCP subprocess", () => {
     control.abort();
     await connection.close();
     expect(mocks.close).toHaveBeenCalledOnce();
+  });
+
+  it("routes the application-owned metadata tool to REST and other tools to MCP", async () => {
+    const fetchApi = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ id: input.user_id, parent: null })));
+    vi.stubGlobal("fetch", fetchApi);
+    mocks.callTool.mockResolvedValue({ content: [] });
+    mocks.listTools.mockResolvedValue({ tools: [{ name: "workitem_metadata", inputSchema: { type: "object" } }] });
+    const signal = new AbortController().signal;
+    const connection = await connectPlaneMcp(input, "http://api:8000", signal);
+    try {
+      expect(connection.tools.filter((tool) => tool.name === "workitem_metadata")).toHaveLength(1);
+      expect(connection.tools[0].inputSchema.properties).toHaveProperty("state_assignees");
+      await connection.client.callTool(
+        {
+          name: "workitem_metadata",
+          arguments: { action: "retrieve", project_id: input.project_id, workitem_id: input.user_id },
+        },
+        undefined,
+        { signal }
+      );
+      expect(fetchApi).toHaveBeenCalledOnce();
+      expect(mocks.callTool).not.toHaveBeenCalled();
+      const request = { name: "project", arguments: { action: "list" } };
+      await connection.client.callTool(request, undefined, { signal });
+      expect(mocks.callTool).toHaveBeenCalledWith(request, undefined, { signal });
+    } finally {
+      await connection.close();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("cleans a partially started child and sanitizes startup errors", async () => {

@@ -499,8 +499,8 @@ describe("ephemeral Pi runtime", () => {
     expect(h.connection.client.callTool).not.toHaveBeenCalled();
   });
 
-  it("shares the sixteen-call budget across skill and MCP tools", async () => {
-    const h = harness(async (_event, options) => {
+  it("allows skill and MCP calls beyond the former shared budget", async () => {
+    const h = harness(async (event, options) => {
       const tools = options.initialState!.tools!;
       const skill = tools.find((tool) => tool.name === "skill")!;
       const project = tools.find((tool) => tool.name === "project")!;
@@ -510,12 +510,16 @@ describe("ephemeral Pi runtime", () => {
         // eslint-disable-next-line no-await-in-loop -- match sequential agent execution
         await project.execute(`project-${index}`, { action: "list" });
       }
-      await skill.execute("over-budget", { action: "load", name: BUILTIN_SKILLS[0].name });
+      await skill.execute("additional-load", { action: "load", name: BUILTIN_SKILLS[0].name });
+      await event({
+        type: "message_end",
+        message: assistantMessage(createChatModel(input.model_config), [{ type: "text", text: "All checked." }]),
+      });
     });
     await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
     expect(h.connection.client.callTool).toHaveBeenCalledTimes(8);
-    expect(h.events.at(-2)).toMatchObject({ type: "error", code: "ai_run_limit", may_have_changes: false });
-    expect(h.events.at(-1)).toEqual({ type: "done", reason: "limit" });
+    expect(h.events.some((event) => event.type === "error")).toBe(false);
+    expect(h.events.at(-1)).toEqual({ type: "done", reason: "complete" });
   });
 
   it("passes user images to Pi and retains prior visual context without leaking image bytes to browser events", async () => {
@@ -1211,15 +1215,20 @@ describe("ephemeral Pi runtime", () => {
     expect(h.events).toEqual([]);
   });
 
-  it("stops after sixteen MCP calls and does not execute the seventeenth", async () => {
-    const h = harness(async (_event, options) => {
+  it("completes more than sixteen MCP calls", async () => {
+    const h = harness(async (event, options) => {
       const tool = options.initialState!.tools![0];
       // eslint-disable-next-line no-await-in-loop -- model tool execution is deliberately sequential
-      for (let index = 0; index < 17; index++) await tool.execute(`call-${index}`, { action: "list" });
+      for (let index = 0; index < 32; index++) await tool.execute(`call-${index}`, { action: "list" });
+      await event({
+        type: "message_end",
+        message: assistantMessage(createChatModel(input.model_config), [{ type: "text", text: "All checked." }]),
+      });
     });
     await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
-    expect(h.connection.client.callTool).toHaveBeenCalledTimes(16);
-    expect(h.events.at(-1)).toEqual({ type: "done", reason: "limit" });
+    expect(h.connection.client.callTool).toHaveBeenCalledTimes(32);
+    expect(h.events.at(-1)).toEqual({ type: "done", reason: "complete" });
+    expect(h.events.some((event) => event.type === "error")).toBe(false);
   });
 
   it.each([false, true])(
@@ -1570,12 +1579,34 @@ describe("ephemeral Pi runtime", () => {
     expect(h.events.at(-1)).toEqual({ type: "done", reason: "limit" });
   });
 
-  it("stops excessive LLM turns", async () => {
-    const h = harness(async (event) => {
-      // eslint-disable-next-line no-await-in-loop -- simulate successive model turns
-      for (let index = 0; index < 9; index++) await event({ type: "turn_start" });
+  it("completes a real agent loop beyond eight turns and sixteen tool calls", async () => {
+    const h = harness();
+    let turns = 0;
+    await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, {
+      ...h.dependencies,
+      createAgent: (options) =>
+        new Agent({
+          ...options,
+          streamFn: (model) => {
+            const turn = turns++;
+            const finished = turn === 20;
+            const message = assistantMessage(
+              model,
+              finished
+                ? [{ type: "text", text: "All checked." }]
+                : [{ type: "toolCall", id: `call-${turn}`, name: "project", arguments: { action: "list" } }],
+              finished ? "stop" : "toolUse"
+            );
+            const stream = createAssistantMessageEventStream();
+            stream.push({ type: "done", reason: finished ? "stop" : "toolUse", message });
+            return stream;
+          },
+        }),
     });
-    await runAiChat(input, "http://api:8000", h.emit, new AbortController().signal, h.dependencies);
-    expect(h.events.at(-1)).toEqual({ type: "done", reason: "limit" });
+    expect(turns).toBe(21);
+    expect(h.connection.client.callTool).toHaveBeenCalledTimes(20);
+    expect(h.events).toContainEqual({ type: "text", text: "All checked." });
+    expect(h.events.at(-1)).toEqual({ type: "done", reason: "complete" });
+    expect(h.connection.close).toHaveBeenCalledOnce();
   });
 });

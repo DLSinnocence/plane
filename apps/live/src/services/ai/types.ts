@@ -4,8 +4,6 @@ import { aiMessageSchema, MAX_CHAT_IMAGES } from "./images";
 export const AI_LIMITS = {
   runMs: 120_000,
   toolMs: 20_000,
-  turns: 8,
-  calls: 16,
   toolResultChars: 32_000,
   outputChars: 100_000,
   concurrentRuns: 8,

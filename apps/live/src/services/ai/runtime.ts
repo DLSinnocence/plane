@@ -122,8 +122,6 @@ export async function runAiChat(
   let agent: Agent | undefined;
   let unsubscribe: (() => void) | undefined;
   let active = true;
-  let calls = 0;
-  let turns = 0;
   let outputChars = 0;
   let hasAnswerText = false;
   // SDK final messages can contain blocks not accompanied by delta events.
@@ -193,13 +191,7 @@ export async function runAiChat(
         control.signal.throwIfAborted();
       }
       const model = createChatModel(input.model_config);
-      const takeCall = () => {
-        control.signal.throwIfAborted();
-        if (++calls > AI_LIMITS.calls) {
-          abort("limit");
-          throw new Error("Tool call limit reached.");
-        }
-      };
+      const takeCall = () => control.signal.throwIfAborted();
       const recordDetails = (id: string, name: string, details: AiToolDetails) => {
         if (active && !control.signal.aborted) verifiedDetails.set(id, { name, details });
       };
@@ -241,10 +233,6 @@ export async function runAiChat(
       });
       unsubscribe = agent.subscribe((event) => {
         if (!active || control.signal.aborted) return;
-        if (event.type === "turn_start" && ++turns > AI_LIMITS.turns) {
-          abort("limit");
-          return;
-        }
         if (event.type === "message_start" && event.message.role === "assistant") {
           streamedChars.clear();
           // Tool announcements in earlier turns are not a final answer.

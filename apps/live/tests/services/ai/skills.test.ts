@@ -39,15 +39,15 @@ describe("built-in writing skills", () => {
     expect(record).not.toHaveBeenCalled();
   });
 
-  it("honors cancellation and the shared runtime budget before returning instructions", async () => {
+  it("honors cancellation before returning instructions", async () => {
     const record = vi.fn();
     const takeCall = vi.fn();
     await expect(createSkillTool(takeCall, record).execute("cancelled", args, AbortSignal.abort())).rejects.toThrow();
     expect(takeCall).not.toHaveBeenCalled();
     takeCall.mockImplementation(() => {
-      throw new Error("Tool call limit reached.");
+      throw new Error("Run cancelled.");
     });
-    await expect(createSkillTool(takeCall, record).execute("limited", args)).rejects.toThrow("limit");
+    await expect(createSkillTool(takeCall, record).execute("cancelled", args)).rejects.toThrow("cancelled");
     expect(record).not.toHaveBeenCalled();
   });
 

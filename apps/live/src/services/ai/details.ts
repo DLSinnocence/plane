@@ -8,6 +8,9 @@ const fields = [
   "id",
   "project_id",
   "workitem_id",
+  "parent",
+  "parent_id",
+  "created_by",
   "state_id",
   "label_id",
   "comment_id",
@@ -121,6 +124,24 @@ export function projectToolDetails(
         const safe = visit(child, depth + 1);
         if (safe !== undefined) result[key] = safe;
       }
+    }
+    const assignments = own(value, "state_assignees");
+    if (assignments && typeof assignments === "object" && !Array.isArray(assignments)) {
+      const safeAssignments: Record<string, string[]> = {};
+      const keys = Object.keys(assignments);
+      if (keys.length > 100) truncated = true;
+      for (const key of keys.slice(0, 100)) {
+        const users = own(assignments, key);
+        if (!uuid.test(key) || redact(key) !== key || !Array.isArray(users)) continue;
+        if (users.length > 16) truncated = true;
+        const safeUsers: string[] = [];
+        for (let i = 0; i < Math.min(users.length, 16); i++) {
+          const user = own(users, String(i));
+          if (typeof user === "string" && uuid.test(user) && redact(user) === user) safeUsers.push(user);
+        }
+        safeAssignments[key] = safeUsers;
+      }
+      result.state_assignees = safeAssignments;
     }
     return result;
   };

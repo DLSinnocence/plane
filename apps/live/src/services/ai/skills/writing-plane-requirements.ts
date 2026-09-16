@@ -2,7 +2,7 @@ export const writingPlaneRequirements = {
   name: "writing-plane-requirements",
   description:
     "Use before drafting, creating, rewriting, or simplifying Plane work item titles and descriptions, " +
-    "including requests such as 提需求. Creation includes choosing and applying labels. " +
+    "including requests such as 提需求. Creation includes reference items, parent selection and labels. " +
     "Also load when the user names this skill. Changes only to status, assignees, or other metadata do not need it.",
   instructions: `# 编写简洁的 Plane 工作项
 
@@ -10,6 +10,15 @@ export const writingPlaneRequirements = {
 2. 用一小段话说明需求，必要时补充少量期望行为；简单需求用一两句话即可，每个要点表达一个意思。
 3. 默认正文只包含需求与期望结果，不自动添加验收标准、实现方案、测试计划或开发记录。用户明确要求某类内容时按其要求补充；精简已有描述时保留重要约束和期望行为。
 4. 返回或写入前，删除重复内容和未经用户要求扩展的功能，确认标题与正文表达同一目标。
+
+## 参考单据与父需求
+
+创建前，先确定目标项目，通过 workitem/search 或 workitem/list 找到两三张相关的已有工作项，再用 workitem/retrieve 读取正文；比较标题前缀、描述结构、标签和 parent。沿用相关单据的命名和简洁程度，内容仍以本次需求为准。用户指定参考单据时优先读取它；查不到同类单据时使用上面的默认写法。仅要求独立草稿且未要求参考项目时，可直接起草。
+
+1. 检查同类单据是否归属于某个父需求，并搜索与本次范围对应的父需求。例如客户端需求应查找已有的“客户端”父需求，读取其内容并确认与目标项目及需求范围一致，而不是只给标题加“客户端”前缀。
+2. 用户明确指定父需求时，核实其真实 ID；未指定时，若已有单据和父需求内容能明确确认归属，则复用该父需求。候选有歧义时只询问影响归属的问题；没有合适父需求时创建独立工作项，不擅自新建汇总父需求。明确要求独立工作项时按用户要求执行。
+3. 创建后通过 workitem_metadata/update 设置 parent 为已核实的父需求 UUID，再用 workitem_metadata/retrieve 核实。父子必须在同一项目；调整已有工作项时检查祖先关系，避免自身或后代成为父项。挂载失败时说明工作项已创建但归属未完成，先读取再决定是否重试，避免重复建单。
+4. 仅改写已有标题或描述时保留父需求和各阶段负责人；需要调整归属或负责人时仅修改用户要求的字段。
 
 ## 创建时的标签
 

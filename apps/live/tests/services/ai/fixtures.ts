@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { workitemMetadataTool } from "@/services/ai/metadata";
 import { CE_ACTIONS } from "@/services/ai/tools";
 import type { AiChatInput } from "@/services/ai/types";
 
@@ -17,24 +18,26 @@ export const input: AiChatInput = {
   plane_api_token: "plane_api_test-secret",
 };
 export const catalogue = (): Tool[] =>
-  Object.entries(CE_ACTIONS).map(([name, actions]) => ({
-    name,
-    description: "Cloud tool supporting all operations and PQL.",
-    inputSchema: {
-      type: "object",
-      required: ["action"],
-      properties: {
-        action: { type: "string", enum: [...actions, "delete"] },
-        project_id: { type: "string" },
-        ...(name === "workitem"
-          ? {
-              name: { type: "string" },
-              workitem_id: { type: "string" },
-              labels: { anyOf: [{ type: "array", items: { type: "string" } }, { type: "null" }], default: null },
-            }
-          : {}),
-        pql: { type: "string" },
-        type_id: { type: "string" },
+  Object.entries(CE_ACTIONS)
+    .map<Tool>(([name, actions]) => ({
+      name,
+      description: "Cloud tool supporting all operations and PQL.",
+      inputSchema: {
+        type: "object",
+        required: ["action"],
+        properties: {
+          action: { type: "string", enum: [...actions, "delete"] },
+          project_id: { type: "string" },
+          ...(name === "workitem"
+            ? {
+                name: { type: "string" },
+                workitem_id: { type: "string" },
+                labels: { anyOf: [{ type: "array", items: { type: "string" } }, { type: "null" }], default: null },
+              }
+            : {}),
+          pql: { type: "string" },
+          type_id: { type: "string" },
+        },
       },
-    },
-  }));
+    }))
+    .map((tool) => (tool.name === workitemMetadataTool.name ? structuredClone(workitemMetadataTool) : tool));

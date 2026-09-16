@@ -60,9 +60,10 @@ export function agentToolLabelKeys(tool: AgentToolEvent): { action: string; enti
     manage_label: "update",
     manage_workitems: "update",
   };
+  const entity = tool.name === "workitem_metadata" ? "workitem" : tool.name;
   return {
     action: `account_settings.ai.action_${actions[tool.action ?? ""] ?? "run"}`,
-    entity: `account_settings.ai.entity_${entities.includes(tool.name) ? tool.name : "workspace"}`,
+    entity: `account_settings.ai.entity_${entities.includes(entity) ? entity : "workspace"}`,
   };
 }
 export function canSendAgentMessage(draft: string, busy: boolean, configured: boolean | null, imageCount = 0): boolean {

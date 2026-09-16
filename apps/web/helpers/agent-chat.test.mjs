@@ -58,6 +58,10 @@ test("friendly labels use known translation keys and never raw tool identifiers"
     }
   );
   assert.deepEqual(
+    agentToolLabelKeys({ type: "tool", name: "workitem_metadata", action: "update", status: "running" }),
+    { action: "account_settings.ai.action_update", entity: "account_settings.ai.entity_workitem" }
+  );
+  assert.deepEqual(
     agentToolLabelKeys({ type: "tool", name: "unknown_internal_name", action: "unknown_action", status: "running" }),
     {
       action: "account_settings.ai.action_run",

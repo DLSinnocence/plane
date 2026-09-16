@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import { AI_LIMITS } from "./types";
 import type { AiToolDetails } from "./types";
 import { parseToolPayload, projectToolDetails, TOOL_FAILURE_OUTPUT } from "./details";
+import { validateMetadataArguments, workitemMetadataTool } from "./metadata";
 
 // Plane MCP 0.3.2 action names, checked against this CE checkout's /api/v1
 // URL table. Do not expose its legacy aliases, PQL, dependencies/custom relations,
@@ -22,6 +23,7 @@ export const CE_ACTIONS: Readonly<Record<string, readonly string[]>> = {
     "manage_assignee",
     "manage_label",
   ],
+  workitem_metadata: ["retrieve", "update"],
   state: ["list", "retrieve", "create", "update"],
   label: ["list", "retrieve", "create", "update"],
   workitem_comment: ["list", "retrieve", "create", "update"],
@@ -148,10 +150,12 @@ export function prepareCeArguments(name: string, raw: Record<string, unknown>, p
     (typeof args.per_page !== "number" || !Number.isInteger(args.per_page) || args.per_page < 1 || args.per_page > 100)
   )
     throw new Error("Page size must be between 1 and 100.");
+  if (name === "workitem_metadata") validateMetadataArguments(args);
   return args;
 }
 
 function ceDescription(tool: Tool, actions: readonly string[]): string {
+  if (tool.name === "workitem_metadata") return workitemMetadataTool.description ?? "";
   // Keep only action documentation that the backend can actually execute. The
   // server's global instructions describe unsupported cloud features and PQL.
   const lines = (tool.description ?? "").split("\n");
@@ -168,7 +172,8 @@ function ceDescription(tool: Tool, actions: readonly string[]): string {
     "Use project_id for project resources. List IDs before writing. No PQL or workspace-wide workitem list. " +
     "Paginated results may be incomplete; follow next_cursor before claiming totals. " +
     (tool.name === "workitem"
-      ? "For create, labels is required: pass an array of verified label UUIDs, or [] only when no labels are intended. Follow writing-plane-requirements for classification. "
+      ? "For create, labels is required: pass an array of verified label UUIDs, or [] only when no labels are intended. Follow writing-plane-requirements for classification, reference items and parent selection. " +
+        "Use workitem_metadata for parent changes and stage assignments; manage_assignee cannot change this installation's workflow assignments. "
       : "") +
     allowedLines.join("\n")
   );
@@ -261,7 +266,8 @@ export function createCeTools(
             const details = projectToolDetails(
               args,
               payload,
-              tool.name === "workitem" || (["cycle", "module"].includes(tool.name) && args.action === "list_workitems"),
+              ["workitem", "workitem_metadata"].includes(tool.name) ||
+                (["cycle", "module"].includes(tool.name) && args.action === "list_workitems"),
               (value) => sanitizeToolText(value, secrets)
             );
             if (payload === undefined) {
