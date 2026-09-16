@@ -11,6 +11,8 @@ export { CustomSearchSelect } from "../../../../../packages/ui/src/dropdowns/cus
 export { AlertModalCore } from "../../../../../packages/ui/src/modals/alert-modal";
 export { CustomMenu } from "../../../../../packages/ui/src/dropdowns/custom-menu";
 export { ContextMenu } from "../../../../../packages/ui/src/dropdowns/context-menu";
+export { ImagePreviewModal } from "../../../../../packages/ui/src/modals/image-preview-modal";
+export { ImageThumbnail } from "../../../../../packages/ui/src/images/image-thumbnail";
 export { ModalCore } from "../../../../../packages/ui/src/modals/modal-core";
 export { EModalWidth } from "../../../../../packages/ui/src/modals/constants";
 export { Input } from "../../../../../packages/ui/src/form-fields/input";

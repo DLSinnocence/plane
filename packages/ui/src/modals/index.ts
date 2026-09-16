@@ -6,4 +6,5 @@
 
 export * from "./alert-modal";
 export * from "./constants";
+export * from "./image-preview-modal";
 export * from "./modal-core";

@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Carregando imagem…",
+      "error": "Não foi possível visualizar esta imagem.",
+      "retry": "Tentar novamente",
+      "close": "Fechar pré-visualização",
+      "open_original": "Abrir arquivo original"
+    },
     "error": "Não foi possível anexar o arquivo. Tente enviar novamente.",
     "only_one_file_allowed": "Apenas um arquivo pode ser enviado por vez.",
     "file_size_limit": "O arquivo deve ter {size}MB ou menos.",

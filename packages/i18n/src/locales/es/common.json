@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Cargando imagen…",
+      "error": "No se pudo mostrar la vista previa de esta imagen.",
+      "retry": "Reintentar",
+      "close": "Cerrar vista previa",
+      "open_original": "Abrir archivo original"
+    },
     "error": "No se pudo adjuntar el archivo. Intenta subirlo de nuevo.",
     "only_one_file_allowed": "Solo se puede subir un archivo a la vez.",
     "file_size_limit": "El archivo debe tener {size}MB o menos de tamaño.",

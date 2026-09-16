@@ -19,6 +19,7 @@ export * from "./dropdowns";
 export * from "./favorite-star";
 export * from "./form-fields";
 export * from "./header";
+export * from "./images/image-thumbnail";
 export * from "./link";
 export * from "./loader";
 export * from "./modals";

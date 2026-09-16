@@ -14,7 +14,7 @@ import { Button } from "@plane/propel/button";
 import { EIssueServiceType } from "@plane/types";
 import type { TIssueAttachmentSlot } from "@plane/types";
 import { CustomMenu } from "@plane/ui";
-import { convertBytesToSize, getFileExtension, getFileURL } from "@plane/utils";
+import { convertBytesToSize, getFileExtension } from "@plane/utils";
 import { ButtonAvatars } from "@/components/dropdowns/member/avatar";
 import { getFileIcon } from "@/components/icons";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
@@ -25,6 +25,8 @@ import type { TAttachmentHelpers } from "../issue-detail-widgets/attachments/hel
 import { AttachmentConfirm } from "./slot-dialogs";
 import { IssueAttachmentsUploadItem } from "./attachment-list-upload-item";
 import { validateAttachmentName } from "./slot-helpers";
+import { AttachmentFileLink } from "./file-link";
+import { useAttachmentPreview } from "./use-attachment-preview";
 
 const EMPTY_SLOTS: TIssueAttachmentSlot[] = [];
 
@@ -104,6 +106,10 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
     };
   }, [attachment, workspaceSlug, projectId, issueId, retry]);
   const slots = attachment.getAttachmentSlotsByIssueId(issueId) ?? EMPTY_SLOTS;
+  const { openPreview, preview } = useAttachmentPreview(
+    issueId,
+    slots.flatMap((slot) => (slot.attachment ? [slot.attachment] : []))
+  );
   const hasUnsavedName = editor !== null && editor.name.trim() !== slots.find((slot) => slot.id === editor.id)?.name;
   useEffect(() => {
     if (!focusSlotId || !editable) return;
@@ -252,16 +258,13 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
             className="flex min-w-0 items-center justify-center gap-3 text-13"
           >
             {slot.attachment ? (
-              <a
+              <AttachmentFileLink
+                attachment={slot.attachment}
+                onPreview={openPreview}
                 data-testid={`attachment-slot-file-${slot.id}`}
                 className="min-w-0 truncate text-center font-medium text-secondary hover:text-accent-primary"
                 title={slot.attachment.attributes.name}
-                href={getFileURL(slot.attachment.asset_url)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {slot.attachment.attributes.name}
-              </a>
+              />
             ) : (
               <button
                 type="button"
@@ -344,6 +347,7 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
           )}
         </div>
       ))}
+      {preview}
       {deleting && canDeleteSlot(deleting) && (
         <AttachmentConfirm
           title={t("attachment.slots.delete_slot")}

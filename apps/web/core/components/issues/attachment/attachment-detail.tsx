@@ -6,18 +6,12 @@
 
 import { useState } from "react";
 import { observer } from "mobx-react";
-import Link from "next/link";
+import type { TIssueAttachment } from "@plane/types";
+import { AttachmentFileLink } from "./file-link";
 import { CloseOutline, WarningCircleOutline } from "@makeplane/propel/icons";
 // ui
 import { Tooltip } from "@makeplane/propel/components/tooltip";
-import {
-  convertBytesToSize,
-  getFileExtension,
-  getFileName,
-  getFileURL,
-  renderFormattedDate,
-  truncateText,
-} from "@plane/utils";
+import { convertBytesToSize, getFileExtension, getFileName, renderFormattedDate, truncateText } from "@plane/utils";
 // icons
 //
 import { getFileIcon } from "@/components/icons";
@@ -36,12 +30,13 @@ type TAttachmentOperationsRemoveModal = Exclude<TAttachmentHelpers, "create">;
 type TIssueAttachmentsDetail = {
   attachmentId: string;
   attachmentHelpers: TAttachmentOperationsRemoveModal;
+  onPreview: (attachment: TIssueAttachment) => void;
   disabled?: boolean;
 };
 
 export const IssueAttachmentsDetail = observer(function IssueAttachmentsDetail(props: TIssueAttachmentsDetail) {
   // props
-  const { attachmentId, attachmentHelpers, disabled } = props;
+  const { attachmentId, attachmentHelpers, disabled, onPreview } = props;
   // store hooks
   const { getUserDetails } = useMember();
   const {
@@ -52,9 +47,8 @@ export const IssueAttachmentsDetail = observer(function IssueAttachmentsDetail(p
   // derived values
   const attachment = attachmentId ? getAttachmentById(attachmentId) : undefined;
   const fileName = getFileName(attachment?.attributes.name ?? "");
-  const fileExtension = getFileExtension(attachment?.asset_url ?? "");
+  const fileExtension = getFileExtension(attachment?.attributes.name ?? "");
   const fileIcon = getFileIcon(fileExtension, 28);
-  const fileURL = getFileURL(attachment?.asset_url ?? "");
   // hooks
   const { isMobile } = usePlatformOS();
 
@@ -70,8 +64,8 @@ export const IssueAttachmentsDetail = observer(function IssueAttachmentsDetail(p
           attachmentId={attachmentId}
         />
       )}
-      <div className="flex h-[60px] items-center justify-between gap-1 rounded-md border-[2px] border-subtle bg-surface-1 px-4 py-2 text-13">
-        <Link href={fileURL ?? ""} target="_blank" rel="noopener noreferrer">
+      <div className="flex min-h-[60px] items-center justify-between gap-1 rounded-md border-[2px] border-subtle bg-surface-1 px-4 py-2 text-13">
+        <AttachmentFileLink attachment={attachment} onPreview={onPreview} aria-label={attachment.attributes.name}>
           <div className="flex items-center gap-3">
             <div className="h-7 w-7">{fileIcon}</div>
             <div className="flex flex-col gap-1">
@@ -98,7 +92,7 @@ export const IssueAttachmentsDetail = observer(function IssueAttachmentsDetail(p
               </div>
             </div>
           </div>
-        </Link>
+        </AttachmentFileLink>
 
         {!disabled && (
           <button type="button" onClick={() => setIsDeleteIssueAttachmentModalOpen(true)}>

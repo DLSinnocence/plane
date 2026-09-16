@@ -20,6 +20,15 @@ export default defineConfig({
     {
       name: "application-route-fixture",
       enforce: "pre",
+      transformIndexHtml(html, context) {
+        if (!new URLSearchParams(context.originalUrl?.split("?")[1]).has("attachment-preview")) return html;
+        // Layout assertions must exercise actual production utilities, not the
+        // hand-maintained subset used by the older dropdown fixtures.
+        return html.replace(
+          'href="/styles.css"',
+          `href="/@fs${path("../../../../packages/tailwind-config/index.css")}"`
+        );
+      },
       resolveId(id, importer) {
         if (id === "virtual:attachment-peek-handler") return "\0virtual:attachment-peek-handler";
         if (

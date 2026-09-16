@@ -20,6 +20,9 @@ import { aiFixtureEnabled, aiFixtureState } from "./ai-state";
 import aiMessages from "../../../../../packages/i18n/src/locales/en/settings.json";
 import aiChineseMessages from "../../../../../packages/i18n/src/locales/zh-CN/settings.json";
 import { workflowStates } from "./stage-data";
+import { EUserPermissions } from "@plane/constants";
+import type { TIssue } from "@plane/types";
+import { getIssueWorkflowPermissions } from "@/helpers/issue-workflow";
 
 export const users = {
   developer: { id: "developer", display_name: "Developer", first_name: "Dev", last_name: "", avatar_url: "" },
@@ -86,15 +89,18 @@ export const useAppRouter = () => {
     [navigate]
   );
 };
+const getFixtureRole = () => {
+  const role = new URLSearchParams(window.location.search).get("role");
+  return role === "guest" || role === "viewer"
+    ? EUserPermissions.GUEST
+    : role === "member"
+      ? EUserPermissions.MEMBER
+      : EUserPermissions.ADMIN;
+};
 export const useUserPermissions = () => ({
-  allowPermissions: (roles: number[]) =>
-    roles.includes(
-      ["viewer", "guest"].includes(new URLSearchParams(window.location.search).get("role") ?? "")
-        ? 5
-        : new URLSearchParams(window.location.search).get("role") === "member"
-          ? 15
-          : 20
-    ),
+  allowPermissions: (roles: number[]) => roles.includes(getFixtureRole()),
+  getIssuePermissions: (_workspaceSlug: string, issue: TIssue | undefined) =>
+    getIssueWorkflowPermissions({ issue, userId: "developer", role: getFixtureRole(), stateGroup: "unstarted" }),
 });
 export default function Link({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   const inRouter = useInRouterContext();

@@ -12,6 +12,7 @@ import type { TAttachmentHelpers } from "../issue-detail-widgets/attachments/hel
 // components
 import { IssueAttachmentsDetail } from "./attachment-detail";
 import { IssueAttachmentsUploadDetails } from "./attachment-upload-details";
+import { useAttachmentPreview } from "./use-attachment-preview";
 
 type TIssueAttachmentsList = {
   issueId: string;
@@ -23,22 +24,31 @@ export const IssueAttachmentsList = observer(function IssueAttachmentsList(props
   const { issueId, attachmentHelpers, disabled } = props;
   // store hooks
   const {
-    attachment: { getAttachmentsByIssueId },
+    attachment: { getAttachmentsByIssueId, getAttachmentById },
   } = useIssueDetail();
   // derived values
   const { snapshot: attachmentSnapshot } = attachmentHelpers;
   const { uploadStatus } = attachmentSnapshot;
   const issueAttachments = getAttachmentsByIssueId(issueId);
+  const { openPreview, preview } = useAttachmentPreview(
+    issueId,
+    (issueAttachments ?? []).flatMap((id) => {
+      const file = getAttachmentById(id);
+      return file ? [file] : [];
+    })
+  );
 
   return (
     <>
-      {uploadStatus?.map((uploadStatus) => (
-        <IssueAttachmentsUploadDetails key={uploadStatus.id} uploadStatus={uploadStatus} />
+      {preview}
+      {uploadStatus?.map((status) => (
+        <IssueAttachmentsUploadDetails key={status.id} uploadStatus={status} />
       ))}
       {issueAttachments?.map((attachmentId) => (
         <IssueAttachmentsDetail
           key={attachmentId}
           attachmentId={attachmentId}
+          onPreview={openPreview}
           disabled={disabled}
           attachmentHelpers={attachmentHelpers}
         />

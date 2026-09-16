@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Đang tải hình ảnh…",
+      "error": "Không thể xem trước hình ảnh này.",
+      "retry": "Thử lại",
+      "close": "Đóng bản xem trước",
+      "open_original": "Mở tệp gốc"
+    },
     "error": "Không thể đính kèm tệp. Vui lòng tải lên lại.",
     "only_one_file_allowed": "Chỉ có thể tải lên một tệp mỗi lần.",
     "file_size_limit": "Kích thước tệp phải nhỏ hơn hoặc bằng {size}MB.",

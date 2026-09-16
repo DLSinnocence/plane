@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Loading image…",
+      "error": "This image could not be previewed.",
+      "retry": "Retry",
+      "close": "Close preview",
+      "open_original": "Open original file"
+    },
     "slots": {
       "add": "Add empty attachment",
       "default_name": "Attachment",

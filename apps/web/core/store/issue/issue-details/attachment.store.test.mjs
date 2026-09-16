@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { test } from "node:test";
 import ts from "typescript";
+import * as issueWorkflow from "../../../../helpers/issue-workflow.ts";
 
 const require = createRequire(import.meta.url);
 const compiled = ts.transpileModule(readFileSync(new URL("./attachment.store.ts", import.meta.url), "utf8"), {
@@ -42,6 +43,7 @@ function fixture(attachmentApi = {}, slotApi = {}) {
     ...slotApi,
   };
   const imports = (specifier) => {
+    if (specifier === "@/helpers/issue-workflow") return issueWorkflow;
     if (specifier === "@/services/issue")
       return {
         IssueAttachmentService: function IssueAttachmentService() {
@@ -60,7 +62,17 @@ function fixture(attachmentApi = {}, slotApi = {}) {
   const exports = {};
   new Function("require", "exports", compiled)(imports, exports);
   const updates = [];
-  const root = { issueDetail: {}, issues: { updateIssue: (...args) => updates.push(args) } };
+  const root = {
+    issueDetail: {},
+    issues: {
+      updateIssue: (...args) => updates.push(args),
+      getIssueById: () => ({ id: "issue", project_id: "project" }),
+    },
+    rootStore: {
+      projectInbox: { getIssueInboxByIssueId: () => undefined },
+      user: { permission: { getIssuePermissions: () => ({ canUploadAttachments: true }) } },
+    },
+  };
   return { store: new exports.IssueAttachmentStore(root, "issues"), updates };
 }
 

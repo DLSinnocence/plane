@@ -66,6 +66,22 @@ class AttachmentFixtureState {
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
   }
+  seedPreview(name: string, url: string) {
+    const attachment = { ...file("preview-image", name), asset_url: url };
+    const document = { ...file("preview-document", "report.pdf"), asset_url: "/preview-assets/document" };
+    this.slots = [
+      { id: "design", name: "Design", sort_order: 0, attachment },
+      { id: "document", name: "Document", sort_order: 1, attachment: document },
+    ];
+    this.files = [attachment, document];
+  }
+  replacePreview() {
+    const attachment = this.files.find((item) => item.id === "preview-image");
+    if (!attachment) return;
+    const replacement = { ...attachment, asset_url: "/preview-assets/replaced?signature=unchanged" };
+    this.files = this.files.map((item) => (item.id === attachment.id ? replacement : item));
+    for (const slot of this.slots) if (slot.attachment?.id === attachment.id) slot.attachment = replacement;
+  }
   getAttachmentSlotsByIssueId() {
     return this.slots;
   }
@@ -154,7 +170,15 @@ export const useIssueDetail = () => ({
   openWidgets: attachmentFixture.openWidgets,
   toggleOpenWidget: attachmentFixture.toggleOpenWidget,
   issue: {
-    getIssueById: () => ({ id: "issue", project_id: "project", attachment_count: attachmentFixture.files.length }),
+    getIssueById: () => ({
+      id: "issue",
+      project_id: "project",
+      created_by: "developer",
+      state_id: "todo",
+      state_assignees: {},
+      assignee_ids: [],
+      attachment_count: attachmentFixture.files.length,
+    }),
   },
   attachment: attachmentFixture,
   attachmentDeleteModalId: null,

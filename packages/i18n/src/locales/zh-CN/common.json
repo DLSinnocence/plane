@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "正在加载图片…",
+      "error": "图片暂时无法预览",
+      "retry": "重试",
+      "close": "关闭预览",
+      "open_original": "打开原文件"
+    },
     "slots": {
       "add": "添加空附件",
       "default_name": "附件",

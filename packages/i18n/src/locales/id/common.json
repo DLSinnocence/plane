@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Memuat gambar…",
+      "error": "Pratinjau gambar ini tidak dapat ditampilkan.",
+      "retry": "Coba lagi",
+      "close": "Tutup pratinjau",
+      "open_original": "Buka file asli"
+    },
     "error": "File tidak dapat dilampirkan. Coba unggah lagi.",
     "only_one_file_allowed": "Hanya satu file yang dapat diunggah pada satu waktu.",
     "file_size_limit": "File harus berukuran {size}MB atau lebih kecil.",

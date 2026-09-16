@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Caricamento dell’immagine…",
+      "error": "Impossibile visualizzare l’anteprima di questa immagine.",
+      "retry": "Riprova",
+      "close": "Chiudi anteprima",
+      "open_original": "Apri file originale"
+    },
     "error": "Impossibile allegare il file. Riprova a caricarlo.",
     "only_one_file_allowed": "È possibile caricare un solo file alla volta.",
     "file_size_limit": "Il file deve essere di {size}MB o meno.",

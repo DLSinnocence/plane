@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Načítava sa obrázok…",
+      "error": "Náhľad tohto obrázka sa nepodarilo zobraziť.",
+      "retry": "Skúsiť znova",
+      "close": "Zavrieť náhľad",
+      "open_original": "Otvoriť pôvodný súbor"
+    },
     "error": "Súbor sa nedá pripojiť. Skúste to prosím znova.",
     "only_one_file_allowed": "Je možné nahrať iba jeden súbor naraz.",
     "file_size_limit": "Súbor musí byť menší ako {size}MB.",

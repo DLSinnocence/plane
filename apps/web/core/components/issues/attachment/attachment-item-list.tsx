@@ -30,6 +30,7 @@ import { IssueAttachmentsListItem } from "./attachment-list-item";
 import { IssueAttachmentsUploadItem } from "./attachment-list-upload-item";
 // types
 import { IssueAttachmentDeleteModal } from "./delete-attachment-modal";
+import { useAttachmentPreview } from "./use-attachment-preview";
 
 type TIssueAttachmentItemList = {
   workspaceSlug: string;
@@ -54,7 +55,7 @@ export const IssueAttachmentItemList = observer(function IssueAttachmentItemList
   const [isUploading, setIsUploading] = useState(false);
   // store hooks
   const {
-    attachment: { getAttachmentsByIssueId, getAttachmentSlotsByIssueId },
+    attachment: { getAttachmentsByIssueId, getAttachmentSlotsByIssueId, getAttachmentById },
     attachmentDeleteModalId,
     toggleDeleteAttachmentModal,
     fetchActivities,
@@ -71,6 +72,13 @@ export const IssueAttachmentItemList = observer(function IssueAttachmentItemList
       : []
   );
   const issueAttachments = getAttachmentsByIssueId(issueId)?.filter((id) => !slotAttachmentIds.has(id));
+  const { openPreview, preview } = useAttachmentPreview(
+    `${issueServiceType}:${issueId}`,
+    (issueAttachments ?? []).flatMap((id) => {
+      const file = getAttachmentById(id);
+      return file ? [file] : [];
+    })
+  );
 
   // handlers
   const handleFetchPropertyActivities = useCallback(() => {
@@ -131,6 +139,7 @@ export const IssueAttachmentItemList = observer(function IssueAttachmentItemList
 
   return (
     <>
+      {preview}
       {uploadStatus?.map((status) => (
         <IssueAttachmentsUploadItem key={status.id} uploadStatus={status} />
       ))}
@@ -164,6 +173,7 @@ export const IssueAttachmentItemList = observer(function IssueAttachmentItemList
               <IssueAttachmentsListItem
                 key={attachmentId}
                 attachmentId={attachmentId}
+                onPreview={openPreview}
                 disabled={disabled}
                 issueServiceType={issueServiceType}
               />

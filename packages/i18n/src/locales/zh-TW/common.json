@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "正在載入圖片…",
+      "error": "暫時無法預覽此圖片",
+      "retry": "重試",
+      "close": "關閉預覽",
+      "open_original": "開啟原始檔案"
+    },
     "error": "無法附加檔案。請重新上傳。",
     "only_one_file_allowed": "一次只能上傳一個檔案。",
     "file_size_limit": "檔案大小必須小於或等於 {size}MB。",

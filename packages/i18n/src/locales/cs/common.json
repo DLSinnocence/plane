@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Načítání obrázku…",
+      "error": "Náhled tohoto obrázku se nepodařilo zobrazit.",
+      "retry": "Zkusit znovu",
+      "close": "Zavřít náhled",
+      "open_original": "Otevřít původní soubor"
+    },
     "error": "Soubor nelze připojit. Zkuste to prosím znovu.",
     "only_one_file_allowed": "Je možné nahrát pouze jeden soubor najednou.",
     "file_size_limit": "Soubor musí být menší než {size}MB.",

@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Se încarcă imaginea…",
+      "error": "Această imagine nu a putut fi previzualizată.",
+      "retry": "Încearcă din nou",
+      "close": "Închide previzualizarea",
+      "open_original": "Deschide fișierul original"
+    },
     "error": "Fișierul nu a putut fi atașat. Încearcă să încarci din nou.",
     "only_one_file_allowed": "Se poate încărca doar un fișier o dată.",
     "file_size_limit": "Fișierul trebuie să aibă {size}MB sau mai puțin.",

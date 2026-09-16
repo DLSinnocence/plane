@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Ładowanie obrazu…",
+      "error": "Nie udało się wyświetlić podglądu tego obrazu.",
+      "retry": "Spróbuj ponownie",
+      "close": "Zamknij podgląd",
+      "open_original": "Otwórz oryginalny plik"
+    },
     "error": "Nie udało się dodać pliku. Spróbuj ponownie.",
     "only_one_file_allowed": "Możesz przesłać tylko jeden plik naraz.",
     "file_size_limit": "Plik musi być mniejszy niż {size}MB.",

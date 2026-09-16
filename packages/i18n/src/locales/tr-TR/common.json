@@ -763,6 +763,13 @@
     }
   },
   "attachment": {
+    "preview": {
+      "loading": "Görsel yükleniyor…",
+      "error": "Bu görselin önizlemesi gösterilemedi.",
+      "retry": "Tekrar dene",
+      "close": "Önizlemeyi kapat",
+      "open_original": "Orijinal dosyayı aç"
+    },
     "error": "Dosya eklenemedi. Tekrar yüklemeyi deneyin.",
     "only_one_file_allowed": "Aynı anda yalnızca bir dosya yüklenebilir.",
     "file_size_limit": "Dosya boyutu {size}MB veya daha az olmalıdır.",
