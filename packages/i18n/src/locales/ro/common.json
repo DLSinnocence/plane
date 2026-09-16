@@ -768,6 +768,10 @@
       "error": "Această imagine nu a putut fi previzualizată.",
       "retry": "Încearcă din nou",
       "close": "Închide previzualizarea",
+      "download": "Descarcă",
+      "zoom_in": "Mărește",
+      "zoom_out": "Micșorează",
+      "reset_zoom": "Potrivește la fereastră",
       "open_original": "Deschide fișierul original"
     },
     "error": "Fișierul nu a putut fi atașat. Încearcă să încarci din nou.",

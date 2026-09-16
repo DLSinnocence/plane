@@ -768,6 +768,10 @@
       "error": "Nie udało się wyświetlić podglądu tego obrazu.",
       "retry": "Spróbuj ponownie",
       "close": "Zamknij podgląd",
+      "download": "Pobierz",
+      "zoom_in": "Powiększ",
+      "zoom_out": "Pomniejsz",
+      "reset_zoom": "Dopasuj do okna",
       "open_original": "Otwórz oryginalny plik"
     },
     "error": "Nie udało się dodać pliku. Spróbuj ponownie.",

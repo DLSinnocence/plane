@@ -768,6 +768,10 @@
       "error": "暫時無法預覽此圖片",
       "retry": "重試",
       "close": "關閉預覽",
+      "download": "下載",
+      "zoom_in": "放大",
+      "zoom_out": "縮小",
+      "reset_zoom": "符合視窗大小",
       "open_original": "開啟原始檔案"
     },
     "error": "無法附加檔案。請重新上傳。",

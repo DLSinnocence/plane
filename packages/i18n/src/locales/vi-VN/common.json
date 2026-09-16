@@ -768,6 +768,10 @@
       "error": "Không thể xem trước hình ảnh này.",
       "retry": "Thử lại",
       "close": "Đóng bản xem trước",
+      "download": "Tải xuống",
+      "zoom_in": "Phóng to",
+      "zoom_out": "Thu nhỏ",
+      "reset_zoom": "Vừa với cửa sổ",
       "open_original": "Mở tệp gốc"
     },
     "error": "Không thể đính kèm tệp. Vui lòng tải lên lại.",

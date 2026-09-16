@@ -47,7 +47,10 @@ const meta: Meta<typeof ImagePreviewModal> = {
       error: "Unable to load this image.",
       retry: "Retry",
       close: "Close",
-      openOriginal: "Open original",
+      download: "Download",
+      zoomIn: "Zoom in",
+      zoomOut: "Zoom out",
+      resetZoom: "Fit to window",
     },
   },
 };
@@ -56,6 +59,25 @@ export default meta;
 type Story = StoryObj<typeof ImagePreviewModal>;
 
 export const Healthy: Story = {};
+
+export const SmallImage: Story = {
+  args: {
+    src: `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="#14b8a6"/></svg>')}`,
+    name: "small-image.svg",
+  },
+  parameters: {
+    docs: {
+      description: { story: "Initial fit keeps this image at its natural 120 × 80 size. Zoom in to enlarge it." },
+    },
+  },
+};
+
+export const Portrait: Story = {
+  args: {
+    src: `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1800"><rect width="900" height="1800" fill="#0f766e"/><circle cx="450" cy="900" r="300" fill="#fbbf24"/></svg>')}`,
+    name: "portrait-image.svg",
+  },
+};
 
 export const Loading: Story = {
   args: { src: "", name: "loading-image.png" },

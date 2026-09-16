@@ -47,7 +47,10 @@ export function useAttachmentPreview(issueId: string, attachments: TIssueAttachm
             error: t("attachment.preview.error"),
             retry: t("attachment.preview.retry"),
             close: t("attachment.preview.close"),
-            openOriginal: t("attachment.preview.open_original"),
+            download: t("attachment.preview.download"),
+            zoomIn: t("attachment.preview.zoom_in"),
+            zoomOut: t("attachment.preview.zoom_out"),
+            resetZoom: t("attachment.preview.reset_zoom"),
           }}
         />
       ) : null,

@@ -768,6 +768,10 @@
       "error": "Impossible d’afficher un aperçu de cette image.",
       "retry": "Réessayer",
       "close": "Fermer l’aperçu",
+      "download": "Télécharger",
+      "zoom_in": "Zoom avant",
+      "zoom_out": "Zoom arrière",
+      "reset_zoom": "Ajuster à la fenêtre",
       "open_original": "Ouvrir le fichier original"
     },
     "error": "Le fichier n’a pas pu être joint. Essayez de le télécharger à nouveau.",

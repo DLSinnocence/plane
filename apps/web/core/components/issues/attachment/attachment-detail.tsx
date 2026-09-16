@@ -6,9 +6,12 @@
 
 import { useState } from "react";
 import { observer } from "mobx-react";
+import { useTranslation } from "@plane/i18n";
+import { CustomMenu } from "@plane/ui";
 import type { TIssueAttachment } from "@plane/types";
 import { AttachmentFileLink } from "./file-link";
-import { CloseOutline, WarningCircleOutline } from "@makeplane/propel/icons";
+import { AttachmentDownloadMenuItem } from "./download";
+import { DeleteOutline, WarningCircleOutline } from "@makeplane/propel/icons";
 // ui
 import { Tooltip } from "@makeplane/propel/components/tooltip";
 import { convertBytesToSize, getFileExtension, getFileName, renderFormattedDate, truncateText } from "@plane/utils";
@@ -37,6 +40,7 @@ type TIssueAttachmentsDetail = {
 export const IssueAttachmentsDetail = observer(function IssueAttachmentsDetail(props: TIssueAttachmentsDetail) {
   // props
   const { attachmentId, attachmentHelpers, disabled, onPreview } = props;
+  const { t } = useTranslation();
   // store hooks
   const { getUserDetails } = useMember();
   const {
@@ -94,11 +98,18 @@ export const IssueAttachmentsDetail = observer(function IssueAttachmentsDetail(p
           </div>
         </AttachmentFileLink>
 
-        {!disabled && (
-          <button type="button" onClick={() => setIsDeleteIssueAttachmentModalOpen(true)}>
-            <CloseOutline className="h-4 w-4 text-secondary hover:text-primary" />
-          </button>
-        )}
+        <CustomMenu ellipsis closeOnSelect placement="bottom-end">
+          <AttachmentDownloadMenuItem attachment={attachment} />
+          {!disabled && (
+            <CustomMenu.MenuItem
+              className="flex items-center gap-2"
+              onClick={() => setIsDeleteIssueAttachmentModalOpen(true)}
+            >
+              <DeleteOutline className="size-3.5" />
+              <span>{t("common.actions.delete")}</span>
+            </CustomMenu.MenuItem>
+          )}
+        </CustomMenu>
       </div>
     </>
   );

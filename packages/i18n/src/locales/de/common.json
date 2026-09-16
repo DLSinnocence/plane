@@ -768,6 +768,10 @@
       "error": "Dieses Bild konnte nicht in der Vorschau angezeigt werden.",
       "retry": "Erneut versuchen",
       "close": "Vorschau schließen",
+      "download": "Herunterladen",
+      "zoom_in": "Vergrößern",
+      "zoom_out": "Verkleinern",
+      "reset_zoom": "An Fenster anpassen",
       "open_original": "Originaldatei öffnen"
     },
     "error": "Datei konnte nicht angehängt werden. Bitte versuchen Sie es erneut.",

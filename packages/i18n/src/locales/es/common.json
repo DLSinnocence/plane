@@ -768,6 +768,10 @@
       "error": "No se pudo mostrar la vista previa de esta imagen.",
       "retry": "Reintentar",
       "close": "Cerrar vista previa",
+      "download": "Descargar",
+      "zoom_in": "Acercar",
+      "zoom_out": "Alejar",
+      "reset_zoom": "Ajustar a la ventana",
       "open_original": "Abrir archivo original"
     },
     "error": "No se pudo adjuntar el archivo. Intenta subirlo de nuevo.",

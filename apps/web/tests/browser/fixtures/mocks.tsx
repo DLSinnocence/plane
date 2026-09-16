@@ -114,6 +114,18 @@ export default function Link({ href, children, ...props }: React.AnchorHTMLAttri
     </a>
   );
 }
+const previewTranslation = (key: string, values?: Record<string, unknown>) => {
+  let message: unknown =
+    new URLSearchParams(window.location.search).get("lang") === "zh" ? chineseAttachmentMessages : attachmentMessages;
+  for (const segment of key.split(".")) {
+    if (typeof message !== "object" || message === null || !(segment in message)) return key;
+    message = (message as Record<string, unknown>)[segment];
+  }
+  return typeof message === "string"
+    ? message.replace(/\{(\w+)\}/g, (placeholder, name: string) => String(values?.[name] ?? placeholder))
+    : key;
+};
+
 export const useTranslation = () => ({
   t: (key: string, values?: Record<string, unknown>) =>
     aiFixtureEnabled() && key.startsWith("account_settings.ai.")
@@ -121,13 +133,16 @@ export const useTranslation = () => ({
           .account_settings.ai[
           key.slice("account_settings.ai.".length) as keyof typeof aiMessages.account_settings.ai
         ] ?? key)
-      : key === "attachment.slots.default_name"
-        ? chineseAttachmentMessages.attachment.slots.default_name
-        : key === "attachment.slots.delete_slot_help"
-          ? attachmentMessages.attachment.slots.delete_slot_help.replace("{name}", String(values?.name ?? ""))
-          : key === "attachment.selection_details"
-            ? `${key}: size=${values?.size}; limit=${values?.limit}; reason=${values?.reason}`
-            : key,
+      : new URLSearchParams(window.location.search).has("preview-labels") &&
+          (key.startsWith("common.") || key.startsWith("attachment."))
+        ? previewTranslation(key, values)
+        : key === "attachment.slots.default_name"
+          ? chineseAttachmentMessages.attachment.slots.default_name
+          : key === "attachment.slots.delete_slot_help"
+            ? attachmentMessages.attachment.slots.delete_slot_help.replace("{name}", String(values?.name ?? ""))
+            : key === "attachment.selection_details"
+              ? `${key}: size=${values?.size}; limit=${values?.limit}; reason=${values?.reason}`
+              : key,
 });
 export const StateOption = ({ option }: { option: { value: string; content: React.ReactNode } }) => (
   <Combobox.Option value={option.value}>{option.content}</Combobox.Option>

@@ -768,6 +768,10 @@
       "error": "Não foi possível visualizar esta imagem.",
       "retry": "Tentar novamente",
       "close": "Fechar pré-visualização",
+      "download": "Baixar",
+      "zoom_in": "Ampliar",
+      "zoom_out": "Reduzir",
+      "reset_zoom": "Ajustar à janela",
       "open_original": "Abrir arquivo original"
     },
     "error": "Não foi possível anexar o arquivo. Tente enviar novamente.",

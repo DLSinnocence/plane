@@ -768,6 +768,10 @@
       "error": "This image could not be previewed.",
       "retry": "Retry",
       "close": "Close preview",
+      "download": "Download",
+      "zoom_in": "Zoom in",
+      "zoom_out": "Zoom out",
+      "reset_zoom": "Fit to window",
       "open_original": "Open original file"
     },
     "slots": {

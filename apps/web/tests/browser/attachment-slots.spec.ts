@@ -16,6 +16,8 @@ const slotRow = (page: Page, name: string) =>
     .filter({ has: page.getByRole("button", { name, exact: true }) });
 const menuItem = (page: Page, name: string) =>
   page.getByRole("menuitem", { name: `attachment.slots.${name}`, exact: true });
+const downloadMenuItem = (page: Page) =>
+  page.getByRole("menuitem", { name: "attachment.preview.download", exact: true });
 const openSlotMenu = async (page: Page, id = "design") => {
   await page.getByTestId(`attachment-slot-actions-${id}`).locator('button[aria-haspopup="menu"]').click();
 };
@@ -58,7 +60,12 @@ for (const role of ["admin", "member", "guest"]) {
       .toEqual(["upload:same-39kb.zip:auto"]);
     if (role === "guest") {
       await expect(page.getByTestId("attachment-slot-name-slot-1")).toBeDisabled();
-      await expect(row.locator('button[aria-haspopup="menu"]')).toHaveCount(0);
+      await row.locator('button[aria-haspopup="menu"]').click();
+      await expect(downloadMenuItem(page)).toBeVisible();
+      await expect(page.getByRole("menuitem")).toHaveCount(1);
+      await Promise.all(
+        ["replace", "delete_slot", "delete_file"].map((name) => expect(menuItem(page, name)).toHaveCount(0))
+      );
     }
     expect(errors).toEqual([]);
   });
@@ -222,7 +229,13 @@ test("only file owners or admins can replace files or delete populated rows", as
   await expect(slotRow(page, "Design")).toBeVisible();
   await expect(slotRow(page, "Design").locator('input[type="file"]')).toHaveCount(0);
   const trigger = page.getByTestId("attachment-slot-actions-design").locator('button[aria-haspopup="menu"]');
-  await expect(trigger).toHaveCount(0);
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await expect(page.getByRole("menuitem")).toHaveText(["attachment.preview.download"]);
+  await Promise.all(
+    ["delete_file", "delete_slot", "replace"].map((name) => expect(menuItem(page, name)).toHaveCount(0))
+  );
+  await trigger.click();
   await page.getByTestId("attachment-slot-name-design").click();
   await nameInput(page).fill("Member renamed");
   await nameInput(page).press("Enter");
@@ -238,7 +251,11 @@ for (const query of ["role=member&own-file", "role=admin"]) {
     await openSlotMenu(page);
     await Promise.all(["delete_slot", "replace"].map((name) => expect(menuItem(page, name)).toBeVisible()));
     await expect(menuItem(page, "delete_file")).toHaveCount(0);
-    await expect(page.getByRole("menuitem")).toHaveCount(2);
+    await expect(page.getByRole("menuitem")).toHaveText([
+      "attachment.preview.download",
+      "attachment.slots.replace",
+      "attachment.slots.delete_slot",
+    ]);
     await menuItem(page, "delete_slot").click();
     await dialog(page).getByRole("button", { name: "attachment.slots.confirm_delete", exact: true }).click();
     await expect(page.getByTestId("attachment-slot-design")).toHaveCount(0);
@@ -450,7 +467,7 @@ test("compact row hides actions until the real menu opens and replacement uses i
   await expect(center).toHaveAttribute("href", "/files/old.txt");
   await expect(center).toHaveText("old.txt");
   await expect(row.getByRole("link")).toHaveCount(1);
-  await expect(row).not.toContainText("attachment.slots.download");
+  await expect(downloadMenuItem(page)).not.toBeVisible();
   await Promise.all(
     ["replace", "delete_file", "delete_slot"].flatMap((name) => [
       expect(action(page, name)).toHaveCount(0),
@@ -458,6 +475,7 @@ test("compact row hides actions until the real menu opens and replacement uses i
     ])
   );
   await openSlotMenu(page);
+  await expect(page.getByRole("menuitem").first()).toHaveText("attachment.preview.download");
   await Promise.all(["replace", "delete_slot"].map((name) => expect(menuItem(page, name)).toBeVisible()));
   await expect(menuItem(page, "delete_file")).toHaveCount(0);
   await openSlotMenu(page);
@@ -481,9 +499,15 @@ for (const readonly of ["role=guest", "role=viewer", "disabled&role=member"]) {
       await expect(row).toBeVisible();
       await expect(page.getByTestId("attachment-slot-name-design")).toBeDisabled();
       await expect(row.locator('input[type="file"]')).toHaveCount(0);
-      await expect(row.locator('button[aria-haspopup="menu"]')).toHaveCount(0);
-      if (empty) await expect(page.getByTestId("attachment-slot-file-design")).toBeDisabled();
-      else await expect(row.getByRole("link")).toHaveAttribute("href", "/files/old.txt");
+      if (empty) {
+        await expect(row.locator('button[aria-haspopup="menu"]')).toHaveCount(0);
+        await expect(page.getByTestId("attachment-slot-file-design")).toBeDisabled();
+        await expect(downloadMenuItem(page)).toHaveCount(0);
+      } else {
+        await expect(row.getByRole("link")).toHaveAttribute("href", "/files/old.txt");
+        await openSlotMenu(page);
+        await expect(page.getByRole("menuitem")).toHaveText(["attachment.preview.download"]);
+      }
       await Promise.all(
         ["replace", "delete_file", "delete_slot"].map((name) => expect(menuItem(page, name)).not.toBeVisible())
       );
@@ -491,6 +515,14 @@ for (const readonly of ["role=guest", "role=viewer", "disabled&role=member"]) {
     });
   }
 }
+
+test("an editable empty slot offers Delete without Download or Replace", async ({ page }) => {
+  await page.goto("/?attachment-slots&empty-slot");
+  await openSlotMenu(page);
+  await expect(page.getByRole("menuitem")).toHaveText(["attachment.slots.delete_slot"]);
+  await expect(downloadMenuItem(page)).toHaveCount(0);
+  await expect(menuItem(page, "replace")).toHaveCount(0);
+});
 
 for (const width of [1280, 375]) {
   test(`attachment row keeps left label, centered file and right actions at ${width}px`, async ({ page }) => {

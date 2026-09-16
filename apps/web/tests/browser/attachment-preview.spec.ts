@@ -8,6 +8,13 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { expect, test, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+const englishMessages = JSON.parse(
+  readFileSync(new URL("../../../../packages/i18n/src/locales/en/common.json", import.meta.url), "utf8")
+) as typeof import("../../../../packages/i18n/src/locales/en/common.json");
+const chineseMessages = JSON.parse(
+  readFileSync(new URL("../../../../packages/i18n/src/locales/zh-CN/common.json", import.meta.url), "utf8")
+) as typeof import("../../../../packages/i18n/src/locales/zh-CN/common.json");
 
 const pageErrors = new WeakMap<Page, string[]>();
 test.beforeEach(({ page }) => {
@@ -28,6 +35,24 @@ const fileLink = (page: Page, region: string, name = filename) =>
   page.getByTestId(`preview-${region}`).getByRole("link", {
     name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`),
   });
+const thumbnailButton = (page: Page, region: string, name = filename) =>
+  page
+    .getByTestId(`preview-${region}`)
+    .getByRole("button", { name, exact: true })
+    .filter({ has: page.locator("img") });
+const thumbnailImage = (page: Page, region: string, name = filename) =>
+  thumbnailButton(page, region, name).locator("img");
+const attachmentRow = (page: Page, region: string, name = filename) =>
+  region === "slots"
+    ? page
+        .getByTestId(`preview-${region}`)
+        .locator('[data-testid^="attachment-slot-"]:has(> [data-testid^="attachment-slot-label-"])')
+        .filter({ has: page.getByRole("link", { name, exact: true }) })
+    : fileLink(page, region, name).locator('xpath=ancestor::div[.//button[@aria-haspopup="menu"]][1]');
+const downloadLink = (page: Page, region: string) =>
+  attachmentRow(page, region).getByRole("link", { name: "attachment.preview.download", exact: true });
+const zoomButton = (page: Page, name: "zoom_in" | "zoom_out" | "reset_zoom") =>
+  modal(page).getByRole("button", { name: `attachment.preview.${name}`, exact: true });
 const fixtureUrl = (params: Record<string, string> = {}) =>
   `/?${new URLSearchParams({ "attachment-preview": "", ...params })}`;
 
@@ -48,10 +73,27 @@ async function imageData(page: Page, mimeType = "image/png", imageWidth = 120, i
       canvas.width = width;
       canvas.height = height;
       const context = canvas.getContext("2d")!;
-      context.fillStyle = "#c026d3";
+      const sky = context.createLinearGradient(0, 0, 0, height);
+      sky.addColorStop(0, "#0c4a6e");
+      sky.addColorStop(1, "#bae6fd");
+      context.fillStyle = sky;
       context.fillRect(0, 0, width, height);
-      context.fillStyle = "#0d9488";
-      context.fillRect(0, 0, width / 2, height / 2);
+      context.fillStyle = "#fbbf24";
+      context.beginPath();
+      context.arc(width * 0.78, height * 0.24, Math.min(width, height) * 0.1, 0, Math.PI * 2);
+      context.fill();
+      for (const [peak, color] of [
+        [0.32, "#0f766e"],
+        [0.72, "#14b8a6"],
+      ] as const) {
+        context.fillStyle = color;
+        context.beginPath();
+        context.moveTo(width * (peak - 0.5), height);
+        context.lineTo(width * peak, height * 0.3);
+        context.lineTo(width * (peak + 0.5), height);
+        context.closePath();
+        context.fill();
+      }
       return canvas.toDataURL(mime);
     },
     { mime: mimeType, width: imageWidth, height: imageHeight }
@@ -67,6 +109,49 @@ async function serveImage(page: Page, mime = "image/png", width = 120, height = 
     await route.fulfill({ contentType: mime, body });
   });
   return requests;
+}
+
+async function serveDownload(page: Page, authenticated = false) {
+  // Exercise native image decoding, HTTP redirects, and Content-Disposition.
+  // This models the download protocol, not Django/S3 authorization.
+  const data = await imageData(page);
+  const body = Buffer.from(data.split(",")[1], "base64");
+  const requests: { url: string; cookie: string }[] = [];
+  const server = createServer((request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    if (request.url?.startsWith("/authenticated?")) {
+      const cookie = request.headers.cookie ?? "";
+      requests.push({ url: request.url, cookie });
+      if (authenticated && !cookie.includes("preview_session=authorized")) {
+        response.writeHead(403).end("Authentication required");
+        return;
+      }
+      response.writeHead(302, { Location: "/object?signature=unchanged" }).end();
+      return;
+    }
+    if (request.url === "/object?signature=unchanged") {
+      response
+        .writeHead(200, {
+          "Content-Type": "image/png",
+          "Content-Disposition": 'attachment; filename="reference.PNG"',
+        })
+        .end(body);
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const sourcePath = "/authenticated?signature=unchanged%2Bvalue";
+  const src = `http://127.0.0.1:${(server.address() as AddressInfo).port}${sourcePath}`;
+  return {
+    src,
+    sourcePath,
+    requests,
+    close: async () => {
+      server.closeAllConnections();
+      await promisify(server.close.bind(server))();
+    },
+  };
 }
 
 async function expectLoaded(page: Page, name = filename, width = 120, height = 80) {
@@ -100,7 +185,7 @@ for (const region of regions) {
       page.on("filechooser", () => choosers++);
       await page.goto(fixtureUrl({ filename: name }));
       await Promise.all(regions.map((entry) => expect(fileLink(page, entry, name)).toBeVisible()));
-      const thumbnail = fileLink(page, region, name).getByRole("img", { name, exact: true });
+      const thumbnail = thumbnailImage(page, region, name);
       await expect(thumbnail).toBeVisible();
       await expect(thumbnail).toHaveJSProperty("naturalWidth", mime === "image/gif" ? 1 : 120);
       await expect(thumbnail).toHaveJSProperty("naturalHeight", mime === "image/gif" ? 1 : 80);
@@ -113,6 +198,8 @@ for (const region of regions) {
       await expect(fileLink(page, region, name)).toHaveAttribute("href", canonical);
       await thumbnail.click();
       await expect(modal(page)).toHaveAccessibleName(name);
+      await expect(modal(page)).toHaveAttribute("aria-modal", "true");
+      await expect(modal(page)).toHaveAttribute("data-prevent-outside-click");
       const image = await expectLoaded(page, name, mime === "image/gif" ? 1 : 120, mime === "image/gif" ? 1 : 80);
       await expect(image).toHaveAttribute("src", canonical);
       expect(requests.length).toBeGreaterThan(0);
@@ -139,9 +226,9 @@ for (const region of regions) {
       })
     );
     await page.goto(fixtureUrl());
-    await expect(fileLink(page, region).getByRole("status")).toHaveText("attachment.preview.error");
+    await expect(thumbnailButton(page, region).getByRole("status")).toHaveText("attachment.preview.error");
     await mutate(page, "replace");
-    const thumbnail = fileLink(page, region).getByRole("img", { name: filename, exact: true });
+    const thumbnail = thumbnailImage(page, region);
     await expect(thumbnail).toBeVisible();
     await expect(thumbnail).toHaveJSProperty("naturalWidth", 120);
     await expect(thumbnail).toHaveAttribute("src", "/preview-assets/replaced?signature=unchanged");
@@ -152,12 +239,17 @@ for (const region of regions) {
     test(`${region}: ${dismissal} dismisses only preview and restores its source focus`, async ({ page }) => {
       await serveImage(page);
       await page.goto(fixtureUrl());
-      const source = fileLink(page, region);
+      const source = thumbnailButton(page, region);
       await source.click();
       await expectLoaded(page);
       await expect(closeButton(page)).toBeFocused();
+      await expect(zoomButton(page, "zoom_out")).toBeDisabled();
       await page.keyboard.press("Tab");
-      await expect(modal(page).getByRole("link", { name: "attachment.preview.open_original" })).toBeFocused();
+      await expect(zoomButton(page, "zoom_in")).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(zoomButton(page, "reset_zoom")).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(modal(page).getByRole("link", { name: "attachment.preview.download" })).toBeFocused();
       await page.keyboard.press("Tab");
       await expect(closeButton(page)).toBeFocused();
       if (dismissal === "escape") await page.keyboard.press("Escape");
@@ -177,16 +269,68 @@ for (const region of regions) {
     }) => {
       await serveImage(page);
       await page.goto(fixtureUrl(permissions));
-      await expect(fileLink(page, region).getByRole("img", { name: filename, exact: true })).toBeVisible();
+      await expect(thumbnailImage(page, region)).toBeVisible();
       await expect(modal(page)).toHaveCount(0);
       await fileLink(page, region).click();
       await expectLoaded(page);
       await closeButton(page).click();
       await expect(page.getByTestId("attachment-peek")).toBeVisible();
+      await attachmentRow(page, region).locator('button[aria-haspopup="menu"]').click();
+      await expect(page.getByRole("menuitem")).toHaveText(["attachment.preview.download"]);
+      await expect(page.getByRole("menuitem", { name: /replace|delete/i })).toHaveCount(0);
     });
   }
 
-  test(`${region}: nonimages and modified clicks retain navigation; original image action still works`, async ({
+  for (const readonly of [false, true]) {
+    test(`${region}: inline and menu actions download the real HTTP image${readonly ? " without edit permissions" : ""}`, async ({
+      page,
+    }) => {
+      const { src, sourcePath, requests, close } = await serveDownload(page);
+      try {
+        await page.goto(fixtureUrl({ src, ...(readonly ? { disabled: "" } : {}) }));
+        await expect(thumbnailImage(page, region)).toBeVisible();
+        await expect(thumbnailImage(page, region)).toHaveJSProperty("naturalWidth", 120);
+        const row = attachmentRow(page, region);
+        const before = await page.getByTestId("preview-state").textContent();
+        const inline = downloadLink(page, region);
+        await expect(inline).toBeVisible();
+        await expect(inline).toHaveAttribute("href", src);
+        await expect(inline).toHaveAttribute("download", filename);
+        await expect(inline).toHaveAttribute("target", "_blank");
+        await expect(inline).toHaveAttribute("rel", "noopener noreferrer");
+        const inlineEvent = page.waitForEvent("download");
+        await inline.click();
+        const inlineDownload = await inlineEvent;
+        expect(inlineDownload.suggestedFilename()).toBe(filename);
+        expect(await inlineDownload.failure()).toBeNull();
+        await expect(modal(page)).toHaveCount(0);
+        await row.locator('button[aria-haspopup="menu"]').click();
+        const items = page.getByRole("menuitem");
+        await expect(items.first()).toHaveText("attachment.preview.download");
+        if (readonly) {
+          await expect(items).toHaveCount(1);
+          await expect(page.getByRole("menuitem", { name: /replace|delete/i })).toHaveCount(0);
+          await expect(row.locator('input[type="file"]')).toHaveCount(0);
+        } else {
+          await expect(items).toHaveCount(region === "slots" ? 3 : 2);
+        }
+        const menuEvent = page.waitForEvent("download");
+        await page.getByRole("menuitem", { name: "attachment.preview.download", exact: true }).click();
+        const menuDownload = await menuEvent;
+        expect(menuDownload.suggestedFilename()).toBe(filename);
+        expect(await menuDownload.failure()).toBeNull();
+        await expect(modal(page)).toHaveCount(0);
+        await expect(page.getByTestId("attachment-peek")).toBeVisible();
+        await expect(page.getByTestId("preview-state")).toHaveText(before!);
+        expect(requests.length).toBeGreaterThanOrEqual(3);
+        expect(requests.every((request) => request.url === sourcePath)).toBe(true);
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  test(`${region}: nonimages and modified clicks retain navigation; image preview exposes download`, async ({
     page,
   }) => {
     await serveImage(page);
@@ -220,15 +364,12 @@ for (const region of regions) {
 
     await fileLink(page, region).click();
     await expectLoaded(page);
-    const original = modal(page).getByRole("link", { name: "attachment.preview.open_original", exact: true });
+    const original = modal(page).getByRole("link", { name: "attachment.preview.download", exact: true });
     await expect(original).toHaveAttribute("href", canonical);
     await expect(original).toHaveAttribute("target", "_blank");
     await expect(original).toHaveAttribute("rel", "noopener noreferrer");
-    const originalPopup = page.waitForEvent("popup");
-    await original.click();
-    const openedOriginal = await originalPopup;
-    await expect(openedOriginal).toHaveURL(new URL(canonical, page.url()).href);
-    await openedOriginal.close();
+    await expect(original).toHaveAttribute("download", filename);
+    await expect(original).toBeVisible();
     await expect(closeButton(page)).toBeVisible();
   });
 
@@ -291,9 +432,11 @@ test("legacy row padding does not open the enclosing upload filechooser", async 
   let choosers = 0;
   page.on("filechooser", () => choosers++);
   await page.goto(fixtureUrl());
-  await expect(fileLink(page, "legacy").getByRole("img", { name: filename, exact: true })).toBeVisible();
+  await expect(thumbnailImage(page, "legacy")).toBeVisible();
   const requestCount = requests.length;
-  const row = fileLink(page, "legacy").locator("..");
+  const row = fileLink(page, "legacy").locator(
+    'xpath=ancestor::div[@role="presentation" and contains(concat(" ", normalize-space(@class), " "), " group ")][1]'
+  );
   await expect(row).toHaveAttribute("role", "presentation");
   // The production row has px-3 padding. Click inside its left padding,
   // outside the filename link and action menu, to exercise bubbling.
@@ -324,19 +467,20 @@ test("failed thumbnails retain the file entry and enlarged preview can retry the
     );
   });
   await page.goto(fixtureUrl());
-  const source = fileLink(page, "slots");
+  const source = thumbnailButton(page, "slots");
   try {
     await expect(source.getByRole("status")).toHaveText("attachment.preview.loading");
   } finally {
     release();
   }
   await expect(source.getByRole("status")).toHaveText("attachment.preview.error");
-  await expect(source).toContainText(filename);
+  await expect(fileLink(page, "slots")).toHaveText(filename);
   await source.click();
   await expect(modal(page).getByRole("alert")).toHaveText("attachment.preview.error");
   available = true;
   await modal(page).getByRole("button", { name: "attachment.preview.retry", exact: true }).click();
   await expectLoaded(page);
+  await expect.poll(() => modal(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
   expect(requests.length).toBeGreaterThanOrEqual(2);
   expect(new Set(requests)).toEqual(new Set([new URL(canonical, page.url()).href]));
 });
@@ -350,7 +494,7 @@ test("a corrupt image response offers retry and the original file without showin
   await expect(modal(page).getByRole("alert")).toHaveText("attachment.preview.error");
   await expect(modal(page).getByRole("img")).toHaveCount(0);
   await expect(modal(page).getByRole("button", { name: "attachment.preview.retry" })).toBeEnabled();
-  await expect(modal(page).getByRole("link", { name: "attachment.preview.open_original" })).toHaveAttribute(
+  await expect(modal(page).getByRole("link", { name: "attachment.preview.download" })).toHaveAttribute(
     "href",
     canonical
   );
@@ -379,43 +523,13 @@ test("cookie-authenticated redirect previews an attachment-disposition image and
   page,
   context,
 }) => {
-  // A real local HTTP server avoids Playwright route interception skipping a
-  // redirected request. It models the protocol, not Django/S3 authorization.
-  const data = await imageData(page);
-  const body = Buffer.from(data.split(",")[1], "base64");
-  const requests: { url: string; cookie: string }[] = [];
-  const server = createServer((request, response) => {
-    response.setHeader("Cache-Control", "no-store");
-    if (request.url?.startsWith("/authenticated?")) {
-      const cookie = request.headers.cookie ?? "";
-      requests.push({ url: request.url, cookie });
-      if (!cookie.includes("preview_session=authorized")) {
-        response.writeHead(403).end("Authentication required");
-        return;
-      }
-      response.writeHead(302, { Location: "/object?signature=unchanged" }).end();
-      return;
-    }
-    if (request.url === "/object?signature=unchanged") {
-      response
-        .writeHead(200, {
-          "Content-Type": "image/png",
-          "Content-Disposition": 'attachment; filename="reference.PNG"',
-        })
-        .end(body);
-      return;
-    }
-    response.writeHead(404).end();
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const sourcePath = "/authenticated?signature=unchanged%2Bvalue";
-  const src = `http://127.0.0.1:${(server.address() as AddressInfo).port}${sourcePath}`;
+  const { src, sourcePath, requests, close } = await serveDownload(page, true);
   try {
     await context.addCookies([
       { name: "preview_session", value: "authorized", url: "http://127.0.0.1:4179", httpOnly: true, sameSite: "Lax" },
     ]);
     await page.goto(fixtureUrl({ src }));
-    await expect(fileLink(page, "inbox").getByRole("img", { name: filename, exact: true })).toBeVisible();
+    await expect(thumbnailImage(page, "inbox")).toBeVisible();
     await expect(modal(page)).toHaveCount(0);
     await fileLink(page, "inbox").click();
     const image = await expectLoaded(page);
@@ -424,7 +538,7 @@ test("cookie-authenticated redirect previews an attachment-disposition image and
     expect(
       requests.every((request) => request.cookie.includes("preview_session=authorized") && request.url === sourcePath)
     ).toBe(true);
-    const original = modal(page).getByRole("link", { name: "attachment.preview.open_original" });
+    const original = modal(page).getByRole("link", { name: "attachment.preview.download" });
     await expect(original).toHaveAttribute("href", src);
     const downloading = page.waitForEvent("download");
     await original.click();
@@ -440,8 +554,7 @@ test("cookie-authenticated redirect previews an attachment-disposition image and
     await expect(modal(page).getByRole("alert")).toHaveText("attachment.preview.error");
     expect(requests.at(-1)?.cookie).not.toContain("preview_session=authorized");
   } finally {
-    server.closeAllConnections();
-    await promisify(server.close.bind(server))();
+    await close();
   }
 });
 
@@ -454,12 +567,25 @@ for (const [width, height] of [
     await page.setViewportSize({ width: 900, height: 700 });
     await serveImage(page, "image/png", width, height);
     await page.goto(fixtureUrl());
-    const thumbnail = fileLink(page, "slots").getByRole("img", { name: filename, exact: true });
+    const thumbnail = thumbnailImage(page, "slots");
     await expect(thumbnail).toBeVisible();
     const thumbnailBox = (await thumbnail.boundingBox())!;
     expect(thumbnailBox.height).toBeLessThanOrEqual(128);
-    expect(thumbnailBox.width).toBeLessThanOrEqual(320);
+    const contentBox = (await page.getByTestId("attachment-slot-content-design").boundingBox())!;
+    expect(thumbnailBox.width).toBeLessThanOrEqual(contentBox.width + 1);
     expect(thumbnailBox.width / thumbnailBox.height).toBeCloseTo(width / height, 1);
+    await Promise.all(
+      [thumbnail.locator(".."), thumbnailButton(page, "slots")].map(async (wrapper) => {
+        const bounds = (await wrapper.boundingBox())!;
+        expect(Math.abs(bounds.width - thumbnailBox.width)).toBeLessThanOrEqual(1);
+        expect(Math.abs(bounds.height - thumbnailBox.height)).toBeLessThanOrEqual(1);
+        const style = await wrapper.evaluate((element) => {
+          const css = getComputedStyle(element);
+          return { background: css.backgroundColor, padding: css.padding, border: css.borderTopWidth };
+        });
+        expect(style).toEqual({ background: "rgba(0, 0, 0, 0)", padding: "0px", border: "0px" });
+      })
+    );
     await thumbnail.click();
     const image = await expectLoaded(page, filename, width, height);
     const box = (await image.boundingBox())!;
@@ -475,29 +601,153 @@ for (const [width, height] of [
   });
 }
 
-test("a long filename wraps and remains readable in a narrow viewport", async ({ page }) => {
+test("a long filename stays accessible while the narrow viewer header truncates it", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   await serveImage(page);
+  const labels = englishMessages.attachment.preview;
   const name = "unbroken-filename-".repeat(18) + ".PNG";
-  await page.goto(fixtureUrl({ filename: name }));
+  await page.goto(fixtureUrl({ filename: name, "preview-labels": "", lang: "en" }));
   await fileLink(page, "inbox", name).click();
   await expectLoaded(page, name);
+  await expect(modal(page)).toHaveAccessibleName(name);
   const title = modal(page).getByRole("heading", { name, exact: true });
   await expect(title).toHaveText(name);
+  await expect(title).toHaveAttribute("title", name);
   const size = await title.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,
-    height: element.clientHeight,
     whiteSpace: getComputedStyle(element).whiteSpace,
+    textOverflow: getComputedStyle(element).textOverflow,
   }));
   expect(size.clientWidth).toBeGreaterThan(0);
-  expect(size.scrollWidth).toBeLessThanOrEqual(size.clientWidth + 1);
-  expect(size.height).toBeGreaterThan(25);
-  expect(size.whiteSpace).not.toBe("nowrap");
+  expect(size.scrollWidth).toBeGreaterThan(size.clientWidth);
+  expect(size.whiteSpace).toBe("nowrap");
+  expect(size.textOverflow).toBe("ellipsis");
   const box = (await title.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(375);
-  await expect(closeButton(page)).toBeInViewport();
-  await closeButton(page).click();
+  const close = modal(page).getByRole("button", { name: labels.close, exact: true });
+  await expect(close).toBeInViewport();
+  await close.click();
   await expect(fileLink(page, "inbox", name)).toBeFocused();
+});
+
+test("zoom reports actual scale, pans without closing, and resets to the original fit", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await serveImage(page, "image/png", 2400, 1600);
+  await page.goto(fixtureUrl());
+  await thumbnailButton(page, "slots").click();
+  const image = await expectLoaded(page, filename, 2400, 1600);
+  const stage = page.getByTestId("image-preview-stage");
+  const percentage = page.getByTestId("image-preview-zoom");
+  const initial = (await image.boundingBox())!;
+  const initialPercentage = await percentage.textContent();
+  expect(initial.width).toBeLessThan(2400);
+  await expect(percentage).toHaveText(`${Math.round((initial.width / 2400) * 100)}%`);
+  await expect(zoomButton(page, "zoom_out")).toBeDisabled();
+  // Each click must observe the preceding zoom state.
+  // eslint-disable-next-line no-await-in-loop
+  for (let step = 0; step < 3; step++) await zoomButton(page, "zoom_in").click();
+  await expect.poll(async () => (await image.boundingBox())!.width).toBeGreaterThan(initial.width * 1.5);
+  const enlarged = (await image.boundingBox())!;
+  await expect(percentage).toHaveText(`${Math.round((enlarged.width / 2400) * 100)}%`);
+  await expect(modal(page).getByRole("status")).toHaveCount(0);
+  await expect(zoomButton(page, "zoom_out")).toBeEnabled();
+  const bounds = (await stage.boundingBox())!;
+  const x = bounds.x + bounds.width / 2;
+  const y = bounds.y + bounds.height / 2;
+  await page.mouse.click(x, y);
+  await expect(closeButton(page)).toBeVisible();
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 120, y - 80, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => stage.evaluate((element) => element.scrollLeft)).toBeGreaterThan(50);
+  await expect.poll(() => stage.evaluate((element) => element.scrollTop)).toBeGreaterThan(30);
+  await expect(closeButton(page)).toBeVisible();
+  await stage.focus();
+  const scrollLeft = await stage.evaluate((element) => element.scrollLeft);
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => stage.evaluate((element) => element.scrollLeft)).toBeGreaterThan(scrollLeft);
+  await zoomButton(page, "zoom_out").click();
+  await expect.poll(async () => (await image.boundingBox())!.width).toBeLessThan(enlarged.width);
+  await zoomButton(page, "reset_zoom").click();
+  await expect(percentage).toHaveText(initialPercentage!);
+  await expect.poll(async () => Math.abs((await image.boundingBox())!.width - initial.width)).toBeLessThan(1);
+  await expect.poll(() => stage.evaluate((element) => [element.scrollLeft, element.scrollTop])).toEqual([0, 0]);
+  await expect(zoomButton(page, "zoom_out")).toBeDisabled();
+  await expect(closeButton(page)).toBeInViewport();
+});
+
+test("clicking blank image-stage space closes only the viewer", async ({ page }) => {
+  await serveImage(page);
+  await page.goto(fixtureUrl());
+  const source = thumbnailButton(page, "slots");
+  await source.click();
+  await expectLoaded(page);
+  await page.getByTestId("image-preview-stage").click({ position: { x: 8, y: 8 } });
+  await expect(modal(page)).toHaveCount(0);
+  await expect(page.getByTestId("attachment-peek")).toBeVisible();
+  await expect(source).toBeFocused();
+});
+
+for (const lang of ["en", "zh"]) {
+  test(`${lang}: mobile toolbar stays fully visible while the image is zoomed and scrolled`, async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await serveImage(page, "image/png", 1600, 1200);
+    const labels = (lang === "zh" ? chineseMessages : englishMessages).attachment.preview;
+    await page.goto(fixtureUrl({ "preview-labels": "", lang }));
+    await thumbnailButton(page, "slots").click();
+    await expectLoaded(page, filename, 1600, 1200);
+    const zoom = modal(page).getByRole("button", { name: labels.zoom_in, exact: true });
+    // Each click must observe the preceding zoom state.
+    // eslint-disable-next-line no-await-in-loop
+    for (let step = 0; step < 5; step++) await zoom.click();
+    await page.getByTestId("image-preview-stage").evaluate((element) => element.scrollTo(200, 200));
+    await Promise.all(
+      [
+        modal(page).getByRole("link", { name: labels.download, exact: true }),
+        ...[labels.close, labels.zoom_in, labels.zoom_out, labels.reset_zoom].map((name) =>
+          modal(page).getByRole("button", { name, exact: true })
+        ),
+        page.getByTestId("image-preview-zoom"),
+      ].map(async (control) => {
+        await expect(control).toBeInViewport();
+        const box = (await control.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.y).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(375);
+        expect(box.y + box.height).toBeLessThanOrEqual(667);
+      })
+    );
+  });
+}
+
+test("real Chinese labels render a dark viewer and frameless inline image artifacts", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await serveImage(page, "image/png", 1000, 650);
+  const name = "产品设计参考图.png";
+  const labels = chineseMessages.attachment.preview;
+  await page.goto(fixtureUrl({ filename: name, "preview-labels": "", lang: "zh" }));
+  const source = thumbnailButton(page, "slots", name);
+  await expect(source.locator("img")).toHaveJSProperty("naturalWidth", 1000);
+  await expect(source.locator("img")).toHaveJSProperty("naturalHeight", 650);
+  const row = attachmentRow(page, "slots", name);
+  await expect(row.getByRole("link", { name: labels.download, exact: true })).toBeVisible();
+  const section = page.getByTestId("preview-slots");
+  await expect(
+    section.getByRole("button", { name: new RegExp(`^${chineseMessages.common.attachments}`) })
+  ).toBeVisible();
+  await expect(section).not.toContainText(/common\.|attachment\./);
+  const inlinePath = testInfo.outputPath("attachment-inline-zh.png");
+  await section.screenshot({ path: inlinePath });
+  await testInfo.attach("Chinese inline attachment", { path: inlinePath, contentType: "image/png" });
+  await source.click();
+  await expectLoaded(page, name, 1000, 650);
+  await expect(modal(page).getByRole("link", { name: labels.download, exact: true })).toBeVisible();
+  await expect(modal(page).getByRole("button", { name: labels.reset_zoom, exact: true })).toBeVisible();
+  await expect(page.getByTestId("image-preview-stage").locator("..")).toHaveCSS("background-color", "rgb(10, 10, 10)");
+  const viewerPath = testInfo.outputPath("attachment-dark-viewer-zh.png");
+  await page.screenshot({ path: viewerPath });
+  await testInfo.attach("Chinese dark image viewer", { path: viewerPath, contentType: "image/png" });
 });

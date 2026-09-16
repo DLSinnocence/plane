@@ -18,6 +18,7 @@ import { useIssueDetail } from "@/hooks/store/use-issue-detail";
 import { useMember } from "@/hooks/store/use-member";
 import { usePlatformOS } from "@/hooks/use-platform-os";
 import { AttachmentFileLink } from "./file-link";
+import { AttachmentDownloadMenuItem } from "./download";
 
 type TIssueAttachmentsListItem = {
   attachmentId: string;
@@ -72,13 +73,16 @@ export const IssueAttachmentsListItem = observer(function IssueAttachmentsListIt
             </div>
           </Tooltip>
         )}
-        <CustomMenu ellipsis closeOnSelect placement="bottom-end" disabled={disabled}>
-          <CustomMenu.MenuItem onClick={() => toggleDeleteAttachmentModal(attachmentId)}>
-            <div className="flex items-center gap-2">
-              <DeleteOutline className="h-3.5 w-3.5" />
-              <span>{t("common.actions.delete")}</span>
-            </div>
-          </CustomMenu.MenuItem>
+        <CustomMenu ellipsis closeOnSelect placement="bottom-end">
+          <AttachmentDownloadMenuItem attachment={attachment} />
+          {!disabled && (
+            <CustomMenu.MenuItem onClick={() => toggleDeleteAttachmentModal(attachmentId)}>
+              <div className="flex items-center gap-2">
+                <DeleteOutline className="h-3.5 w-3.5" />
+                <span>{t("common.actions.delete")}</span>
+              </div>
+            </CustomMenu.MenuItem>
+          )}
         </CustomMenu>
       </div>
     </div>

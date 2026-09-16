@@ -8,8 +8,10 @@
 
 - JPG／JPEG、PNG、GIF、WebP 附件直接显示缩略预览，无需点击；点击缩略图或文件名后放大查看。按原始文件名的末尾扩展名判断，忽略大小写，不从附件行名称或资产 URL 猜测格式。
 - 支持正式工作项附件行、非普通工作项的旧附件列表和收件箱卡片；完整详情和快速预览复用相同实现。
-- 可视区域内自动加载约 128px 高的缩略图，屏幕外使用浏览器懒加载。缩略图和大图均使用原生 `<img>` 保持比例与 GIF 动画；图片行随内容增高，非图片行保持紧凑布局。
-- 提供加载提示、失败提示、重试、关闭和打开原文件；重试继续使用原始地址，不修改签名参数，不通过 Blob／Base64 转换图片。
+- 可视区域内自动加载最高约 128px 的缩略图，图片显示多宽，外层就占多宽，不保留固定空框；屏幕外使用浏览器懒加载。缩略图和大图均使用原生 `<img>` 保持比例与 GIF 动画。
+- 图片文件名旁、附件 **⋯** 菜单、大图顶部均提供明确的带图标**下载**入口。只读用户也可下载，替换和删除仍按原有权限控制，空附件行没有下载项。
+- 大图使用深色背景和固定工具栏，提供缩放比例、放大、缩小和适合窗口；图片放大后支持滚动、拖动和方向键平移，文件名可通过标题查看完整内容。
+- 提供加载提示、失败提示、重试和关闭；重试及下载继续使用原始地址，不修改签名参数，不通过 Blob／Base64 转换图片。
 - Escape、关闭按钮、遮罩只关闭图片，底层快速预览保留，焦点返回文件入口。弹窗内部点击不会关闭工作项。
 - 保留修饰键点击、新标签页、非图片附件及原文件打开／下载行为。文件操作不会冒泡打开上传选择器；旧列表的文件链接与删除菜单使用独立元素。
 - 预览不依赖编辑权限。当前数据中附件删除、替换或切换工作项后立即移除预览，并清理选择；图片异步结果不串到新文件。
@@ -21,15 +23,16 @@ SVG、PDF、Office、音视频、图集切换、服务端缩略图生成及图�
 | 文件                                                                                              | 职责                                                                                                            |
 | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `packages/ui/src/images/image-thumbnail.tsx`                                                      | 自动显示原图缩略预览、保持比例、加载和失败提示，来源变化时清理旧状态；配套 Storybook 提供正常、加载和错误场景。 |
-| `packages/ui/src/modals/image-preview-modal.tsx`                                                  | 通用图片预览，复用 `ModalCore` 与 Dialog 焦点管理；图片来源和重试分别隔离状态，处理加载、失败与缓存完成事件。   |
+| `packages/ui/src/modals/image-preview-modal.tsx`                                                  | 通用深色图片查看器，使用 Headless UI Dialog 管理焦点；包含下载、缩放、适合窗口、拖动平移以及加载／失败处理。    |
 | `packages/ui/src/modals/image-preview-modal.stories.tsx`                                          | 正常、加载、错误、长文件名的独立展示场景。                                                                      |
 | `apps/web/helpers/attachment-preview.ts`                                                          | 集中判断是否可尝试图片预览；文件名仅决定展示方式，不宣称验证文件内容。                                          |
-| `apps/web/core/components/issues/attachment/file-link.tsx`                                        | 共用原文件链接，拦截图片的普通点击，保留修饰键行为并隔离 dropzone 点击。                                        |
+| `apps/web/core/components/issues/attachment/download.tsx`                                         | 文件旁与菜单中的原生下载操作，沿用受保护地址，不读取二进制到 JavaScript 内存。                                  |
+| `apps/web/core/components/issues/attachment/file-link.tsx`                                        | 分离缩略图按钮、文件名链接和下载按钮，保留文件名修饰键导航并隔离上传区域事件。                                  |
 | `apps/web/core/components/issues/attachment/use-attachment-preview.tsx`                           | 每个区域一个弹窗；根据当前附件集合、文件 ID、原始地址及工作项身份派生选择。                                     |
 | `apps/web/core/components/issues/attachment/slots.tsx`                                            | 正式工作项统一附件行入口。                                                                                      |
 | `apps/web/core/components/issues/attachment/attachment-item-list.tsx`、`attachment-list-item.tsx` | 旧列表入口，按 `issueServiceType` 读取附件，并拆开文件链接和操作菜单。                                          |
 | `apps/web/core/components/issues/attachment/attachments-list.tsx`、`attachment-detail.tsx`        | 收件箱卡片入口；文件扩展名改为从原文件名读取。                                                                  |
-| `packages/i18n/src/locales/*/common.json`                                                         | 20 个语言包的加载、错误、重试、关闭和打开原文件文案。                                                           |
+| `packages/i18n/src/locales/*/common.json`                                                         | 20 个语言包的预览状态、下载、缩放和适合窗口文案。                                                               |
 
 通用预览通过 `@plane/ui` 导出，业务代码通过参数提供来源、名称、关闭回调和文案。选择保存在区域局部状态，不新增全局 MobX UI 状态或网络接口。
 
@@ -52,7 +55,7 @@ SVG、PDF、Office、音视频、图集切换、服务端缩略图生成及图�
 已通过的检查：
 
 - 新增格式判断及既有附件上传、替换、删除、异步响应和快速预览回归：36 项。
-- 浏览器测试：预览 51 项及既有附件行 35 项，共 86 项通过；覆盖无需点击的缩略预览、点击放大、GIF 动画与替换后的缩略图恢复。
+- 浏览器测试：图片预览与下载 62 项及附件行 36 项，共 98 项；覆盖无空框缩略图、三处下载入口、只读菜单、缩放／平移、重试焦点、窄屏工具栏与真实中文界面截图。
 - Web 与 `@plane/ui` 类型检查。
 - 共享依赖构建与 Web 生产构建。
 - 20 个语言包的新增键与非空文案校验。

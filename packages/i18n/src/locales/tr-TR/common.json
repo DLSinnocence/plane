@@ -768,6 +768,10 @@
       "error": "Bu görselin önizlemesi gösterilemedi.",
       "retry": "Tekrar dene",
       "close": "Önizlemeyi kapat",
+      "download": "İndir",
+      "zoom_in": "Yakınlaştır",
+      "zoom_out": "Uzaklaştır",
+      "reset_zoom": "Pencereye sığdır",
       "open_original": "Orijinal dosyayı aç"
     },
     "error": "Dosya eklenemedi. Tekrar yüklemeyi deneyin.",

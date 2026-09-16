@@ -768,6 +768,10 @@
       "error": "Impossibile visualizzare l’anteprima di questa immagine.",
       "retry": "Riprova",
       "close": "Chiudi anteprima",
+      "download": "Scarica",
+      "zoom_in": "Ingrandisci",
+      "zoom_out": "Riduci",
+      "reset_zoom": "Adatta alla finestra",
       "open_original": "Apri file originale"
     },
     "error": "Impossibile allegare il file. Riprova a caricarlo.",

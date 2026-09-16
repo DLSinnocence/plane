@@ -768,6 +768,10 @@
       "error": "Pratinjau gambar ini tidak dapat ditampilkan.",
       "retry": "Coba lagi",
       "close": "Tutup pratinjau",
+      "download": "Unduh",
+      "zoom_in": "Perbesar",
+      "zoom_out": "Perkecil",
+      "reset_zoom": "Sesuaikan dengan jendela",
       "open_original": "Buka file asli"
     },
     "error": "File tidak dapat dilampirkan. Coba unggah lagi.",

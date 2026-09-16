@@ -768,6 +768,10 @@
       "error": "图片暂时无法预览",
       "retry": "重试",
       "close": "关闭预览",
+      "download": "下载",
+      "zoom_in": "放大",
+      "zoom_out": "缩小",
+      "reset_zoom": "适合窗口",
       "open_original": "打开原文件"
     },
     "slots": {

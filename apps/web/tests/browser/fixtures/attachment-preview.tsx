@@ -31,7 +31,7 @@ export const AttachmentPreviewFixture = observer(function AttachmentPreviewFixtu
   const close = () => setOpen(false);
   usePeekOverviewOutsideClickDetector(peekRef, close, "issue");
   useKeypress("Escape", createPeekEscapeHandler(close));
-  const disabled = params.has("disabled") || params.get("role") === "guest";
+  const disabled = params.has("disabled") || ["guest", "viewer"].includes(params.get("role") ?? "");
   const attachmentHelpers = useAttachmentOperations("workspace", "project", issueId, EIssueServiceType.EPICS);
 
   useEffect(() => {
@@ -77,6 +77,9 @@ export const AttachmentPreviewFixture = observer(function AttachmentPreviewFixtu
             <IssueAttachmentsList issueId={issueId} attachmentHelpers={attachmentHelpers} disabled={disabled} />
           </section>
           <output data-testid="preview-issue">{issueId}</output>
+          <output data-testid="preview-state" hidden>
+            {JSON.stringify({ calls: attachmentFixture.calls, files: attachmentFixture.files.map((file) => file.id) })}
+          </output>
         </div>
       ) : (
         <p data-testid="peek-closed">Peek closed</p>

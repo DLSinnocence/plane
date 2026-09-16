@@ -768,6 +768,10 @@
       "error": "Náhľad tohto obrázka sa nepodarilo zobraziť.",
       "retry": "Skúsiť znova",
       "close": "Zavrieť náhľad",
+      "download": "Stiahnuť",
+      "zoom_in": "Priblížiť",
+      "zoom_out": "Oddialiť",
+      "reset_zoom": "Prispôsobiť oknu",
       "open_original": "Otvoriť pôvodný súbor"
     },
     "error": "Súbor sa nedá pripojiť. Skúste to prosím znova.",

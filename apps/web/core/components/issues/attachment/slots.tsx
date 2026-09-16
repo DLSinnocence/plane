@@ -26,6 +26,7 @@ import { AttachmentConfirm } from "./slot-dialogs";
 import { IssueAttachmentsUploadItem } from "./attachment-list-upload-item";
 import { validateAttachmentName } from "./slot-helpers";
 import { AttachmentFileLink } from "./file-link";
+import { AttachmentDownloadMenuItem } from "./download";
 import { useAttachmentPreview } from "./use-attachment-preview";
 
 const EMPTY_SLOTS: TIssueAttachmentSlot[] = [];
@@ -292,18 +293,29 @@ export const IssueAttachmentSlots = observer(function IssueAttachmentSlots({
                 <ButtonAvatars showTooltip userIds={slot.attachment.created_by} />
               </div>
             )}
-            {canDeleteSlot(slot) && (
-              <CustomMenu ellipsis closeOnSelect placement="bottom-end" disabled={busy !== null || hasUnsavedName}>
-                {slot.attachment && (
-                  <CustomMenu.MenuItem className="flex items-center gap-2" onClick={() => chooseFile(slot.id)}>
+            {(slot.attachment || canDeleteSlot(slot)) && (
+              <CustomMenu ellipsis closeOnSelect placement="bottom-end">
+                {slot.attachment && <AttachmentDownloadMenuItem attachment={slot.attachment} />}
+                {slot.attachment && canDeleteFile(slot) && (
+                  <CustomMenu.MenuItem
+                    className="flex items-center gap-2"
+                    disabled={busy !== null || hasUnsavedName}
+                    onClick={() => chooseFile(slot.id)}
+                  >
                     <UploadOutline className="h-3.5 w-3.5" />
                     <span>{t("attachment.slots.replace")}</span>
                   </CustomMenu.MenuItem>
                 )}
-                <CustomMenu.MenuItem className="flex items-center gap-2" onClick={() => setDeleting(slot)}>
-                  <DeleteOutline className="h-3.5 w-3.5" />
-                  <span>{t("attachment.slots.delete_slot")}</span>
-                </CustomMenu.MenuItem>
+                {canDeleteSlot(slot) && (
+                  <CustomMenu.MenuItem
+                    className="flex items-center gap-2"
+                    disabled={busy !== null || hasUnsavedName}
+                    onClick={() => setDeleting(slot)}
+                  >
+                    <DeleteOutline className="h-3.5 w-3.5" />
+                    <span>{t("attachment.slots.delete_slot")}</span>
+                  </CustomMenu.MenuItem>
+                )}
               </CustomMenu>
             )}
           </div>

@@ -23,7 +23,13 @@ function ThumbnailImage({ src, name, loadingLabel, errorLabel }: ImageThumbnailP
   }, [src]);
 
   return (
-    <span className="relative flex h-32 w-full max-w-xs cursor-zoom-in items-center justify-center overflow-hidden rounded border border-subtle bg-surface-2">
+    <span
+      className={
+        state === "loaded"
+          ? "relative inline-flex max-w-full cursor-zoom-in"
+          : "relative flex h-24 w-40 max-w-full cursor-zoom-in items-center justify-center rounded bg-surface-2"
+      }
+    >
       <img
         ref={imageRef}
         src={src || undefined}
@@ -32,7 +38,7 @@ function ThumbnailImage({ src, name, loadingLabel, errorLabel }: ImageThumbnailP
         decoding="async"
         onLoad={() => setState("loaded")}
         onError={() => setState("error")}
-        className="h-auto max-h-full w-auto max-w-full object-contain"
+        className="block h-auto max-h-32 w-auto max-w-full rounded object-contain"
         style={{ visibility: state === "loaded" ? "visible" : "hidden" }}
       />
       {state !== "loaded" && (
