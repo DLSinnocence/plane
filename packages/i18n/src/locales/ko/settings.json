@@ -197,7 +197,10 @@
       "custom_model": "Custom model",
       "idle_timeout": "The model or tool has not responded for too long. The request was stopped; you can retry.",
       "model_output_limit": "The model reached its response length limit before finishing. You can ask it to continue.",
-      "output_limit": "This response is too large to display in one request. You can ask to continue with a shorter answer."
+      "output_limit": "This response is too large to display in one request. You can ask to continue with a shorter answer.",
+      "migration_notice": "The assistant uses your current workspace's default model. Personal credentials are no longer used.",
+      "workspace_settings": "Open workspace AI settings",
+      "select_workspace": "Open a workspace to view its AI settings."
     }
   },
   "profile": {
