@@ -342,6 +342,8 @@ class GiteaCommitsEndpoint(GiteaBearerAPIView):
                 for c in GiteaCommit.all_objects.filter(workspace=workspace, url__in=[c["url"] for c in commits])
             }
             for payload, row in zip(commits, validation["results"]):
+                if row["work_item"] is None:
+                    continue
                 stored = existing.get(payload["url"])
                 if stored and (stored.sha != payload["sha"] or stored.message != payload["message"]):
                     row["valid"] = False
@@ -354,6 +356,8 @@ class GiteaCommitsEndpoint(GiteaBearerAPIView):
                 return self.commit_response(validation, commits, status=400, report=True)
             linked_count = 0
             for payload, row in zip(commits, validation["results"]):
+                if row["work_item"] is None:
+                    continue
                 commit, _ = GiteaCommit.all_objects.update_or_create(
                     workspace=workspace,
                     url=payload["url"],

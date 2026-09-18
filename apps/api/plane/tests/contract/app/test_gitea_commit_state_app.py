@@ -55,7 +55,10 @@ def endpoint(integration, suffix):
 
 
 def commit(item, description="implement work"):
-    message = f"{key(item)} {description}\n"
+    return message_commit(f"{key(item)} {description}\n")
+
+
+def message_commit(message):
     raw = (
         "tree " + "a" * 40 + "\n"
         "author Developer <developer@example.invalid> 1767225600 +0000\n"
@@ -102,6 +105,45 @@ def assert_rejected(response, transport, operation, item, state_name=None, row_i
     assert key(item) in message
     if state_name is not None:
         assert state_name in message
+
+
+@pytest.mark.parametrize("transport", ["json", "shell"])
+@pytest.mark.parametrize("operation", ["validate", "report"])
+@pytest.mark.parametrize("ordinary", ["none", "started", "completed"])
+def test_deploy_exemption_preserves_batch_validation(bearer, integration, item, transport, operation, ordinary):
+    deployment = message_commit("[deploy] publish Godot Web\n")
+    values = [deployment]
+    if ordinary != "none":
+        values.append(commit(item))
+    if ordinary == "completed":
+        State.objects.filter(pk=item.state_id).update(group="completed", name="已完成")
+    response = post(bearer, integration, transport, operation, values)
+    if ordinary == "completed":
+        assert_rejected(response, transport, operation, item, "已完成", row_index=1)
+        expected = 0
+    else:
+        assert response.status_code == 200
+        expected = int(operation == "report" and ordinary == "started")
+        if transport == "json":
+            data = response.json()
+            assert data["valid"] is True
+            assert data["results"][0] == {
+                "sha": deployment["sha"],
+                "valid": True,
+                "identifier": None,
+                "work_item": None,
+                "error": None,
+            }
+            if operation == "report":
+                assert data["linked_count"] == expected
+        else:
+            lines = response.content.decode().splitlines()
+            assert lines[: len(values) + 2] == [
+                "PLANE-HOOK-OK", *(value["sha"] for value in values), "PLANE-HOOK-END"
+            ]
+            assert len(lines) == len(values) + 2 + expected
+    assert GiteaCommit.objects.count() == GiteaCommitLink.objects.count() == expected
+    assert not GiteaCommit.objects.filter(sha=deployment["sha"]).exists()
 
 
 @pytest.mark.parametrize("transport", ["json", "shell"])

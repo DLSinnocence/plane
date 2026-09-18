@@ -72,6 +72,24 @@ def test_gitea_logs_omit_request_and_response(path):
     log.assert_not_called()
 
 
+@pytest.mark.parametrize("message", ["[deploy]", "[deploy] publish web\nbody", "[deploy]web", "[deploy] PROJ-3 build"])
+def test_deploy_prefix_passes_without_work_item_lookup(message):
+    with patch("plane.utils.gitea.issue_for_identifier") as lookup:
+        result = validate_commits(object(), [{"sha": SHA.upper(), "message": message}])
+    assert result == {
+        "valid": True,
+        "results": [{"sha": SHA, "valid": True, "identifier": None, "work_item": None, "error": None}],
+    }
+    lookup.assert_not_called()
+
+
+@pytest.mark.parametrize("message", ["[DEPLOY] publish", " [deploy] publish", "publish\n[deploy]", "[deployment] publish"])
+def test_deploy_marker_must_be_exact_first_line_prefix(message):
+    result = validate_commits(object(), [{"sha": SHA, "message": message}])
+    assert result["valid"] is False
+    assert result["results"][0]["error"]["code"] == "invalid_prefix"
+
+
 @pytest.mark.parametrize("prefix", ["1_研发+X", "TEAM-SUB", "ABC"])
 @pytest.mark.parametrize("separator", [" ", "\t", " \t "])
 def test_full_workspace_identifier(prefix, separator):

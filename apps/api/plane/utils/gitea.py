@@ -126,6 +126,17 @@ def validate_commits(workspace, commits):
     results = []
     for commit in commits:
         first_line = commit["message"].split("\n", 1)[0].rstrip("\r")
+        if first_line.startswith("[deploy]"):
+            results.append(
+                {
+                    "sha": commit["sha"].lower(),
+                    "valid": True,
+                    "identifier": None,
+                    "work_item": None,
+                    "error": None,
+                }
+            )
+            continue
         match = re.fullmatch(r"([^\s]+-[1-9][0-9]{0,18})[ \t]+\S.*", first_line)
         identifier = match.group(1) if match else None
         issue = issue_for_identifier(workspace, identifier) if identifier else None
