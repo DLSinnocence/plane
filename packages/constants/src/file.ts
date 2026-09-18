@@ -4,7 +4,7 @@
  * See the LICENSE file for details.
  */
 
-export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MiB
 export const MAX_ATTACHMENT_SIZE = 1024 * 1024 * 1024; // 1GB
 
 export const ACCEPTED_AVATAR_IMAGE_MIME_TYPES_FOR_REACT_DROPZONE = {
