@@ -1019,7 +1019,10 @@ describe("ephemeral Pi runtime", () => {
     }
   );
 
-  it.each([404, 500])("does not retry or probe another endpoint after HTTP %s", async (status) => {
+  it.each([
+    [404, 1],
+    [500, 3],
+  ])("keeps retries on the configured endpoint after HTTP %s", async (status, expectedRequests) => {
     const h = harness();
     const requests: { method: string | undefined; path: string | undefined; model: unknown }[] = [];
     const server = createServer(async (req, res) => {
@@ -1041,9 +1044,19 @@ describe("ephemeral Pi runtime", () => {
         idleMs: 2000,
         createAgent: (options) => new Agent(options),
       });
-      expect(requests).toEqual([{ method: "POST", path: "/v1/chat/completions", model: input.model_config.model }]);
+      expect(requests).toHaveLength(expectedRequests);
+      expect(requests).toEqual(
+        Array.from({ length: expectedRequests }, () => ({
+          method: "POST",
+          path: "/v1/chat/completions",
+          model: input.model_config.model,
+        }))
+      );
       expect(config.base_url).toBe(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
-      expect(h.events.at(-2)).toMatchObject({ type: "error", code: "ai_model_error" });
+      expect(h.events.at(-2)).toMatchObject({
+        type: "error",
+        code: status === 500 ? "ai_idle_timeout" : "ai_model_error",
+      });
       expect(h.events.at(-1)).toEqual({ type: "done", reason: "error" });
     } finally {
       server.closeAllConnections();
@@ -1139,7 +1152,8 @@ describe("ephemeral Pi runtime", () => {
         type: "error",
         code: "ai_model_error",
         may_have_changes: changed,
-        message: "The model could not complete this request. Check your personal AI settings and try again.",
+        message:
+          "The model could not complete this request after retrying. Check the model connection or ask a workspace administrator to review AI settings.",
       });
       expect(h.events.at(-1)).toEqual({ type: "done", reason: "error" });
       expect(JSON.stringify(h.events)).not.toMatch(/private-provider-url|model-secret/);

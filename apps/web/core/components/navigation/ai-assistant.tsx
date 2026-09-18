@@ -6,7 +6,6 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
-  ChevronDown,
   Copy,
   Maximize2,
   Minimize2,
@@ -36,6 +35,7 @@ import { AgentMessageContent, useAgentMarkdownLabels } from "./agent-message-con
 import { AgentToolDetails } from "./agent-tool-details";
 
 type ChatError = { message: string; code?: string; mayHaveChanges: boolean };
+type WorkspaceChatModel = { id: string; name: string; supportsImages: boolean };
 type ChatMessage = AgentMessage & {
   id: number;
   thinking?: string;
@@ -122,6 +122,8 @@ const ScopedAssistant = observer(function ScopedAssistant({
   const [wide, setWide] = useState(false);
   const [dock, setDock] = useState<HTMLElement | null>(null);
   const [settings, setSettings] = useState<AISettings | null>(null);
+  const [models, setModels] = useState<WorkspaceChatModel[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [loadingSettings, setLoadingSettings] = useState(false);
   const [history, setHistory] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -152,7 +154,6 @@ const ScopedAssistant = observer(function ScopedAssistant({
   const startedAt = useRef(0);
   const configured = Boolean(settings?.has_api_key);
   const supportsImages = Boolean(settings?.supports_images);
-  const modelName = settings?.model_metadata?.name || settings?.model || t("account_settings.ai.select_model");
   const focusComposer = () => requestAnimationFrame(() => composer.current?.focus());
   useEffect(() => {
     setDock(document.getElementById("workspace-ai-sidebar"));
@@ -174,19 +175,32 @@ const ScopedAssistant = observer(function ScopedAssistant({
     void getWorkspaceAISettings(workspaceSlug, request.signal)
       .then((value) => {
         if (request.signal.aborted) return undefined;
-        const provider = value.providers.find(
-          (item) =>
-            item.is_enabled && item.has_api_key && item.models.some((model) => model.is_enabled && model.is_default)
+        const availableModels = value.providers.flatMap((provider) =>
+          provider.is_enabled && provider.has_api_key
+            ? provider.models
+                .filter((model) => model.is_enabled)
+                .map((model) => ({
+                  id: model.id,
+                  name: model.model,
+                  supportsImages: model.supports_images,
+                  isDefault: model.is_default,
+                }))
+            : []
         );
-        const model = provider?.models.find((item) => item.is_enabled && item.is_default);
+        const selected =
+          availableModels.find((model) => model.id === selectedModelId) ??
+          availableModels.find((model) => model.isDefault) ??
+          availableModels[0];
+        setModels(availableModels);
+        setSelectedModelId(selected?.id ?? null);
         setSettings(
-          provider && model
+          selected
             ? {
-                provider: provider.provider,
-                base_url: provider.base_url,
-                model: model.model,
-                has_api_key: provider.has_api_key,
-                supports_images: model.supports_images,
+                provider: "openai",
+                base_url: "",
+                model: selected.name,
+                has_api_key: true,
+                supports_images: selected.supportsImages,
               }
             : null
         );
@@ -202,7 +216,7 @@ const ScopedAssistant = observer(function ScopedAssistant({
         if (!request.signal.aborted) setLoadingSettings(false);
       });
     return () => request.abort();
-  }, [open, settingsOpen, reload, workspaceSlug]);
+  }, [open, settingsOpen, reload, selectedModelId, workspaceSlug]);
   useEffect(() => {
     if (open && !settingsOpen && configured) focusComposer();
   }, [open, settingsOpen, configured]);
@@ -271,6 +285,19 @@ const ScopedAssistant = observer(function ScopedAssistant({
   };
   const configure = () => {
     window.location.assign(`/${workspaceSlug}/settings/ai/`);
+  };
+  const selectModel = (modelId: string) => {
+    const model = models.find((item) => item.id === modelId);
+    if (!model) return;
+    setSelectedModelId(model.id);
+    setSettings({
+      provider: "openai",
+      base_url: "",
+      model: model.name,
+      has_api_key: true,
+      supports_images: model.supportsImages,
+    });
+    setImageError(null);
   };
   const addImages = async (files: File[]) => {
     if (!files.length || busy || imageLoading || imageReader.current) return;
@@ -376,7 +403,13 @@ const ScopedAssistant = observer(function ScopedAssistant({
       setTools([]);
     };
     try {
-      const body = await startAgentChat(workspaceSlug, messages, projectId, request.signal);
+      const body = await startAgentChat(
+        workspaceSlug,
+        messages,
+        projectId,
+        selectedModelId ?? undefined,
+        request.signal
+      );
       await readAgentStream(
         body,
         (event) => {
@@ -786,17 +819,19 @@ const ScopedAssistant = observer(function ScopedAssistant({
             >
               <Plus size={19} />
             </button>
-            <button
-              type="button"
+            <select
               className="agent-model-button"
-              disabled={busy}
-              onClick={configure}
-              aria-label={`${t("account_settings.ai.model_settings")}: ${modelName}`}
-              title={modelName}
+              aria-label={t("account_settings.ai.select_model")}
+              disabled={busy || models.length === 0}
+              value={selectedModelId ?? ""}
+              onChange={(event) => selectModel(event.target.value)}
             >
-              <span>{modelName}</span>
-              <ChevronDown size={12} />
-            </button>
+              {models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name}
+                </option>
+              ))}
+            </select>
             {imageLoading && (
               <span role="status" className="agent-upload-status">
                 {t("account_settings.ai.image_uploading")}

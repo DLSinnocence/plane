@@ -111,11 +111,13 @@ export async function startAgentChat(
   workspaceSlug: string,
   messages: AgentMessage[],
   projectId: string | undefined,
+  modelId: string | undefined,
   signal: AbortSignal
 ) {
   const response = await request(`/api/workspaces/${encodeURIComponent(workspaceSlug)}/agent/chat/`, "POST", signal, {
     messages,
     ...(projectId ? { project_id: projectId } : {}),
+    ...(modelId ? { model_id: modelId } : {}),
   });
   if (!response.body) throw new Error("Assistant response has no stream");
   return response.body;

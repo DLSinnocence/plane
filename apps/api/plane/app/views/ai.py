@@ -572,16 +572,13 @@ class WorkspaceAgentChatEndpoint(BaseAPIView):
             return Response(
                 ai_error("The AI service is not configured on this instance.", "ai_service_not_configured"), status=503
             )
-        config = (
-            WorkspaceAIModel.objects.select_related("provider_config", "workspace")
-            .filter(
-                workspace__slug=slug,
-                is_default=True,
-                is_enabled=True,
-                provider_config__is_enabled=True,
-            )
-            .first()
+        configs = WorkspaceAIModel.objects.select_related("provider_config", "workspace").filter(
+            workspace__slug=slug,
+            is_enabled=True,
+            provider_config__is_enabled=True,
         )
+        model_id = data.get("model_id")
+        config = configs.filter(id=model_id).first() if model_id else configs.filter(is_default=True).first()
         if (
             config is None
             or not config.model
@@ -603,7 +600,7 @@ class WorkspaceAgentChatEndpoint(BaseAPIView):
         supports_images = config.supports_images
         if not supports_images and any(message.get("images") for message in data["messages"]):
             return Response(
-                ai_error("The workspace default model does not support images.", "ai_images_disabled"),
+                ai_error("The selected workspace model does not support images.", "ai_images_disabled"),
                 status=400,
             )
         project_id = data.get("project_id")

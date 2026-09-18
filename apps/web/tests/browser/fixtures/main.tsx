@@ -24,6 +24,7 @@ import { AttachmentSlotsFixture } from "./attachment-slots";
 import { AttachmentPreviewFixture } from "./attachment-preview";
 import { StageAssigneesFixture } from "./stage-assignees";
 import { AIAssistantFixture } from "./ai-assistant";
+import { WorkspaceAISettings } from "@/components/workspace/settings/ai/root";
 import { GitCommitsMenuFixture } from "./git-commits-menu";
 
 function App() {
@@ -109,6 +110,10 @@ function App() {
     </main>
   );
 }
+function WorkspaceAISettingsFixture() {
+  return <WorkspaceAISettings workspaceSlug="workspace" canEdit />;
+}
+
 function GiteaSettingsFixture() {
   const [workspaceSlug, setWorkspaceSlug] = useState("workspace");
   return (
@@ -124,6 +129,8 @@ function GiteaSettingsFixture() {
 createRoot(document.getElementById("root")!).render(
   new URLSearchParams(window.location.search).has("ai-assistant") ? (
     <AIAssistantFixture />
+  ) : new URLSearchParams(window.location.search).has("workspace-ai-settings") ? (
+    <WorkspaceAISettingsFixture />
   ) : new URLSearchParams(window.location.search).has("gitea-settings") ? (
     <GiteaSettingsFixture />
   ) : new URLSearchParams(window.location.search).has("git-commits-menu") ? (

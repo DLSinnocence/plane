@@ -2,7 +2,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only */
 import { expect, test, type Page } from "@playwright/test";
 
-async function mockSettings(page: Page, configured = true, supportsImages = false) {
+async function mockSettings(
+  page: Page,
+  configured = true,
+  supportsImages = false,
+  models = [
+    {
+      id: "fixture-model-id",
+      model: "fixture-model",
+      supports_images: supportsImages,
+      is_enabled: true,
+      is_default: true,
+    },
+  ]
+) {
   const current = {
     providers: [
       {
@@ -12,15 +25,7 @@ async function mockSettings(page: Page, configured = true, supportsImages = fals
         base_url: "",
         has_api_key: configured,
         is_enabled: true,
-        models: [
-          {
-            id: "fixture-model-id",
-            model: "fixture-model",
-            supports_images: supportsImages,
-            is_enabled: true,
-            is_default: true,
-          },
-        ],
+        models,
       },
     ],
   };
@@ -138,7 +143,7 @@ test("composer uses Enter to send and Shift+Enter for a newline and shows the cu
   await mockSettings(page);
   await page.goto("/?ai-assistant");
   await open(page);
-  await expect(page.getByRole("button", { name: "Model settings: fixture-model" })).toBeVisible();
+  await expect(page.locator("select.agent-model-button")).toHaveValue("fixture-model-id");
   const input = page.getByRole("textbox", { name: "Message the assistant" });
   await input.fill("First line");
   await input.press("Shift+Enter");
@@ -210,7 +215,7 @@ test("Chinese sidebar presents a complete Agent conversation beside the workspac
   await page.screenshot({ path: "test-results/ai-sidebar-streaming-zh.png", fullPage: true });
   await frames(page, [{ type: "done" }]);
   await expect(aside.getByRole("link", { name: "ENG-42", exact: true })).toBeVisible();
-  await expect(aside.getByRole("button", { name: "模型设置: fixture-model" })).toBeVisible();
+  await expect(aside.locator("select.agent-model-button")).toHaveValue("fixture-model-id");
   await page.screenshot({ path: "test-results/ai-sidebar-zh.png", fullPage: true });
 });
 
@@ -254,7 +259,7 @@ test("configured model settings opens the workspace configuration", async ({ pag
   );
   await page.goto("/?ai-assistant");
   await open(page);
-  await page.getByRole("button", { name: "Model settings: fixture-model" }).click();
+  await page.getByRole("button", { name: "Model settings" }).click();
   await expect(page).toHaveURL(/\/workspace\/settings\/ai\/$/);
 });
 
@@ -279,6 +284,7 @@ test("attaches real image data, sends image-only prompts and preserves images fo
       { role: "user", content: "", images: [{ data: imageData, mime_type: "image/png", name: "screen.png" }] },
     ],
     project_id: "fixture-project",
+    model_id: "fixture-model-id",
   });
   await frames(page, [{ type: "text", text: "I can see the screenshot." }, { type: "done" }]);
   await expect(page.getByRole("complementary").getByRole("img", { name: "screen.png" })).toBeVisible();
@@ -377,6 +383,7 @@ test("streams safe Markdown, updates friendly tool progress and keeps only succe
       { role: "user", content: "Summarize them" },
     ],
     project_id: "fixture-project",
+    model_id: "fixture-model-id",
   });
   await frames(page, [{ type: "text", text: "Summary complete." }, { type: "done" }]);
   await page.getByRole("button", { name: "New chat", exact: true }).click();
@@ -520,6 +527,7 @@ test("pre-execution service configuration errors preserve the draft and never cl
   expect(await page.evaluate(() => window.aiFixture.requests[1].body)).toEqual({
     messages: [{ role: "user", content: "Show my tasks instead" }],
     project_id: "fixture-project",
+    model_id: "fixture-model-id",
   });
   await frames(page, [{ type: "text", text: "The service is connected." }, { type: "done" }]);
   await expect(page.getByRole("complementary")).toContainText("The service is connected.");
@@ -569,6 +577,7 @@ test("separates streamed native thoughts and tagged thoughts from the final answ
       { role: "user", content: "Follow up" },
     ],
     project_id: "fixture-project",
+    model_id: "fixture-model-id",
   });
 });
 
@@ -751,4 +760,24 @@ test("sanitized model errors remain visible and navigation or user changes destr
   await page.evaluate(() => window.aiFixture.switchUser());
   await expect(page.getByRole("complementary")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.aiFixture.aborted)).toBe(2);
+});
+
+test("selects an administrator-configured workspace model without navigating away", async ({ page }) => {
+  await mockSettings(page, true, false, [
+    { id: "default-model-id", model: "default-model", supports_images: false, is_enabled: true, is_default: true },
+    { id: "vision-model-id", model: "vision-model", supports_images: true, is_enabled: true, is_default: false },
+  ]);
+  await page.goto("/?ai-assistant");
+  await open(page);
+
+  const modelSelect = page.locator("select.agent-model-button");
+  await expect(modelSelect).toHaveValue("default-model-id");
+  await modelSelect.selectOption("vision-model-id");
+  await expect(page).toHaveURL(/ai-assistant/);
+  await send(page, "Use the selected model");
+  await expect
+    .poll(() => page.evaluate(() => window.aiFixture.requests.at(-1)?.body))
+    .toMatchObject({
+      model_id: "vision-model-id",
+    });
 });

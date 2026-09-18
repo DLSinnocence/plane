@@ -394,19 +394,26 @@ export function WorkspaceAIProviderCard({
                   {t("workspace_settings.settings.ai.discovery_results")}
                   {discoveryTruncated ? ` · ${t("workspace_settings.settings.ai.discovery_truncated")}` : ""}
                 </p>
-                <div className="flex flex-wrap gap-2">
+                <select
+                  aria-label={t("workspace_settings.settings.ai.discovery_results")}
+                  className="w-full rounded border border-subtle bg-surface-1 px-3 py-2 text-body-sm-regular"
+                  defaultValue=""
+                  disabled={busy}
+                  onChange={(event) => {
+                    const selected = discovery.find((option) => option.id === event.target.value);
+                    if (!selected) return;
+                    setNewModel(selected.id);
+                    setSupportsImages(selected.vision === true);
+                    event.target.value = "";
+                  }}
+                >
+                  <option value="">{t("workspace_settings.settings.ai.discovery_results")}</option>
                   {discovery.map((option) => (
-                    <Button
-                      key={option.id}
-                      variant="secondary"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => void addModel(option.id, option.vision === true)}
-                    >
-                      {option.id}
-                    </Button>
+                    <option key={option.id} value={option.id}>
+                      {option.name === option.id ? option.id : `${option.name} (${option.id})`}
+                    </option>
                   ))}
-                </div>
+                </select>
               </div>
             )}
             {discovered && !discovering && !discoveryError && discovery.length === 0 && (

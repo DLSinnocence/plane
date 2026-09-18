@@ -335,6 +335,103 @@ def test_authorized_chat_uses_saved_config_and_session_identity_without_eager_to
     response.close()
 
 
+def test_chat_uses_requested_enabled_workspace_model(session_client, create_user, workspace, monkeypatch):
+    default = save_workspace_settings(workspace, model="default-model")
+    selected = WorkspaceAIModel.objects.create(
+        workspace=workspace,
+        provider_config=default.provider_config,
+        model="selected-model",
+    )
+    captured = {}
+
+    def stream(payload, workspace_id):
+        captured.update(payload=payload, workspace_id=workspace_id)
+        return iter(())
+
+    monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
+    response = session_client.post(
+        chat_url(workspace),
+        {"messages": [{"role": "user", "content": "hello"}], "model_id": str(selected.id)},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert captured["workspace_id"] == workspace.id
+    assert captured["payload"]["model_config"] == {
+        "provider": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "model": "selected-model",
+        "api_key": "model-secret",
+        "supports_images": False,
+    }
+    response.close()
+
+
+def test_chat_without_model_id_falls_back_to_workspace_default(session_client, create_user, workspace, monkeypatch):
+    default = save_workspace_settings(workspace, model="default-model")
+    WorkspaceAIModel.objects.create(
+        workspace=workspace,
+        provider_config=default.provider_config,
+        model="non-default-model",
+    )
+    stream = Mock(return_value=iter(()))
+    monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
+
+    response = session_client.post(
+        chat_url(workspace), {"messages": [{"role": "user", "content": "hello"}]}, format="json"
+    )
+
+    assert response.status_code == 200
+    assert stream.call_args.args[0]["model_config"]["model"] == "default-model"
+    response.close()
+
+
+@pytest.mark.parametrize("invalid", ["other-workspace", "disabled-model", "disabled-provider"])
+def test_chat_rejects_unavailable_requested_model_without_leaking_configuration(
+    session_client, create_user, workspace, invalid, monkeypatch
+):
+    default = save_workspace_settings(workspace)
+    if invalid == "other-workspace":
+        other = Workspace.objects.create(name="Other", slug="other-model-workspace", owner=create_user)
+        provider = WorkspaceAIProvider.objects.create(
+            workspace=other,
+            name="Other provider",
+            provider="openai",
+            base_url="https://api.openai.com/v1",
+            api_key_encrypted=encrypt_model_key("other-secret"),
+        )
+        requested = WorkspaceAIModel.objects.create(
+            workspace=other, provider_config=provider, model="other-model", is_default=True
+        )
+    elif invalid == "disabled-model":
+        requested = WorkspaceAIModel.objects.create(
+            workspace=workspace,
+            provider_config=default.provider_config,
+            model="disabled-model",
+            is_enabled=False,
+        )
+    else:
+        default.provider_config.is_enabled = False
+        default.provider_config.save()
+        requested = default
+    stream = Mock()
+    monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
+
+    response = session_client.post(
+        chat_url(workspace),
+        {"messages": [{"role": "user", "content": "hello"}], "model_id": str(requested.id)},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "Ask a workspace administrator to configure a default AI model.",
+        "code": "ai_model_not_configured",
+        "may_have_changes": False,
+    }
+    stream.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "url,secret",
     [

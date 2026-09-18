@@ -83,7 +83,7 @@ test("settings and chat mutations obtain CSRF and include credentials without re
   await getAISettings(signal);
   await saveAISettings(buildAISettingsInput("openai", "", "fixture", ""), signal);
   await disconnectAISettings(signal);
-  await startAgentChat("a/b", [{ role: "user", content: "hello" }], "project-1", signal);
+  await startAgentChat("a/b", [{ role: "user", content: "hello" }], "project-1", "model-1", signal);
   assert.equal(calls.length, 7);
   for (const call of calls) {
     assert.equal(call.credentials, "include");
@@ -96,6 +96,7 @@ test("settings and chat mutations obtain CSRF and include credentials without re
   assert.deepEqual(JSON.parse(calls[6].body), {
     messages: [{ role: "user", content: "hello" }],
     project_id: "project-1",
+    model_id: "model-1",
   });
   assert.equal("api_key" in JSON.parse(calls[2].body), false);
 });
@@ -113,7 +114,7 @@ test("settings errors include readable field validation and preserve a non-JSON 
   await assert.rejects(getAISettings(signal), /Settings are unavailable\./);
   payload = JSON.stringify({ error: "Configure your model in personal AI settings first." });
   await assert.rejects(
-    startAgentChat("workspace", [{ role: "user", content: "hello" }], undefined, signal),
+    startAgentChat("workspace", [{ role: "user", content: "hello" }], undefined, undefined, signal),
     /Configure your model in personal AI settings first\./
   );
   payload = "<html>Proxy unavailable</html>";
@@ -132,6 +133,6 @@ test("CSRF failures prevent writes and failed writes are never retried", async (
     calls++;
     return calls === 2 ? new Response('{"csrf_token":"fixture"}') : new Response("{}", { status: 502 });
   };
-  await assert.rejects(startAgentChat("workspace", [], undefined, new AbortController().signal));
+  await assert.rejects(startAgentChat("workspace", [], undefined, undefined, new AbortController().signal));
   assert.equal(calls, 3);
 });

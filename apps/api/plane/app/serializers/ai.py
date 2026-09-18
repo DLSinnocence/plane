@@ -115,6 +115,7 @@ class AgentMessageSerializer(serializers.Serializer):
 class AgentChatInputSerializer(serializers.Serializer):
     messages = AgentMessageSerializer(many=True, allow_empty=False, max_length=40)
     project_id = serializers.UUIDField(required=False, allow_null=True)
+    model_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate_messages(self, value):
         if sum(len(message["content"]) for message in value) > 60000:

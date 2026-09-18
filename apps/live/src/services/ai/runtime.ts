@@ -229,7 +229,7 @@ export async function runAiChat(
             apiKey: input.model_config.api_key,
             signal: control.signal,
             maxTokens: selectedModel.maxTokens,
-            maxRetries: 0,
+            maxRetries: 5,
             timeoutMs: 60_000,
             maxRetryDelayMs: 1000,
             cacheRetention: "none",
@@ -355,8 +355,8 @@ export async function runAiChat(
               : errorCode === "ai_tools_unavailable"
                 ? "Plane tools are unavailable. Please try again later."
                 : errorCode === "ai_empty_response"
-                  ? "The model finished without an answer. Try again or choose another model in your personal AI settings."
-                  : "The model could not complete this request. Check your personal AI settings and try again.",
+                  ? "The model finished without an answer. Try again or ask a workspace administrator to choose another default model."
+                  : "The model could not complete this request after retrying. Check the model connection or ask a workspace administrator to review AI settings.",
     });
   }
   await emit({ type: "done", reason });
