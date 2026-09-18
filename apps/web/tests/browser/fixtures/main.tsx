@@ -25,6 +25,7 @@ import { AttachmentPreviewFixture } from "./attachment-preview";
 import { StageAssigneesFixture } from "./stage-assignees";
 import { AIAssistantFixture } from "./ai-assistant";
 import { WorkspaceAISettings } from "@/components/workspace/settings/ai/root";
+import { EditorFileSizeFixture } from "./editor-file-size";
 import { GitCommitsMenuFixture } from "./git-commits-menu";
 
 function App() {
@@ -133,6 +134,8 @@ createRoot(document.getElementById("root")!).render(
     <WorkspaceAISettingsFixture />
   ) : new URLSearchParams(window.location.search).has("gitea-settings") ? (
     <GiteaSettingsFixture />
+  ) : new URLSearchParams(window.location.search).has("editor-file-size") ? (
+    <EditorFileSizeFixture />
   ) : new URLSearchParams(window.location.search).has("git-commits-menu") ? (
     <GitCommitsMenuFixture />
   ) : new URLSearchParams(window.location.search).has("git-commits") ? (

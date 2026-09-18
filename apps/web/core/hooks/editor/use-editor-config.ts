@@ -6,13 +6,13 @@
 
 import { useCallback } from "react";
 // plane imports
+import { MAX_FILE_SIZE } from "@plane/constants";
 import type { TFileHandler } from "@plane/editor";
 import { getEditorAssetDownloadSrc, getEditorAssetSrc } from "@plane/utils";
 // hooks
 import { useEditorAsset } from "@/hooks/store/use-editor-asset";
 // plane web hooks
 import { useExtendedEditorConfig } from "@/hooks/editor/use-extended-editor-config";
-import { useFileSize } from "@/hooks/use-file-size";
 // services
 import { FileService } from "@/services/file.service";
 const fileService = new FileService();
@@ -28,8 +28,6 @@ type TArgs = {
 export const useEditorConfig = () => {
   // store hooks
   const { assetsUploadPercentage } = useEditorAsset();
-  // file size
-  const { maxFileSize } = useFileSize();
   const { getExtendedEditorFileHandlers } = useExtendedEditorConfig();
 
   const getEditorFileHandlers = useCallback(
@@ -94,12 +92,12 @@ export const useEditorConfig = () => {
         upload: uploadFile,
         duplicate: duplicateFile,
         validation: {
-          maxFileSize,
+          maxFileSize: MAX_FILE_SIZE,
         },
         ...getExtendedEditorFileHandlers({ projectId, workspaceSlug }),
       };
     },
-    [assetsUploadPercentage, getExtendedEditorFileHandlers, maxFileSize]
+    [assetsUploadPercentage, getExtendedEditorFileHandlers]
   );
 
   return {
