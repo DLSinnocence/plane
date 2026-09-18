@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from plane.db.models import APIToken, UserAISettings
+from plane.db.models import APIToken, WorkspaceAIModel, WorkspaceAIProvider
 from plane.utils.ai import AGENT_TOKEN_LABEL, encrypt_model_key
 
 pytestmark = [
@@ -26,16 +26,22 @@ pytestmark = [
 
 
 @pytest.fixture(autouse=True)
-def local_agent_settings(settings, create_user):
+def local_agent_settings(settings, workspace):
     settings.AI_AGENT_URL = os.environ["PLANE_AI_TEST_LIVE_URL"]
     settings.LIVE_SERVER_SECRET_KEY = "local-agent-integration-secret"
     settings.CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
-    UserAISettings.objects.create(
-        user=create_user,
+    provider = WorkspaceAIProvider.objects.create(
+        workspace=workspace,
+        name="Local integration",
         provider="openai",
         base_url=os.environ["PLANE_AI_TEST_MODEL_URL"],
-        model="local-integration-model",
         api_key_encrypted=encrypt_model_key("local-model-test-key"),
+    )
+    WorkspaceAIModel.objects.create(
+        workspace=workspace,
+        provider_config=provider,
+        model="local-integration-model",
+        is_default=True,
     )
 
 

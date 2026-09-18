@@ -31,6 +31,10 @@ function errorMessage(data: unknown): string | undefined {
     base_url: "Base URL",
     model: "Model",
     api_key: "API key",
+    name: "Name",
+    is_default: "Default model",
+    is_enabled: "Enabled",
+    supports_images: "Image support",
   };
   return (
     Object.entries(labels)
@@ -43,7 +47,7 @@ function errorMessage(data: unknown): string | undefined {
   );
 }
 
-async function request(path: string, method: string, signal: AbortSignal, data?: unknown) {
+export async function agentRequest(path: string, method: string, signal: AbortSignal, data?: unknown) {
   const headers: Record<string, string> = {};
   if (method !== "GET") {
     const csrf = await fetch(`${API_BASE_URL}/auth/get-csrf-token/`, { credentials: "include", signal });
@@ -74,6 +78,8 @@ async function request(path: string, method: string, signal: AbortSignal, data?:
   }
   return response;
 }
+const request = agentRequest;
+
 export type AIModelOption = {
   id: string;
   name: string;

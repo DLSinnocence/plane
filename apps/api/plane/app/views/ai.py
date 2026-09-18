@@ -12,6 +12,7 @@ from asgiref.sync import sync_to_async
 from cryptography.fernet import InvalidToken
 from django.conf import settings
 from django.core.cache import cache
+from django.db import IntegrityError, transaction
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 import httpx
@@ -26,9 +27,19 @@ from plane.app.serializers.ai import (
     AISettingsInputSerializer,
     AgentChatInputSerializer,
     PROVIDER_BASE_URLS,
+    WorkspaceAIModelInputSerializer,
+    WorkspaceAIModelsDiscoveryInputSerializer,
+    WorkspaceAIProviderInputSerializer,
 )
 from plane.app.views.base import BaseAPIView
-from plane.db.models import APIToken, ProjectMember, UserAISettings, Workspace
+from plane.db.models import (
+    APIToken,
+    ProjectMember,
+    UserAISettings,
+    Workspace,
+    WorkspaceAIModel,
+    WorkspaceAIProvider,
+)
 from plane.utils.ai import (
     AGENT_TOKEN_LABEL,
     DEFAULT_AI_SETTINGS,
@@ -133,6 +144,251 @@ class PersonalAISettingsEndpoint(BaseAPIView):
         # Revoke any outstanding MCP authority immediately when settings are removed.
         APIToken.objects.filter(user=request.user, is_service=True, label=AGENT_TOKEN_LABEL).update(is_active=False)
         return Response(status=204)
+
+
+def public_workspace_ai_model(config):
+    return {
+        "id": str(config.id),
+        "model": config.model,
+        "supports_images": config.supports_images,
+        "is_enabled": config.is_enabled,
+        "is_default": config.is_default,
+    }
+
+
+def public_workspace_ai_provider(config):
+    return {
+        "id": str(config.id),
+        "name": config.name,
+        "provider": config.provider,
+        "base_url": config.base_url,
+        "has_api_key": bool(config.api_key_encrypted),
+        "is_enabled": config.is_enabled,
+        "models": [public_workspace_ai_model(model) for model in config.models.all()],
+    }
+
+
+def workspace_ai_provider(slug, provider_id):
+    return WorkspaceAIProvider.objects.filter(workspace__slug=slug, id=provider_id).first()
+
+
+def not_found_response():
+    return Response({"detail": "Not found."}, status=404)
+
+
+class WorkspaceAISettingsEndpoint(BaseAPIView):
+    authentication_classes = [SessionAuthentication]
+
+    @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
+    def get(self, request, slug):
+        providers = WorkspaceAIProvider.objects.filter(workspace__slug=slug).prefetch_related("models")
+        response = Response({"providers": [public_workspace_ai_provider(provider) for provider in providers]})
+        response["Cache-Control"] = "no-store"
+        return response
+
+
+class WorkspaceAIProvidersEndpoint(BaseAPIView):
+    authentication_classes = [SessionAuthentication]
+
+    @allow_permission([ROLE.ADMIN], level="WORKSPACE")
+    def post(self, request, slug):
+        serializer = WorkspaceAIProviderInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        missing = {
+            field: "This field is required."
+            for field in ("name", "provider", "api_key")
+            if field not in values
+        }
+        if missing:
+            raise ValidationError(missing)
+        api_key = values.pop("api_key")
+        if not api_key:
+            raise ValidationError({"api_key": "An API key is required."})
+        provider = values["provider"]
+        values["base_url"] = values.get("base_url") or PROVIDER_BASE_URLS[provider]
+        workspace = Workspace.objects.get(slug=slug)
+        config = WorkspaceAIProvider.objects.create(
+            workspace=workspace,
+            api_key_encrypted=encrypt_model_key(api_key),
+            **values,
+        )
+        return Response(public_workspace_ai_provider(config), status=201)
+
+
+class WorkspaceAIProviderEndpoint(BaseAPIView):
+    authentication_classes = [SessionAuthentication]
+
+    @allow_permission([ROLE.ADMIN], level="WORKSPACE")
+    def patch(self, request, slug, provider_id):
+        serializer = WorkspaceAIProviderInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        with transaction.atomic():
+            workspace = Workspace.objects.select_for_update().get(slug=slug)
+            config = WorkspaceAIProvider.objects.filter(workspace=workspace, id=provider_id).first()
+            if config is None:
+                return not_found_response()
+            api_key = values.pop("api_key", "")
+            provider = values.get("provider", config.provider)
+            if values.get("base_url") == "" or ("base_url" not in values and provider != config.provider):
+                values["base_url"] = PROVIDER_BASE_URLS[provider]
+            base_url = values.get("base_url", validate_model_url(config.base_url))
+            destination_changed = provider != config.provider or base_url != validate_model_url(config.base_url)
+            if destination_changed and not api_key:
+                raise ValidationError({"api_key": "Enter an API key again when changing the provider or base URL."})
+            for field in ("name", "provider", "base_url", "is_enabled"):
+                if field in values:
+                    setattr(config, field, values[field])
+            if api_key:
+                config.api_key_encrypted = encrypt_model_key(api_key)
+            config.save()
+            if not config.is_enabled:
+                WorkspaceAIModel.objects.filter(provider_config=config, is_default=True).update(is_default=False)
+        config = WorkspaceAIProvider.objects.prefetch_related("models").get(id=config.id)
+        return Response(public_workspace_ai_provider(config))
+
+    @allow_permission([ROLE.ADMIN], level="WORKSPACE")
+    def delete(self, request, slug, provider_id):
+        with transaction.atomic():
+            workspace = Workspace.objects.select_for_update().get(slug=slug)
+            config = WorkspaceAIProvider.objects.filter(workspace=workspace, id=provider_id).first()
+            if config is None:
+                return not_found_response()
+            config.delete()
+        return Response(status=204)
+
+
+@transaction.atomic
+def save_workspace_ai_model(slug, provider_id, values, model_id=None):
+    workspace = Workspace.objects.select_for_update().filter(slug=slug).first()
+    if workspace is None:
+        return None
+    provider = WorkspaceAIProvider.objects.filter(workspace=workspace, id=provider_id).first()
+    if provider is None:
+        return None
+    if model_id is None:
+        config = WorkspaceAIModel(
+            workspace=workspace,
+            provider_config=provider,
+            model=values["model"],
+        )
+    else:
+        config = WorkspaceAIModel.objects.filter(
+            workspace=workspace,
+            provider_config=provider,
+            id=model_id,
+        ).first()
+        if config is None:
+            return None
+
+    next_enabled = values.get("is_enabled", config.is_enabled)
+    if not next_enabled:
+        values["is_default"] = False
+    next_default = values.get("is_default", config.is_default)
+    if next_default and not provider.is_enabled:
+        raise ValidationError({"is_default": "The default model and its provider must be enabled."})
+    if next_default:
+        WorkspaceAIModel.objects.filter(workspace=workspace, is_default=True).exclude(id=config.id).update(
+            is_default=False
+        )
+    for field in ("model", "supports_images", "is_enabled", "is_default"):
+        if field in values:
+            setattr(config, field, values[field])
+    config.save()
+    return config
+
+
+class WorkspaceAIProviderModelsEndpoint(BaseAPIView):
+    authentication_classes = [SessionAuthentication]
+
+    @allow_permission([ROLE.ADMIN], level="WORKSPACE")
+    def post(self, request, slug, provider_id):
+        serializer = WorkspaceAIModelInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        if "model" not in values:
+            raise ValidationError({"model": "This field is required."})
+        try:
+            config = save_workspace_ai_model(slug, provider_id, values)
+        except IntegrityError:
+            raise ValidationError({"model": "This model is already configured for the provider."})
+        if config is None:
+            return not_found_response()
+        return Response(public_workspace_ai_model(config), status=201)
+
+
+class WorkspaceAIProviderModelEndpoint(BaseAPIView):
+    authentication_classes = [SessionAuthentication]
+
+    @allow_permission([ROLE.ADMIN], level="WORKSPACE")
+    def patch(self, request, slug, provider_id, model_id):
+        serializer = WorkspaceAIModelInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            config = save_workspace_ai_model(
+                slug,
+                provider_id,
+                serializer.validated_data,
+                model_id=model_id,
+            )
+        except IntegrityError:
+            raise ValidationError({"model": "This model is already configured for the provider."})
+        if config is None:
+            return not_found_response()
+        return Response(public_workspace_ai_model(config))
+
+    @allow_permission([ROLE.ADMIN], level="WORKSPACE")
+    def delete(self, request, slug, provider_id, model_id):
+        with transaction.atomic():
+            workspace = Workspace.objects.select_for_update().get(slug=slug)
+            config = WorkspaceAIModel.objects.filter(
+                workspace=workspace,
+                provider_config_id=provider_id,
+                provider_config__workspace=workspace,
+                id=model_id,
+            ).first()
+            if config is None:
+                return not_found_response()
+            config.delete()
+        return Response(status=204)
+
+
+class WorkspaceAIModelsDiscoveryEndpoint(BaseAPIView):
+    authentication_classes = [SessionAuthentication]
+
+    @allow_permission([ROLE.ADMIN], level="WORKSPACE")
+    def post(self, request, slug):
+        serializer = WorkspaceAIModelsDiscoveryInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        api_key = values.get("api_key", "")
+        provider_id = values.get("provider_id")
+        config = None
+        if provider_id:
+            config = workspace_ai_provider(slug, provider_id)
+            if config is None:
+                return not_found_response()
+        if not api_key and config is not None:
+            if config.provider != values["provider"] or validate_model_url(config.base_url) != values["base_url"]:
+                raise ValidationError(
+                    {"api_key": "Enter an API key for this provider and base URL."}
+                )
+            if not config.api_key_encrypted:
+                raise ValidationError({"api_key": "Enter an API key for this provider and base URL."})
+            try:
+                api_key = decrypt_model_key(config.api_key_encrypted)
+            except (InvalidToken, ValueError):
+                raise ValidationError({"api_key": "The saved model key cannot be read. Enter it again."})
+        if not api_key:
+            raise ValidationError({"api_key": "Enter an API key for this provider and base URL."})
+        try:
+            data = discover_models(values["provider"], values["base_url"], api_key)
+            response = Response(data)
+        except ModelDiscoveryError:
+            response = Response({"error": DISCOVERY_ERROR}, status=502)
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 def ai_error(message, code):
@@ -316,23 +572,38 @@ class WorkspaceAgentChatEndpoint(BaseAPIView):
             return Response(
                 ai_error("The AI service is not configured on this instance.", "ai_service_not_configured"), status=503
             )
-        config = UserAISettings.objects.filter(user=request.user).first()
-        if config is None or not config.api_key_encrypted or not config.model:
-            return Response(
-                ai_error("Configure your model in personal AI settings first.", "ai_model_not_configured"), status=400
+        config = (
+            WorkspaceAIModel.objects.select_related("provider_config", "workspace")
+            .filter(
+                workspace__slug=slug,
+                is_default=True,
+                is_enabled=True,
+                provider_config__is_enabled=True,
             )
+            .first()
+        )
+        if (
+            config is None
+            or not config.model
+            or not config.provider_config.api_key_encrypted
+            or config.provider_config.workspace_id != config.workspace_id
+        ):
+            return Response(
+                ai_error("Ask a workspace administrator to configure a default AI model.", "ai_model_not_configured"),
+                status=400,
+            )
+        provider_config = config.provider_config
         try:
-            validate_model_url(config.base_url)
+            validate_model_url(provider_config.base_url)
         except ValidationError:
             return Response(
-                ai_error("Configure your model in personal AI settings first.", "ai_model_not_configured"), status=400
+                ai_error("Ask a workspace administrator to configure a default AI model.", "ai_model_not_configured"),
+                status=400,
             )
         supports_images = config.supports_images
         if not supports_images and any(message.get("images") for message in data["messages"]):
             return Response(
-                ai_error(
-                    "Enable image support for your selected model in personal AI settings first.", "ai_images_disabled"
-                ),
+                ai_error("The workspace default model does not support images.", "ai_images_disabled"),
                 status=400,
             )
         project_id = data.get("project_id")
@@ -344,27 +615,30 @@ class WorkspaceAgentChatEndpoint(BaseAPIView):
         ):
             return Response(ai_error("You do not have access to this project.", "ai_access_denied"), status=403)
         try:
-            model_key = decrypt_model_key(config.api_key_encrypted)
+            model_key = decrypt_model_key(provider_config.api_key_encrypted)
         except (InvalidToken, ValueError):
             return Response(
-                ai_error("Your saved model key cannot be read. Save it again in AI settings.", "ai_key_unreadable"),
+                ai_error(
+                    "The workspace model key cannot be read. Ask an administrator to save it again.",
+                    "ai_key_unreadable",
+                ),
                 status=400,
             )
-        workspace = Workspace.objects.get(slug=slug)
+        workspace = config.workspace
         payload = {
             "user_id": str(request.user.id),
             "workspace_slug": slug,
             "project_id": str(project_id) if project_id else None,
             "messages": data["messages"],
             "model_config": {
-                "provider": config.provider,
-                "base_url": config.base_url,
+                "provider": provider_config.provider,
+                "base_url": provider_config.base_url,
                 "model": config.model,
                 "api_key": model_key,
                 "supports_images": supports_images,
             },
         }
-        metadata = registry_metadata(config.model, config.base_url)
+        metadata = registry_metadata(config.model, provider_config.base_url)
         reasoning = metadata.get("reasoning") if metadata else None
         if isinstance(reasoning, bool):
             payload["model_config"]["supports_reasoning"] = reasoning

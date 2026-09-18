@@ -18,7 +18,17 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.test import APIClient
 
 from plane.api.middleware.api_authentication import APIKeyAuthentication
-from plane.db.models import APIToken, Project, ProjectMember, User, UserAISettings, Workspace, WorkspaceMember
+from plane.db.models import (
+    APIToken,
+    Project,
+    ProjectMember,
+    User,
+    UserAISettings,
+    Workspace,
+    WorkspaceAIModel,
+    WorkspaceAIProvider,
+    WorkspaceMember,
+)
 from plane.utils.ai import AGENT_TOKEN_LABEL, DEFAULT_AI_SETTINGS, decrypt_model_key, encrypt_model_key
 
 pytestmark = [pytest.mark.contract, pytest.mark.django_db]
@@ -42,6 +52,23 @@ def other_user():
 
 def save_settings(user, key="model-secret"):
     return UserAISettings.objects.create(user=user, api_key_encrypted=encrypt_model_key(key))
+
+
+def save_workspace_settings(workspace, key="model-secret", **model_values):
+    provider = WorkspaceAIProvider.objects.create(
+        workspace=workspace,
+        name="Primary",
+        provider="openai",
+        base_url="https://api.openai.com/v1",
+        api_key_encrypted=encrypt_model_key(key),
+    )
+    return WorkspaceAIModel.objects.create(
+        workspace=workspace,
+        provider_config=provider,
+        model=model_values.pop("model", "gpt-4o-mini"),
+        is_default=True,
+        **model_values,
+    )
 
 
 def test_settings_are_owned_by_session_user_even_with_injected_owner(session_client, create_user, other_user):
@@ -243,7 +270,7 @@ def test_chat_requires_active_workspace_membership(session_client, create_user, 
 
 @pytest.mark.parametrize("case", ["absent", "inactive", "other-workspace"])
 def test_chat_project_scope_requires_active_membership_in_same_workspace(session_client, create_user, workspace, case):
-    save_settings(create_user)
+    save_workspace_settings(workspace)
     target_workspace = workspace
     if case == "other-workspace":
         target_workspace = Workspace.objects.create(name="Other", slug="other-ai-workspace", owner=create_user)
@@ -267,7 +294,7 @@ def test_chat_project_scope_requires_active_membership_in_same_workspace(session
 def test_authorized_chat_uses_saved_config_and_session_identity_without_eager_token(
     session_client, create_user, workspace, role, monkeypatch
 ):
-    save_settings(create_user)
+    save_workspace_settings(workspace)
     WorkspaceMember.objects.filter(workspace=workspace, member=create_user).update(role=role)
     captured = {}
 
@@ -339,7 +366,7 @@ def test_service_configuration_failure_never_claims_changes(
 
 def test_chat_does_not_require_public_live_url(session_client, create_user, workspace, settings, monkeypatch):
     settings.LIVE_URL = ""
-    save_settings(create_user)
+    save_workspace_settings(workspace)
     monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", Mock(return_value=iter([])))
     response = session_client.post(
         chat_url(workspace), {"messages": [{"role": "user", "content": "hello"}]}, format="json"
@@ -353,13 +380,14 @@ def test_unusable_saved_settings_prevent_starting_chat(
     session_client, create_user, workspace, problem, settings, monkeypatch
 ):
     if problem != "missing":
-        config = save_settings(create_user)
+        config = save_workspace_settings(workspace)
+        provider = config.provider_config
         if problem == "unreadable":
-            config.api_key_encrypted = "not-a-valid-ciphertext"
-            config.save()
+            provider.api_key_encrypted = "not-a-valid-ciphertext"
+            provider.save()
         else:
-            config.base_url = "https://user:secret@gateway.test"
-            config.save()
+            provider.base_url = "https://user:secret@gateway.test"
+            provider.save()
     stream = Mock()
     monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
     response = session_client.post(
@@ -479,9 +507,10 @@ def test_discovery_with_new_key_and_valid_csrf_does_not_save(create_user, monkey
 def test_saved_image_preference_matches_settings_chat_gate_and_payload(
     session_client, create_user, workspace, monkeypatch, vision, stored
 ):
-    config = save_settings(create_user)
-    config.supports_images = stored
-    config.save()
+    personal_config = save_settings(create_user)
+    personal_config.supports_images = stored
+    personal_config.save()
+    config = save_workspace_settings(workspace, supports_images=stored)
     monkeypatch.setattr("plane.app.views.ai.lookup_model_metadata", lambda *args: {"vision": vision})
     stream = Mock(return_value=iter([]))
     monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
@@ -510,9 +539,8 @@ def test_saved_image_preference_matches_settings_chat_gate_and_payload(
 
 
 def test_image_support_settings_and_forwarding(session_client, create_user, workspace, monkeypatch):
-    config = save_settings(create_user)
-    config.model = "custom/not-in-catalogue"
-    config.save()
+    personal_config = save_settings(create_user)
+    config = save_workspace_settings(workspace, model="custom/not-in-catalogue")
     stream = Mock(return_value=iter([]))
     monkeypatch.setattr("plane.app.views.ai.stream_agent_turn", stream)
     messages = [
@@ -524,17 +552,24 @@ def test_image_support_settings_and_forwarding(session_client, create_user, work
     ]
     response = session_client.post(chat_url(workspace), {"messages": messages}, format="json")
     assert response.status_code == 400
-    assert "image support" in response.json()["error"]
+    assert "does not support images" in response.json()["error"]
     stream.assert_not_called()
     response = session_client.patch(
-        SETTINGS_URL, {"supports_images": True, "model": "custom/not-in-catalogue"}, format="json"
+        SETTINGS_URL, {"supports_images": True, "model": "personal-only-model"}, format="json"
     )
     assert response.status_code == 200
-    assert response.json()["supports_images"] is True
+    personal_config.refresh_from_db()
+    config.refresh_from_db()
+    assert personal_config.supports_images is True
+    assert config.supports_images is False
+    response = session_client.patch(
+        f"/api/workspaces/{workspace.slug}/ai-settings/providers/{config.provider_config_id}/models/{config.id}/",
+        {"supports_images": True},
+        format="json",
+    )
+    assert response.status_code == 200
     config.refresh_from_db()
     assert config.supports_images is True
-    assert config.model == "custom/not-in-catalogue"
-    assert session_client.get(SETTINGS_URL).json()["supports_images"] is True
     response = session_client.post(chat_url(workspace), {"messages": messages}, format="json")
     assert response.status_code == 200
     assert stream.call_args.args[0]["messages"] == messages

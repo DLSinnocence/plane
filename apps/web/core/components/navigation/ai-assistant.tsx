@@ -22,7 +22,8 @@ import { useTranslation } from "@plane/i18n";
 import { ChatMarkdown } from "@plane/ui";
 import { useUser } from "@/hooks/store/user";
 import { useCommandPalette } from "@/hooks/store/use-command-palette";
-import { AgentRequestError, getAISettings, startAgentChat } from "@/services/agent.service";
+import { AgentRequestError, startAgentChat } from "@/services/agent.service";
+import { getWorkspaceAISettings } from "@/services/workspace-ai.service";
 import type { AISettings } from "@/helpers/agent-settings";
 import { AgentStreamError, readAgentStream } from "@/helpers/agent-stream";
 import type { AgentImage, AgentMessage } from "@/helpers/agent-stream";
@@ -115,7 +116,7 @@ const ScopedAssistant = observer(function ScopedAssistant({
 }) {
   const { t } = useTranslation();
   const markdownLabels = useAgentMarkdownLabels();
-  const { toggleProfileSettingsModal, profileSettingsModal } = useCommandPalette();
+  const { profileSettingsModal } = useCommandPalette();
   const settingsOpen = profileSettingsModal.isOpen;
   const [open, setOpen] = useState(false);
   const [wide, setWide] = useState(false);
@@ -170,20 +171,38 @@ const ScopedAssistant = observer(function ScopedAssistant({
     const request = new AbortController();
     loading.current = request;
     setLoadingSettings(true);
-    void getAISettings(request.signal)
+    void getWorkspaceAISettings(workspaceSlug, request.signal)
       .then((value) => {
-        if (!request.signal.aborted) setSettings(value);
+        if (request.signal.aborted) return undefined;
+        const provider = value.providers.find(
+          (item) =>
+            item.is_enabled && item.has_api_key && item.models.some((model) => model.is_enabled && model.is_default)
+        );
+        const model = provider?.models.find((item) => item.is_enabled && item.is_default);
+        setSettings(
+          provider && model
+            ? {
+                provider: provider.provider,
+                base_url: provider.base_url,
+                model: model.model,
+                has_api_key: provider.has_api_key,
+                supports_images: model.supports_images,
+              }
+            : null
+        );
         return undefined;
       })
       .catch((failure: unknown) => {
-        if (!request.signal.aborted)
+        if (!request.signal.aborted) {
+          setSettings(null);
           setError({ message: failure instanceof Error ? failure.message : "", mayHaveChanges: false });
+        }
       })
       .finally(() => {
         if (!request.signal.aborted) setLoadingSettings(false);
       });
     return () => request.abort();
-  }, [open, settingsOpen, reload]);
+  }, [open, settingsOpen, reload, workspaceSlug]);
   useEffect(() => {
     if (open && !settingsOpen && configured) focusComposer();
   }, [open, settingsOpen, configured]);
@@ -250,7 +269,9 @@ const ScopedAssistant = observer(function ScopedAssistant({
     setOpen(false);
     trigger.current?.focus();
   };
-  const configure = () => toggleProfileSettingsModal({ isOpen: true, activeTab: "ai" });
+  const configure = () => {
+    window.location.assign(`/${workspaceSlug}/settings/ai/`);
+  };
   const addImages = async (files: File[]) => {
     if (!files.length || busy || imageLoading || imageReader.current) return;
     setImageError(null);

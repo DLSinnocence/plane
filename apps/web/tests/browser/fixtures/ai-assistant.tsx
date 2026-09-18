@@ -33,6 +33,9 @@ const Content = observer(function Content() {
               <h1>Product development</h1>
             </div>
             <button onClick={() => setActions((value) => value + 1)}>Workspace action</button>
+            <button onClick={() => aiFixtureState.toggleProfileSettingsModal({ isOpen: true, activeTab: "ai" })}>
+              Legacy profile AI settings
+            </button>
           </div>
           <output data-testid="workspace-actions">{actions}</output>
           <nav className="ai-fixture-tabs">

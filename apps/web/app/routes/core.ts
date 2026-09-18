@@ -274,6 +274,7 @@ export const coreRoutes: RouteConfigEntry[] = [
             ":workspaceSlug/settings/exports",
             "./(all)/[workspaceSlug]/(settings)/settings/(workspace)/exports/page.tsx"
           ),
+          route(":workspaceSlug/settings/ai", "./(all)/[workspaceSlug]/(settings)/settings/(workspace)/ai/page.tsx"),
           route(
             ":workspaceSlug/settings/integrations",
             "./(all)/[workspaceSlug]/(settings)/settings/(workspace)/integrations/page.tsx"

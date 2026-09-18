@@ -173,19 +173,23 @@ def test_missing_shared_secret_never_starts_execution(settings):
 def test_chat_payload_forwards_only_known_reasoning_capability(monkeypatch, settings, model, reasoning):
     settings.AI_AGENT_URL = "http://live.internal"
     settings.LIVE_SERVER_SECRET_KEY = "internal-secret"
-    config = SimpleNamespace(
+    provider_config = SimpleNamespace(
         provider="openai",
         base_url="https://gateway.example/v1",
-        model=model,
         api_key_encrypted="encrypted-key",
+        workspace_id="workspace-id",
+        is_enabled=True,
+    )
+    config = SimpleNamespace(
+        provider_config=provider_config,
+        workspace=SimpleNamespace(id="workspace-id"),
+        workspace_id="workspace-id",
+        model=model,
         supports_images=False,
     )
     configs = Mock()
-    configs.filter.return_value.first.return_value = config
-    monkeypatch.setattr(ai.UserAISettings, "objects", configs)
-    workspaces = Mock()
-    workspaces.get.return_value = SimpleNamespace(id="workspace-id")
-    monkeypatch.setattr(ai.Workspace, "objects", workspaces)
+    configs.select_related.return_value.filter.return_value.first.return_value = config
+    monkeypatch.setattr(ai.WorkspaceAIModel, "objects", configs)
     monkeypatch.setattr(ai, "validate_model_url", lambda value: value)
     monkeypatch.setattr(ai, "decrypt_model_key", lambda value: "model-secret")
     monkeypatch.setattr(ai.httpx, "Client", Mock(side_effect=AssertionError("No metadata network calls")))
@@ -201,7 +205,7 @@ def test_chat_payload_forwards_only_known_reasoning_capability(monkeypatch, sett
     assert workspace_id == "workspace-id"
     expected = {
         "provider": "openai",
-        "base_url": config.base_url,
+        "base_url": provider_config.base_url,
         "model": model,
         "api_key": "model-secret",
         "supports_images": False,
@@ -618,6 +622,9 @@ def test_cleanup_hard_deletes_only_issued_token(monkeypatch):
         "/api/users/me/ai-settings/",
         "/api/users/me/ai-settings/models",
         "/api/users/me/ai-settings/models/",
+        "/api/workspaces/team/ai-settings/",
+        "/api/workspaces/team/ai-settings/models/",
+        "/api/workspaces/team/ai-settings/providers/00000000-0000-0000-0000-000000000001/",
         "/api/workspaces/team/agent/chat",
         "/api/workspaces/team/agent/chat/",
     ],

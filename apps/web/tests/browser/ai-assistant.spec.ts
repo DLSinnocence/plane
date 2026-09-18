@@ -3,31 +3,31 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function mockSettings(page: Page, configured = true, supportsImages = false) {
-  let current = {
-    provider: "openai",
-    base_url: "",
-    model: "fixture-model",
-    has_api_key: configured,
-    supports_images: supportsImages,
+  const current = {
+    providers: [
+      {
+        id: "fixture-provider",
+        name: "Fixture provider",
+        provider: "openai",
+        base_url: "",
+        has_api_key: configured,
+        is_enabled: true,
+        models: [
+          {
+            id: "fixture-model-id",
+            model: "fixture-model",
+            supports_images: supportsImages,
+            is_enabled: true,
+            is_default: true,
+          },
+        ],
+      },
+    ],
   };
-  const mutations: { method: string; body: unknown; csrf: string | undefined }[] = [];
   await page.route("**/auth/get-csrf-token/", (route) => route.fulfill({ json: { csrf_token: "fixture-csrf" } }));
-  await page.route("**/api/users/me/ai-settings/", async (route) => {
-    const request = route.request();
-    if (request.method() === "PATCH") {
-      const data = request.postDataJSON();
-      mutations.push({ method: "PATCH", body: data, csrf: request.headers()["x-csrftoken"] });
-      current = {
-        provider: data.provider,
-        base_url: data.base_url,
-        model: data.model,
-        has_api_key: true,
-        supports_images: data.supports_images ?? false,
-      };
-    }
+  await page.route("**/api/workspaces/*/ai-settings/", async (route) => {
     await route.fulfill({ json: current });
   });
-  return mutations;
 }
 async function open(page: Page) {
   await page.getByRole("button", { name: "AI assistant", exact: true }).click();
@@ -159,18 +159,6 @@ test("composer uses Enter to send and Shift+Enter for a newline and shows the cu
 test("Chinese sidebar presents a complete Agent conversation beside the workspace", async ({ page }) => {
   await mockSettings(page, true, true);
   await page.setViewportSize({ width: 1521, height: 1085 });
-  await page.route("**/api/users/me/ai-settings/", (route) =>
-    route.fulfill({
-      json: {
-        provider: "openai",
-        base_url: "https://custom.example/v1",
-        model: "gpt-4o",
-        has_api_key: true,
-        supports_images: true,
-        model_metadata: { name: "GPT-4o", vision: true, tools: true, metadata_source: "models.dev" },
-      },
-    })
-  );
   await page.goto("/?ai-assistant&lang=zh");
   await page.getByRole("button", { name: "AI 助手", exact: true }).click();
   const aside = page.getByRole("complementary", { name: "AI 助手" });
@@ -222,183 +210,52 @@ test("Chinese sidebar presents a complete Agent conversation beside the workspac
   await page.screenshot({ path: "test-results/ai-sidebar-streaming-zh.png", fullPage: true });
   await frames(page, [{ type: "done" }]);
   await expect(aside.getByRole("link", { name: "ENG-42", exact: true })).toBeVisible();
-  await expect(aside.getByRole("button", { name: "模型设置: GPT-4o" })).toBeVisible();
+  await expect(aside.getByRole("button", { name: "模型设置: fixture-model" })).toBeVisible();
   await page.screenshot({ path: "test-results/ai-sidebar-zh.png", fullPage: true });
 });
 
-test("opens docked sidebar and configures personal settings without repopulating the key", async ({ page }) => {
-  const mutations = await mockSettings(page, false);
-  await page.route("**/api/users/me/ai-settings/models/", (route) =>
-    route.fulfill({
-      json: { models: [{ id: "fixture-model", name: "fixture-model", vision: null, tools: null }], truncated: false },
-    })
-  );
-  await page.goto("/?ai-assistant");
-  await expect(page.getByRole("button", { name: "AI assistant", exact: true })).toHaveText("AI");
-  await open(page);
-  await expect(page.locator("#workspace-ai-sidebar > aside")).toBeVisible();
-  await expect(page.getByRole("complementary")).not.toContainText("fixture-project");
-  await page.getByRole("button", { name: "Configure AI", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Profile settings fixture" })).toBeVisible();
-  await expect(page.getByTestId("profile-options")).toContainText('"activeTab":"ai"');
-  await page.getByLabel(/^API key/).fill("synthetic-fixture-key");
-  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
-  await page.getByRole("button", { name: "Fetch models", exact: true }).click();
-  await page.getByRole("button", { name: "Model Select a model", exact: true }).click();
-  await page.getByRole("listbox").getByRole("option").filter({ hasText: "fixture-model" }).click();
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.locator("form").getByRole("status")).toHaveText("Settings updated.");
-  await expect(page.getByLabel(/^API key/)).toHaveValue("");
-  expect(mutations[0]).toEqual({
-    method: "PATCH",
-    csrf: "fixture-csrf",
-    body: {
-      provider: "openai",
-      base_url: "",
-      model: "fixture-model",
-      api_key: "synthetic-fixture-key",
-      supports_images: false,
-    },
-  });
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect.poll(() => mutations.length).toBe(2);
-  expect(mutations[1].body).not.toHaveProperty("api_key");
-  await page.getByRole("button", { name: "Close settings" }).click();
-  await expect(page.getByRole("textbox", { name: "Message the assistant" })).toBeEnabled();
-});
-
-test("saved model metadata renders registry capabilities without unknown placeholders", async ({ page }) => {
-  await mockSettings(page);
-  await page.route("**/api/users/me/ai-settings/", (route) =>
-    route.fulfill({
-      json: {
-        provider: "openai",
-        base_url: "https://custom.example/v1",
-        model: "gpt-4o",
-        has_api_key: true,
-        supports_images: false,
-        model_metadata: {
-          name: "GPT-4o",
-          vision: true,
-          tools: true,
-          reasoning: false,
-          context_window: 128000,
-          metadata_source: "models.dev",
-        },
-      },
-    })
-  );
-  await page.goto("/?ai-assistant");
-  await open(page);
-  await expect(page.getByRole("button", { name: "Model settings: GPT-4o" })).toBeVisible();
-  await page.getByRole("button", { name: "Model settings", exact: true }).click();
-  await page.getByRole("button", { name: "Model GPT-4o", exact: true }).click();
-  const option = page.getByRole("listbox").getByRole("option");
-  await expect(option).toContainText("Images supported");
-  await expect(option).toContainText("Tools supported");
-  await expect(option).toContainText("models.dev");
-  await expect(option).not.toContainText("unknown");
-  await option.click();
-  await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeEnabled();
-});
-
-test("fetches models from an arbitrary gateway and searches by name or ID with capability selection", async ({
-  page,
-}) => {
-  const mutations = await mockSettings(page, false);
-  const discoveries: unknown[] = [];
-  await page.route("**/api/users/me/ai-settings/models/", async (route) => {
-    discoveries.push(route.request().postDataJSON());
-    expect(route.request().headers()["x-csrftoken"]).toBe("fixture-csrf");
-    await route.fulfill({
-      json: {
-        models: [
-          { id: "team-text", name: "Text model", vision: false, tools: true },
-          { id: "my-vision-v2", name: "Screenshot Reader", vision: true, tools: true },
-          { id: "private-model", name: "Unknown capability", vision: null, tools: null },
-        ],
-        truncated: false,
-      },
-    });
-  });
-  await page.goto("/?ai-assistant");
-  await open(page);
-  await page.getByRole("button", { name: "Configure AI", exact: true }).click();
-  await page.getByLabel(/^Base URL/).fill("http://model-gateway.internal:8080/custom/v1");
-  await page.getByLabel(/^API key/).fill("custom-test-key");
-  await expect(page.getByRole("textbox", { name: "Model", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Fetch models", exact: true }).click();
-  await page.getByRole("button", { name: "Model Select a model", exact: true }).click();
-  const search = page.getByRole("combobox", { name: "Search models by name or ID" });
-  await search.fill("VISION-v2");
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(1);
-  await expect(page.getByRole("listbox").getByRole("option")).toContainText("Screenshot Reader");
-  await search.press("ArrowDown");
-  await search.press("Enter");
-  await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeEnabled();
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect.poll(() => mutations.length).toBe(1);
-  expect(mutations[0].body).toMatchObject({
-    base_url: "http://model-gateway.internal:8080/custom/v1",
-    model: "my-vision-v2",
-    supports_images: true,
-  });
-  expect(discoveries[0]).toEqual({
-    provider: "openai",
-    base_url: "http://model-gateway.internal:8080/custom/v1",
-    api_key: "custom-test-key",
-  });
-  await page.getByRole("button", { name: "Model Screenshot Reader", exact: true }).click();
-  await search.fill("Unknown");
-  await page.getByRole("listbox").getByRole("option").click();
-  await expect(page.getByRole("checkbox", { name: "Enable image input" })).toBeEnabled();
-  await page.getByRole("checkbox", { name: "Enable image input" }).check();
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect.poll(() => mutations.length).toBe(2);
-  expect(mutations[1].body).toMatchObject({ model: "private-model", supports_images: true });
-});
-
-test("destination changes invalidate fetched models and ignore obsolete model responses", async ({ page }) => {
+test("unconfigured assistant opens workspace settings instead of personal settings", async ({ page }) => {
   await mockSettings(page, false);
-  let firstResolve: (() => void) | undefined;
-  let calls = 0;
-  await page.route("**/api/users/me/ai-settings/models/", async (route) => {
-    const id = ++calls;
-    if (id === 1)
-      await new Promise<void>((resolve) => {
-        firstResolve = resolve;
-      });
-    await route
-      .fulfill({
-        json: {
-          models: [
-            {
-              id: id === 1 ? "obsolete-model" : "new-model",
-              name: id === 1 ? "Obsolete" : "Current",
-              vision: null,
-              tools: null,
-            },
-          ],
-          truncated: false,
-        },
-      })
-      .catch(() => undefined);
-  });
+  await page.route("**/workspace/settings/ai/", (route) =>
+    route.fulfill({ contentType: "text/html", body: "Workspace AI settings" })
+  );
   await page.goto("/?ai-assistant");
   await open(page);
+  await expect(page.getByRole("textbox", { name: "Message the assistant" })).toBeDisabled();
+  await expect(page.getByRole("complementary")).toContainText("workspace administrator");
   await page.getByRole("button", { name: "Configure AI", exact: true }).click();
-  await page.getByLabel(/^API key/).fill("key");
-  await page.getByRole("button", { name: "Fetch models", exact: true }).click();
-  await expect.poll(() => calls).toBe(1);
-  await page.getByLabel(/^Base URL/).fill("https://different.example/v1");
-  firstResolve?.();
-  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
-  await page.getByRole("button", { name: "Fetch models", exact: true }).click();
-  await page.getByRole("button", { name: "Model Select a model", exact: true }).click();
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(1);
-  await expect(page.getByRole("listbox").getByRole("option")).toContainText("Current");
-  await expect(page.getByRole("listbox").getByRole("option")).not.toContainText("Obsolete");
+  await expect(page).toHaveURL(/\/workspace\/settings\/ai\/$/);
+});
+
+for (const [language, notice, link] of [
+  ["en", "Personal credentials are no longer used.", "Open workspace AI settings"],
+  ["zh", "不再使用个人凭据", "打开工作区 AI 设置"],
+] as const) {
+  test("legacy personal AI settings shows a migration notice in " + language, async ({ page }) => {
+    const legacyRequests: string[] = [];
+    await page.route("**/api/users/me/ai-settings/**", async (route) => {
+      legacyRequests.push(route.request().method());
+      await route.fulfill({ status: 410, json: {} });
+    });
+    await page.goto("/?ai-assistant&lang=" + language);
+    await page.getByRole("button", { name: "Legacy profile AI settings" }).click();
+    const dialog = page.getByRole("dialog", { name: "Profile settings fixture" });
+    await expect(dialog).toContainText(notice);
+    await expect(dialog.getByRole("link", { name: link })).toHaveAttribute("href", "/workspace/settings/ai");
+    await expect(dialog.locator("form, input, select")).toHaveCount(0);
+    expect(legacyRequests).toEqual([]);
+  });
+}
+
+test("configured model settings opens the workspace configuration", async ({ page }) => {
+  await mockSettings(page);
+  await page.route("**/workspace/settings/ai/", (route) =>
+    route.fulfill({ contentType: "text/html", body: "Workspace AI settings" })
+  );
+  await page.goto("/?ai-assistant");
+  await open(page);
+  await page.getByRole("button", { name: "Model settings: fixture-model" }).click();
+  await expect(page).toHaveURL(/\/workspace\/settings\/ai\/$/);
 });
 
 const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5WQAAAAASUVORK5CYII=";
@@ -476,7 +333,10 @@ test("text-only configuration disables image attachment with an actionable hint"
   await open(page);
   const button = page.getByRole("button", { name: "Attach images", exact: true });
   await expect(button).toBeDisabled();
-  await expect(button).toHaveAttribute("title", "Enable image input in AI settings to attach images.");
+  await expect(button).toHaveAttribute(
+    "title",
+    "Ask a workspace administrator to enable image input for the default model in workspace AI settings."
+  );
 });
 
 test("streams safe Markdown, updates friendly tool progress and keeps only successful text history", async ({

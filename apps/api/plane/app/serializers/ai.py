@@ -43,6 +43,37 @@ class AIModelsInputSerializer(serializers.Serializer):
         return attrs
 
 
+class WorkspaceAIProviderInputSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=80, required=False)
+    provider = serializers.ChoiceField(choices=["openai", "anthropic"], required=False)
+    base_url = ModelBaseURLField(required=False)
+    api_key = serializers.CharField(max_length=4096, required=False, allow_blank=True, write_only=True)
+    is_enabled = serializers.BooleanField(required=False)
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Enter a provider name.")
+        return value
+
+
+class WorkspaceAIModelInputSerializer(serializers.Serializer):
+    model = serializers.CharField(max_length=200, required=False)
+    supports_images = serializers.BooleanField(required=False)
+    is_enabled = serializers.BooleanField(required=False)
+    is_default = serializers.BooleanField(required=False)
+
+    def validate_model(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Enter a model name.")
+        return value
+
+
+class WorkspaceAIModelsDiscoveryInputSerializer(AIModelsInputSerializer):
+    provider_id = serializers.UUIDField(required=False)
+
+
 class AgentImageSerializer(serializers.Serializer):
     data = serializers.CharField(max_length=MAX_IMAGE_BASE64, trim_whitespace=False)
     mime_type = serializers.ChoiceField(choices=["image/png", "image/jpeg", "image/webp"])

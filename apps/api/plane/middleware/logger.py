@@ -94,6 +94,7 @@ class APITokenLogMiddleware:
         if (
             "/integrations/gitea/" in request.path_info
             or request.path_info.rstrip("/") in {"/api/users/me/ai-settings", "/api/users/me/ai-settings/models"}
+            or re.fullmatch(r"/api/workspaces/[^/]+/ai-settings(?:/.*)?/?", request.path_info)
             or re.fullmatch(r"/api/workspaces/[^/]+/agent/chat/?", request.path_info)
         ):
             return self.get_response(request)
@@ -142,6 +143,7 @@ class APITokenLogMiddleware:
         if (
             "/integrations/gitea/" in request.path_info
             or request.path_info.rstrip("/") in {"/api/users/me/ai-settings", "/api/users/me/ai-settings/models"}
+            or re.fullmatch(r"/api/workspaces/[^/]+/ai-settings(?:/.*)?/?", request.path_info)
             or re.fullmatch(r"/api/workspaces/[^/]+/agent/chat/?", request.path_info)
         ):
             return None
