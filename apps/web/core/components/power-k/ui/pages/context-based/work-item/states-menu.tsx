@@ -12,6 +12,7 @@ import type { TIssue } from "@plane/types";
 import { Spinner } from "@plane/ui";
 // hooks
 import { useProjectState } from "@/hooks/store/use-project-state";
+import { isStateAvailableForIssue } from "@/helpers/issue-testing-state";
 // local imports
 import { PowerKProjectStatesMenuItems } from "./state-menu-item";
 
@@ -29,7 +30,9 @@ export const PowerKProjectStatesMenu = observer(function PowerKProjectStatesMenu
   // derived values
   const projectStateIds = workItemDetails.project_id ? getProjectStateIds(workItemDetails.project_id) : undefined;
   const projectStates = projectStateIds ? projectStateIds.map((stateId) => getStateById(stateId)) : undefined;
-  const filteredProjectStates = projectStates ? projectStates.filter((state) => !!state) : undefined;
+  const filteredProjectStates = projectStates
+    ?.filter((state) => !!state)
+    .filter((state) => isStateAvailableForIssue(state, workItemDetails.needs_testing));
 
   if (!filteredProjectStates) return <Spinner />;
 

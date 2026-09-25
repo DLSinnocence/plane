@@ -8,6 +8,14 @@ export const workflowStates = [
   { id: "backlog", name: "Backlog", group: "backlog", color: "#888888", default: true },
   { id: "todo", name: "Planning", group: "unstarted", color: "#aaaaaa", default: false },
   { id: "started", name: "Developing", group: "started", color: "#ffbb00", default: false },
+  {
+    id: "testing",
+    name: "Renamed testing stage",
+    group: "started",
+    color: "#ffbb00",
+    default: false,
+    is_testing: true,
+  },
   { id: "done", name: "Done", group: "completed", color: "#00bb88", default: false },
   { id: "cancelled", name: "Cancelled", group: "cancelled", color: "#cc4444", default: false },
 ];

@@ -36,6 +36,7 @@ import { useMember } from "@/hooks/store/use-member";
 import { useProject } from "@/hooks/store/use-project";
 import { useProjectState } from "@/hooks/store/use-project-state";
 import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
+import { NeedsTestingSelect } from "@/components/issues/needs-testing-select";
 import { IssueStateAssignees } from "../issue-detail/state-assignees";
 // plane web components
 import { IssueParentSelectRoot } from "@/components/issues/parent-select-root";
@@ -81,8 +82,17 @@ export const PeekOverviewProperties = observer(function PeekOverviewProperties(p
     <div>
       <h6 className="text-body-xs-medium">{t("common.properties")}</h6>
       <div className={`mt-3 w-full space-y-3 ${disabled ? "opacity-60" : ""}`}>
+        <SidebarPropertyListItem icon={StateOutline} label={t("workflows.needs_testing.label")}>
+          <NeedsTestingSelect
+            value={issue.needs_testing}
+            disabled={disabled}
+            isTestingState={stateDetails?.is_testing}
+            onChange={(needs_testing) => issueOperations.update(workspaceSlug, projectId, issueId, { needs_testing })}
+          />
+        </SidebarPropertyListItem>
         <SidebarPropertyListItem icon={StateOutline} label={t("common.state")}>
           <StateDropdown
+            needsTesting={issue.needs_testing}
             value={issue?.state_id}
             onChange={(val) => issueOperations.update(workspaceSlug, projectId, issueId, { state_id: val })}
             projectId={projectId}

@@ -441,6 +441,7 @@ export const IssueFormRoot = observer(function IssueFormRoot(props: IssueFormPro
                           columns={2}
                           workspaceSlug={workspaceSlug?.toString()}
                           projectId={projectId}
+                          needsTesting={watch("needs_testing")}
                           stateId={watch("state_id")}
                           creatorId={creatorId}
                           value={value}

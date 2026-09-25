@@ -63,6 +63,7 @@ export const IssueStateAssignees = observer(function IssueStateAssignees(props: 
         <StateAssigneeFields
           workspaceSlug={workspaceSlug}
           projectId={projectId}
+          needsTesting={issue.needs_testing}
           stateId={issue.state_id}
           creatorId={issue.created_by}
           value={issue.state_assignees}

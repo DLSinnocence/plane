@@ -216,6 +216,7 @@ export const ActiveCycleStats = observer(function ActiveCycleStats(props: Active
                           <div className="flex flex-shrink-0 items-center gap-1.5">
                             <StateDropdown
                               value={issue.state_id}
+                              needsTesting={issue.needs_testing}
                               onChange={() => {}}
                               projectId={projectId?.toString() ?? ""}
                               disabled

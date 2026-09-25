@@ -98,6 +98,23 @@ def validate_issue_completion(issue, next_state):
         visited.update(parents)
 
 
+def validate_testing_state(data, issue=None, *, project_id=None):
+    """Validate the effective flag/state pair, including partial and atomic updates."""
+    needs_testing = data.get("needs_testing", getattr(issue, "needs_testing", True))
+    if needs_testing:
+        return
+    state = data.get("state", getattr(issue, "state", None))
+    if state is None and project_id is not None:
+        states = State.objects.filter(project_id=project_id, is_triage=False, is_testing=False)
+        state = states.filter(default=True).first() or states.first()
+        # Explicit null and omitted create states must use an eligible default.
+        data["state"] = state
+    if getattr(state, "is_testing", False):
+        raise serializers.ValidationError(
+            {"needs_testing": "Select a non-testing state before disabling testing, or change both in the same request."}
+        )
+
+
 class IssueWorkflowSerializerMixin:
     """Authorize persisted responsibility and save each handoff under the issue lock."""
 
@@ -110,7 +127,9 @@ class IssueWorkflowSerializerMixin:
         for alias in aliases:
             if alias in data:
                 raise serializers.ValidationError({alias: "Use the endpoint's canonical workflow field."})
-        return super().to_internal_value(data)
+        attrs = super().to_internal_value(data)
+        validate_testing_state(attrs, self.instance, project_id=self._workflow_project_id())
+        return attrs
 
     @transaction.atomic
     def save(self, **kwargs):
@@ -206,6 +225,7 @@ class IssueWorkflowSerializerMixin:
             if state is None:
                 raise serializers.ValidationError({"state": "State must belong to this project."})
             data["state"] = state
+        validate_testing_state(data, issue, project_id=self._workflow_project_id())
         if "state_assignees" in data:
             data["state_assignees"] = self.validate_state_assignees(data["state_assignees"])
         if self.workflow_assignee_field in data:

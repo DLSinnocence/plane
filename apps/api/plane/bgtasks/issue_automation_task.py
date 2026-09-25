@@ -134,6 +134,8 @@ def close_old_issues():
                     # A user may have changed the issue after candidate selection.
                     if not issues.filter(pk=issue_id).exists():
                         continue
+                    if close_state.is_testing and not issue.needs_testing:
+                        continue
                     try:
                         validate_issue_completion(issue, close_state)
                     except UnfinishedSubIssuesError:

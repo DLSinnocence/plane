@@ -7,7 +7,9 @@
 import { useState } from "react";
 import { observer } from "mobx-react";
 import type { Control } from "react-hook-form";
-import { Controller } from "react-hook-form";
+import { Controller, useWatch } from "react-hook-form";
+import { NeedsTestingSelect } from "@/components/issues/needs-testing-select";
+import { useProjectState } from "@/hooks/store/use-project-state";
 import { ETabIndices, EUserPermissions, EUserPermissionsLevel } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
 import { ParentOutline } from "@makeplane/propel/icons";
@@ -71,6 +73,9 @@ export const IssueDefaultProperties = observer(function IssueDefaultProperties(p
   // derived values
   const projectDetails = getProjectById(projectId);
 
+  const { getStateById } = useProjectState();
+  const needsTesting = useWatch({ control, name: "needs_testing" });
+  const stateId = useWatch({ control, name: "state_id" });
   const { getIndex } = getTabIndex(ETabIndices.ISSUE_FORM, isMobile);
 
   const canCreateLabel =
@@ -86,13 +91,31 @@ export const IssueDefaultProperties = observer(function IssueDefaultProperties(p
     <div className="flex flex-wrap items-center gap-2">
       <Controller
         control={control}
+        name="needs_testing"
+        render={({ field: { value, onChange } }) => (
+          <label className="flex items-center gap-2 text-body-xs-regular">
+            {t("workflows.needs_testing.label")}
+            <NeedsTestingSelect
+              value={value}
+              isTestingState={getStateById(stateId)?.is_testing}
+              onChange={(nextNeedsTesting) => {
+                onChange(nextNeedsTesting);
+                handleFormChange();
+              }}
+            />
+          </label>
+        )}
+      />
+      <Controller
+        control={control}
         name="state_id"
         render={({ field: { value, onChange } }) => (
           <div className="h-7">
             <StateDropdown
+              needsTesting={needsTesting}
               value={value}
-              onChange={(stateId) => {
-                onChange(stateId);
+              onChange={(nextStateId) => {
+                onChange(nextStateId);
                 handleFormChange();
               }}
               projectId={projectId ?? undefined}

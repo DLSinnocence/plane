@@ -1,5 +1,12 @@
 {
   "workflows": {
+    "fixed_states_description": "状态由平台统一管理，不支持按项目自定义。",
+    "needs_testing": {
+      "label": "需要测试",
+      "yes": "是",
+      "no": "否",
+      "change_state_first": "请先离开待测试状态，再关闭需要测试。"
+    },
     "errors": {
       "unfinished_sub_issues": "仍有未完成的子工作项，请先完成或取消所有子工作项。"
     },

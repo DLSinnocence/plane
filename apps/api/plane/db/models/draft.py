@@ -35,6 +35,7 @@ class DraftIssue(WorkspaceBaseModel):
         blank=True,
         related_name="state_draft_issue",
     )
+    needs_testing = models.BooleanField(default=True)
     state_assignees = models.JSONField(default=dict, blank=True)
     estimate_point = models.ForeignKey(
         "db.EstimatePoint",
@@ -87,14 +88,10 @@ class DraftIssue(WorkspaceBaseModel):
             try:
                 from plane.db.models import State
 
-                default_state = State.objects.filter(
-                    ~models.Q(is_triage=True), project=self.project, default=True
-                ).first()
-                if default_state is None:
-                    random_state = State.objects.filter(~models.Q(is_triage=True), project=self.project).first()
-                    self.state = random_state
-                else:
-                    self.state = default_state
+                states = State.objects.filter(~models.Q(is_triage=True), project=self.project)
+                if not self.needs_testing:
+                    states = states.filter(is_testing=False)
+                self.state = states.filter(default=True).first() or states.first()
             except ImportError:
                 pass
         else:

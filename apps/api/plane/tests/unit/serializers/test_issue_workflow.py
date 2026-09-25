@@ -87,6 +87,60 @@ def assert_denied(serializer):
         save(serializer)
 
 
+def test_testing_flag_defaults_to_true(workflow):
+    assert workflow.issue.needs_testing is True
+
+
+@pytest.fixture
+def testing_state(workflow):
+    return State.objects.create(name="Renamed testing stage", group="started", is_testing=True, project=workflow.project)
+
+
+def test_non_testing_issue_cannot_enter_testing_stage(endpoint, workflow, testing_state):
+    _, state_key, _ = endpoint
+    workflow.issue.needs_testing = False
+    workflow.issue.save()
+    with pytest.raises(ValidationError):
+        save(serializer_for(endpoint, workflow, workflow.admin, {state_key: str(testing_state.pk)}))
+    workflow.issue.refresh_from_db()
+    assert workflow.issue.state_id == workflow.development.pk
+    assert workflow.issue.needs_testing is False
+
+
+def test_testing_stage_accepts_enabled_issue_and_rejects_disabling_in_place(endpoint, workflow, testing_state):
+    _, state_key, _ = endpoint
+    issue = save(serializer_for(endpoint, workflow, workflow.admin, {state_key: str(testing_state.pk)}))
+    assert issue.state_id == testing_state.pk
+    with pytest.raises(ValidationError):
+        save(serializer_for(endpoint, workflow, workflow.admin, {"needs_testing": False}, instance=issue))
+    issue.refresh_from_db()
+    assert issue.needs_testing is True
+    assert issue.state_id == testing_state.pk
+
+
+def test_can_disable_testing_when_leaving_testing_stage_atomically(endpoint, workflow, testing_state):
+    _, state_key, _ = endpoint
+    issue = save(serializer_for(endpoint, workflow, workflow.admin, {state_key: str(testing_state.pk)}))
+    issue = save(serializer_for(
+        endpoint, workflow, workflow.admin,
+        {"needs_testing": False, state_key: str(workflow.acceptance.pk)}, instance=issue,
+    ))
+    issue.refresh_from_db()
+    assert issue.needs_testing is False
+    assert issue.state_id == workflow.acceptance.pk
+
+
+def test_can_enable_testing_and_enter_testing_stage_atomically(endpoint, workflow, testing_state):
+    _, state_key, _ = endpoint
+    workflow.issue.needs_testing = False
+    workflow.issue.save()
+    issue = save(serializer_for(
+        endpoint, workflow, workflow.admin, {"needs_testing": True, state_key: str(testing_state.pk)},
+    ))
+    assert issue.needs_testing is True
+    assert issue.state_id == testing_state.pk
+
+
 def test_current_responsible_can_transition_and_hands_off(endpoint, workflow):
     workflow.issue.save(created_by_id=workflow.other.id)
     _, state_key, _ = endpoint

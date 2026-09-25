@@ -181,6 +181,7 @@ class IssueListEndpoint(BaseAPIView):
                 "id",
                 "name",
                 "state_id",
+                "needs_testing",
                 "state_assignees",
                 "sort_order",
                 "completed_at",
@@ -451,6 +452,7 @@ class IssueViewSet(BaseViewSet):
                     "id",
                     "name",
                     "state_id",
+                    "needs_testing",
                     "state_assignees",
                     "sort_order",
                     "completed_at",
@@ -704,7 +706,7 @@ class IssueViewSet(BaseViewSet):
             is_migration_description_update = (
                 skip_activity
                 and is_description_update
-                and not any(field in request.data for field in ("state_id", "state_assignees", "assignee_ids"))
+                and not any(field in request.data for field in ("state_id", "state_assignees", "assignee_ids", "needs_testing"))
             )
             # Log all the updates
             if not is_migration_description_update:
@@ -737,8 +739,16 @@ class IssueViewSet(BaseViewSet):
                     issue_id=str(serializer.data.get("id", None)),
                     user_id=request.user.id,
                 )
-            if any(field in request.data for field in ("state_id", "assignee_ids", "state_assignees")):
-                workflow_fields = ("id", "state_id", "state_assignees", "assignee_ids", "completed_at", "updated_at")
+            if any(field in request.data for field in ("state_id", "assignee_ids", "state_assignees", "needs_testing")):
+                workflow_fields = (
+                    "id",
+                    "state_id",
+                    "state_assignees",
+                    "assignee_ids",
+                    "needs_testing",
+                    "completed_at",
+                    "updated_at",
+                )
                 return Response(
                     {field: serializer.data[field] for field in workflow_fields},
                     status=status.HTTP_200_OK,
@@ -906,6 +916,7 @@ class IssuePaginatedViewSet(BaseViewSet):
             "id",
             "name",
             "state_id",
+            "needs_testing",
             "state_assignees",
             "state__group",
             "sort_order",

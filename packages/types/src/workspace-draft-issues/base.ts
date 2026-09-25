@@ -16,6 +16,7 @@ export type TWorkspaceDraftIssue = {
   label_ids: string[];
   assignee_ids: string[];
   state_assignees?: Record<string, string[]>;
+  needs_testing?: boolean;
   estimate_point: string | undefined;
 
   project_id: string | undefined;

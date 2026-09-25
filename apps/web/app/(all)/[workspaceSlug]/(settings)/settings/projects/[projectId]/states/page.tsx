@@ -46,7 +46,7 @@ function StatesSettingsPage({ params }: Route.ComponentProps) {
       <div className="w-full">
         <SettingsHeading
           title={t("project_settings.states.heading")}
-          description={t("project_settings.states.description")}
+          description={t("workflows.fixed_states_description")}
         />
         <div className="mt-6">
           <ProjectStateRoot workspaceSlug={workspaceSlug} projectId={projectId} />

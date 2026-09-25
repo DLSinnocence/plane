@@ -153,6 +153,7 @@ class Issue(ChangeTrackerMixin, ProjectBaseModel):
         through="IssueAssignee",
         through_fields=("issue", "assignee"),
     )
+    needs_testing = models.BooleanField(default=True)
     state_assignees = models.JSONField(blank=True, default=dict)
     sequence_id = models.IntegerField(default=1, verbose_name="Issue Sequence ID")
     labels = models.ManyToManyField("db.Label", blank=True, related_name="labels", through="IssueLabel")
@@ -233,8 +234,10 @@ class Issue(ChangeTrackerMixin, ProjectBaseModel):
         try:
             from plane.db.models import State
 
-            default_state = State.objects.filter(~models.Q(is_triage=True), project=self.project, default=True).first()
-            self.state = default_state or State.objects.filter(~models.Q(is_triage=True), project=self.project).first()
+            states = State.objects.filter(~models.Q(is_triage=True), project=self.project)
+            if not self.needs_testing:
+                states = states.filter(is_testing=False)
+            self.state = states.filter(default=True).first() or states.first()
         except ImportError as e:
             log_exception(e)
 

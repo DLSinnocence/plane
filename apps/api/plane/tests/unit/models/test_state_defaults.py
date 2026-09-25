@@ -24,6 +24,7 @@ def test_chinese_default_states_keep_groups_and_order():
         ("待开始", "unstarted"),
         ("开发中", "started"),
         ("开发完成/待验收", "started"),
+        ("验收完成/待测试", "started"),
         ("已完成", "completed"),
         ("已取消", "cancelled"),
         ("Triage", "triage"),
@@ -35,7 +36,7 @@ def test_chinese_default_states_keep_groups_and_order():
 @pytest.fixture
 def historical_states(workspace):
     with override_settings(MIGRATION_MODULES={}):
-        apps = MigrationLoader(None).project_state([("db", "0123_default_chinese_locale")]).apps
+        apps = MigrationLoader(None).project_state([("db", "0136_issue_needs_testing")]).apps
     State = apps.get_model("db", "State")
     project = Project.objects.create(name="Migration project", identifier="MIG", workspace=workspace)
 

@@ -151,6 +151,7 @@ class SubIssuesEndpoint(BaseAPIView):
                 "id",
                 "name",
                 "state_id",
+                "needs_testing",
                 "state_assignees",
                 "sort_order",
                 "completed_at",

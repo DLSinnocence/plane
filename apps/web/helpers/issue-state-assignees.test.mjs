@@ -85,6 +85,18 @@ test("new create-more form defaults to its creator independently of the previous
   assert.deepEqual(result.state_assignees.development, ["creator"]);
 });
 
+test("testing preference and hidden stage assignments survive draft/create payloads", () => {
+  for (const needs_testing of [true, false]) {
+    const result = getIssueWorkflowFormData(
+      { needs_testing, state_assignees: { acceptance: ["qa"] } },
+      states,
+      "creator"
+    );
+    assert.equal(result.needs_testing, needs_testing);
+    assert.deepEqual(result.state_assignees.acceptance, ["qa"]);
+  }
+});
+
 test("missing creator never falls back to a current assignee", () => {
   const result = getIssueWorkflowFormData({ assignee_ids: ["old-owner"] }, states, undefined);
   for (const state of states) assert.deepEqual(result.state_assignees[state.id], []);

@@ -48,6 +48,13 @@ DEFAULT_STATES = [
         "group": StateGroup.STARTED.value,
     },
     {
+        "name": "验收完成/待测试",
+        "color": "#F59E0B",
+        "sequence": 42500,
+        "group": StateGroup.STARTED.value,
+        "is_testing": True,
+    },
+    {
         "name": "已完成",
         "color": "#46A758",
         "sequence": 45000,
@@ -93,6 +100,7 @@ class State(ProjectBaseModel):
         default=StateGroup.BACKLOG,
         max_length=20,
     )
+    is_testing = models.BooleanField(default=False)
     is_triage = models.BooleanField(default=False)
     default = models.BooleanField(default=False)
     external_source = models.CharField(max_length=255, null=True, blank=True)

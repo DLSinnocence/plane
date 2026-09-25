@@ -17,6 +17,11 @@ class StateSerializer(BaseSerializer):
     """
 
     def validate(self, data):
+        if getattr(self.instance, "is_testing", False):
+            if data.get("group", self.instance.group) != StateGroup.STARTED.value:
+                raise serializers.ValidationError({"group": "The testing state must remain in the started group."})
+            if data.get("default", self.instance.default):
+                raise serializers.ValidationError({"default": "The optional testing state cannot be the default."})
         # If the default is being provided then make all other states default False
         if data.get("default", False):
             State.objects.filter(project_id=self.context.get("project_id")).update(default=False)
@@ -38,6 +43,7 @@ class StateSerializer(BaseSerializer):
             "project",
             "deleted_at",
             "slug",
+            "is_testing",
         ]
 
 
@@ -51,5 +57,5 @@ class StateLiteSerializer(BaseSerializer):
 
     class Meta:
         model = State
-        fields = ["id", "name", "color", "group"]
+        fields = ["id", "name", "color", "group", "is_testing"]
         read_only_fields = fields

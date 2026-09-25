@@ -12,7 +12,7 @@ from rest_framework import serializers
 # Module imports
 from .base import BaseSerializer
 from .issue import IssueCreateSerializer
-from plane.utils.issue_workflow import complete_workflow_plan, workflow_default_assignees
+from plane.utils.issue_workflow import complete_workflow_plan, workflow_default_assignees, validate_testing_state
 from plane.db.models import (
     Issue,
     Label,
@@ -106,6 +106,9 @@ class DraftIssueCreateSerializer(BaseSerializer):
         return data
 
     def validate(self, attrs):
+        if self.instance is not None and str(self.context.get("project_id", self.instance.project_id)) != str(self.instance.project_id):
+            attrs.setdefault("state", None)
+        validate_testing_state(attrs, self.instance, project_id=self.context.get("project_id"))
         if (
             attrs.get("start_date", None) is not None
             and attrs.get("target_date", None) is not None
@@ -315,6 +318,7 @@ class DraftIssueSerializer(BaseSerializer):
             "name",
             "state_id",
             "state_assignees",
+            "needs_testing",
             "sort_order",
             "completed_at",
             "estimate_point",

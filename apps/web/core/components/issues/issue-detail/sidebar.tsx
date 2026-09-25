@@ -36,6 +36,7 @@ import { useMember } from "@/hooks/store/use-member";
 import { useProject } from "@/hooks/store/use-project";
 import { useProjectState } from "@/hooks/store/use-project-state";
 import { useIssueWorkflow } from "@/hooks/use-issue-workflow";
+import { NeedsTestingSelect } from "@/components/issues/needs-testing-select";
 import { IssueStateAssignees } from "./state-assignees";
 // components
 import { IssueParentSelectRoot } from "@/components/issues/parent-select-root";
@@ -86,8 +87,19 @@ export const IssueDetailsSidebar = observer(function IssueDetailsSidebar(props: 
         <div className="h-full w-full overflow-y-auto px-6">
           <h5 className="mt-5 text-body-xs-medium">{t("common.properties")}</h5>
           <div className={`mt-4 mb-2 space-y-2.5 truncate ${!isEditable ? "opacity-60" : ""}`}>
+            <SidebarPropertyListItem icon={StateOutline} label={t("workflows.needs_testing.label")}>
+              <NeedsTestingSelect
+                value={issue.needs_testing}
+                disabled={!isEditable}
+                isTestingState={stateDetails?.is_testing}
+                onChange={(needs_testing) =>
+                  issueOperations.update(workspaceSlug, projectId, issueId, { needs_testing })
+                }
+              />
+            </SidebarPropertyListItem>
             <SidebarPropertyListItem icon={StateOutline} label={t("common.state")}>
               <StateDropdown
+                needsTesting={issue.needs_testing}
                 value={issue?.state_id}
                 onChange={(val) => issueOperations.update(workspaceSlug, projectId, issueId, { state_id: val })}
                 projectId={projectId?.toString() ?? ""}

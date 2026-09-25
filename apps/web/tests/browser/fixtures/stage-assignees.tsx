@@ -6,7 +6,9 @@
 
 import React, { useState } from "react";
 import { MemoryRouter } from "react-router";
-import type { TIssue } from "@plane/types";
+import type { IState, TIssue } from "@plane/types";
+import { ReadOnlyStateList } from "@/components/project-states/read-only-list";
+import { NeedsTestingSelect } from "@/components/issues/needs-testing-select";
 import { StateAssigneeFields } from "@/components/issues/state-assignee-fields";
 import { getDefaultStateAssignees, getIssueWorkflowFormData } from "@/helpers/issue-state-assignees";
 import { workflowStates } from "./stage-data";
@@ -16,7 +18,11 @@ export function StageAssigneesFixture() {
   const [assignments, setAssignments] = useState<TIssue["state_assignees"]>(
     params.has("legacy") ? { backlog: ["reviewer"], done: [], cancelled: ["reviewer"] } : undefined
   );
+  const [needsTesting, setNeedsTesting] = useState(true);
   const [submitted, setSubmitted] = useState<Partial<TIssue>>();
+  if (params.has("read-only-states")) {
+    return <ReadOnlyStateList groupedStates={{ started: workflowStates as IState[] }} />;
+  }
   return (
     <MemoryRouter>
       <main className="panel">
@@ -29,6 +35,7 @@ export function StageAssigneesFixture() {
                 {
                   name: "Workflow work item",
                   state_id: "todo",
+                  needs_testing: needsTesting,
                   assignee_ids: ["legacy-owner"],
                   state_assignees: assignments,
                 },
@@ -38,11 +45,17 @@ export function StageAssigneesFixture() {
             );
           }}
         >
+          <NeedsTestingSelect
+            value={needsTesting}
+            onChange={setNeedsTesting}
+            isTestingState={params.has("testing-state")}
+          />
           <section data-testid="stage-fields">
             <StateAssigneeFields
               workspaceSlug="workspace"
               projectId="project"
               stateId="todo"
+              needsTesting={needsTesting}
               creatorId="developer"
               value={assignments}
               onChange={setAssignments}

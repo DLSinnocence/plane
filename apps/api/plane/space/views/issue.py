@@ -831,6 +831,7 @@ class IssueRetrievePublicEndpoint(BaseAPIView):
                 "id",
                 "name",
                 "state_id",
+                "needs_testing",
                 "state_assignees",
                 "sort_order",
                 "description_json",

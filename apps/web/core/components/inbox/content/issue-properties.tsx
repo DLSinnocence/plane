@@ -75,6 +75,7 @@ export const InboxIssueContentProperties = observer(function InboxIssueContentPr
               {issue?.state_id && (
                 <DropdownComponent
                   value={issue?.state_id}
+                  needsTesting={issue.needs_testing}
                   onChange={() => {}}
                   projectId={projectId?.toString() ?? ""}
                   disabled

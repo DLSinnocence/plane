@@ -20,6 +20,7 @@ type Props = {
   value: TIssue["state_assignees"];
   onChange: (assignments: NonNullable<TIssue["state_assignees"]>) => void;
   disabled?: boolean;
+  needsTesting?: boolean;
   columns?: 1 | 2;
 };
 
@@ -64,41 +65,43 @@ export const StateAssigneeFields = observer(function StateAssigneeFields(props: 
 
   return (
     <div className={columns === 2 ? "mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2" : "mt-3 grid grid-cols-1 gap-2"}>
-      {states.filter(canConfigureStateAssignees).map((state) => {
-        const owners = assignments[state.id];
-        const isCreator = owners.length === 1 && owners[0] === creatorId;
-        return (
-          <div key={state.id} className="min-w-0 rounded-sm border border-subtle p-2">
-            <div className="flex items-center gap-2 text-body-xs-medium">
-              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: state.color }} />
-              <span className="min-w-0 flex-1 break-words">{state.name}</span>
-              {state.id === currentStateId && (
-                <span className="shrink-0 text-secondary">{t("workflows.state_assignees.current")}</span>
-              )}
-            </div>
-            <div className="mt-1 flex items-center gap-1">
-              <MemberDropdown
-                projectId={projectId}
-                value={owners}
-                onChange={(members) => onChange({ ...assignments, [state.id]: members })}
-                disabled={disabled}
-                multiple
-                placeholder={t(
-                  isCreator ? "workflows.state_assignees.creator" : "workflows.state_assignees.unassigned"
+      {states
+        .filter((state) => canConfigureStateAssignees(state) && (props.needsTesting !== false || !state.is_testing))
+        .map((state) => {
+          const owners = assignments[state.id];
+          const isCreator = owners.length === 1 && owners[0] === creatorId;
+          return (
+            <div key={state.id} className="min-w-0 rounded-sm border border-subtle p-2">
+              <div className="flex items-center gap-2 text-body-xs-medium">
+                <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: state.color }} />
+                <span className="min-w-0 flex-1 break-words">{state.name}</span>
+                {state.id === currentStateId && (
+                  <span className="shrink-0 text-secondary">{t("workflows.state_assignees.current")}</span>
                 )}
-                buttonVariant="transparent-with-text"
-                className="min-w-0 flex-1"
-                buttonContainerClassName="w-full text-left"
-                buttonClassName="text-body-xs-regular"
-                showUserDetails
-                showTooltip
-                tooltipContent={state.name}
-                dropdownArrow={!disabled}
-              />
+              </div>
+              <div className="mt-1 flex items-center gap-1">
+                <MemberDropdown
+                  projectId={projectId}
+                  value={owners}
+                  onChange={(members) => onChange({ ...assignments, [state.id]: members })}
+                  disabled={disabled}
+                  multiple
+                  placeholder={t(
+                    isCreator ? "workflows.state_assignees.creator" : "workflows.state_assignees.unassigned"
+                  )}
+                  buttonVariant="transparent-with-text"
+                  className="min-w-0 flex-1"
+                  buttonContainerClassName="w-full text-left"
+                  buttonClassName="text-body-xs-regular"
+                  showUserDetails
+                  showTooltip
+                  tooltipContent={state.name}
+                  dropdownArrow={!disabled}
+                />
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
     </div>
   );
 });

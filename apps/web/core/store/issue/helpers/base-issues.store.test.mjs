@@ -65,6 +65,7 @@ function fixture(patchIssue) {
   const groups = [];
   const stats = [];
   const store = {
+    assertCanEditIssue: () => {},
     rootIssueStore: {
       issues: {
         getIssueById: () => issue,
@@ -154,6 +155,19 @@ test("permission failures restore the issue, optional map, groups and parent cou
   assert.equal(result.groups[1].after.state_id, "todo");
   assert.equal(result.stats[1].before.state_id, "doing");
   assert.equal(result.stats[1].after.state_id, "todo");
+});
+
+test("rejected testing preference updates restore legacy default and explicit false", async () => {
+  await Promise.all(
+    [undefined, false].map(async (previous) => {
+      const result = fixture(async () => {
+        throw new Error("Rejected");
+      });
+      if (previous !== undefined) result.issue.needs_testing = previous;
+      await assert.rejects(result.update({ needs_testing: previous === false }), /Rejected/);
+      assert.equal(result.issue.needs_testing, previous ?? true);
+    })
+  );
 });
 
 test("local-only updates do not contact the server", async () => {

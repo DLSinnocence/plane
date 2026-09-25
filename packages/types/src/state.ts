@@ -8,6 +8,7 @@ export type TStateGroups = "backlog" | "unstarted" | "started" | "completed" | "
 
 export interface IState {
   readonly id: string;
+  readonly is_testing?: boolean;
   color: string;
   default: boolean;
   description: string;
@@ -20,6 +21,7 @@ export interface IState {
 }
 
 export interface IStateLite {
+  readonly is_testing?: boolean;
   color: string;
   group: TStateGroups;
   id: string;

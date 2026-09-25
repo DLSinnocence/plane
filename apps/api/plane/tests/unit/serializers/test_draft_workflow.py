@@ -72,10 +72,13 @@ def test_conversion_uses_saved_map_only_when_request_omits_it(explicit):
     draft = SimpleNamespace(
         project_id=uuid4(),
         state_assignees=saved,
+        needs_testing=False,
+        workspace_id=uuid4(),
         project=SimpleNamespace(workspace_id=uuid4(), default_assignee_id=None),
     )
-    request = SimpleNamespace(data=data)
+    request = SimpleNamespace(data=data, user=SimpleNamespace(pk=uuid4()))
     with (
+        patch("plane.app.views.workspace.draft.require_project_admin_access"),
         patch("plane.app.views.workspace.draft.DraftIssue.objects.select_for_update") as drafts,
         patch("plane.app.views.workspace.draft.IssueCreateSerializer") as formal,
     ):
@@ -87,6 +90,7 @@ def test_conversion_uses_saved_map_only_when_request_omits_it(explicit):
         )
     assert response.status_code == 400
     assert formal.call_args.kwargs["data"]["state_assignees"] == ({} if explicit else saved)
+    assert formal.call_args.kwargs["data"]["needs_testing"] is False
     assert ("state_assignees" in request.data) == explicit
 
 
@@ -158,8 +162,9 @@ def save_draft(workflow, data, instance=None, context=None):
 def test_draft_workflow_survives_save_reopen_edit_and_conversion(draft_workflow):
     wf = draft_workflow
     plan = {str(wf.review.id): [str(wf.reviewer.id)]}
-    draft = save_draft(wf, {"name": "Draft", "state_assignees": plan})
+    draft = save_draft(wf, {"name": "Draft", "state_assignees": plan, "needs_testing": False})
     draft.refresh_from_db()
+    assert draft.needs_testing is False
     assert draft.state_assignees[str(wf.review.id)] == [str(wf.reviewer.id)]
     for state in (wf.backlog, wf.completed, wf.cancelled):
         assert draft.state_assignees[str(state.id)] == [str(wf.creator.id)]
@@ -188,6 +193,7 @@ def test_draft_workflow_survives_save_reopen_edit_and_conversion(draft_workflow)
     assert response.status_code == 201, response.data
     formal = Issue.objects.get(pk=response.data["id"])
     assert formal.state_assignees == draft.state_assignees
+    assert formal.needs_testing is False
     assert list(formal.assignees.all()) == [wf.reviewer]
     assert not DraftIssue.objects.filter(pk=draft.pk).exists()
 

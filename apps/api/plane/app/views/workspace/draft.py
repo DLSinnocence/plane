@@ -134,6 +134,7 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
                     "name",
                     "state_id",
                     "state_assignees",
+                    "needs_testing",
                     "sort_order",
                     "completed_at",
                     "estimate_point",
@@ -190,7 +191,7 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
         if serializer.is_valid():
             serializer.save()
 
-            if {"state_id", "state_assignees", "project_id"}.intersection(request.data):
+            if {"state_id", "state_assignees", "project_id", "needs_testing"}.intersection(request.data):
                 issue = self.get_queryset().get(pk=issue.pk)
                 return Response(DraftIssueDetailSerializer(issue).data, status=status.HTTP_200_OK)
             return Response(status=status.HTTP_204_NO_CONTENT)
@@ -231,6 +232,7 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
 
         require_project_admin_access(request.user, draft_issue.project_id, draft_issue.workspace_id)
         issue_data = request.data.copy()
+        issue_data.setdefault("needs_testing", draft_issue.needs_testing)
         if "state_assignees" not in issue_data:
             issue_data["state_assignees"] = draft_issue.state_assignees
         serializer = IssueCreateSerializer(

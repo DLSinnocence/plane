@@ -26,6 +26,7 @@ import { getIssueUpdateErrorKey } from "@/helpers/issue-update-error";
 import { useDropdown } from "@/hooks/use-dropdown";
 // plane web imports
 import { StateOption } from "@/components/workflow";
+import { isStateAvailableForIssue } from "@/helpers/issue-testing-state";
 
 export type TWorkItemStateDropdownBaseProps = TDropdownProps & {
   alwaysAllowStateChange?: boolean;
@@ -36,6 +37,8 @@ export type TWorkItemStateDropdownBaseProps = TDropdownProps & {
   getStateById: (stateId: string | null | undefined) => IState | undefined;
   iconSize?: string;
   isForWorkItemCreation?: boolean;
+  /** Hide backend-marked testing states when an issue does not need testing. */
+  needsTesting?: boolean;
   isInitializing?: boolean;
   onChange: (val: string) => unknown;
   onClose?: () => void;
@@ -63,6 +66,7 @@ export const WorkItemStateDropdownBase = observer(function WorkItemStateDropdown
     hideIcon = false,
     iconSize = "size-4",
     isInitializing = false,
+    needsTesting = true,
     onChange,
     onClose,
     onDropdownOpen,
@@ -85,7 +89,9 @@ export const WorkItemStateDropdownBase = observer(function WorkItemStateDropdown
   const [isOpen, setIsOpen] = useState(false);
   // store hooks
   const { t } = useTranslation();
-  const statesList = stateIds.map((stateId) => getStateById(stateId)).filter((state) => !!state);
+  const statesList = stateIds
+    .map((stateId) => getStateById(stateId))
+    .filter((state): state is IState => !!state && isStateAvailableForIssue(state, needsTesting));
   const defaultState = statesList?.find((state) => state?.default);
   const stateValue = value ? value : showDefaultState ? defaultState?.id : undefined;
   // popper-js init

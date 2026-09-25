@@ -54,6 +54,7 @@ export type TBaseIssue = {
   assignee_ids: string[];
   /** Per-state owners. An omitted state inherits the current assignees; [] explicitly leaves it unassigned. */
   state_assignees?: Record<string, string[]>;
+  needs_testing?: boolean;
   estimate_point: string | null;
 
   sub_issues_count: number;

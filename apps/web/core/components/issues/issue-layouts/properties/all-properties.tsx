@@ -202,6 +202,7 @@ export const IssueProperties = observer(function IssueProperties(props: IIssuePr
           <StateDropdown
             buttonContainerClassName="truncate max-w-40"
             value={issue.state_id}
+            needsTesting={issue.needs_testing}
             onChange={handleState}
             projectId={issue.project_id}
             disabled={isReadOnly || !canTransition}
