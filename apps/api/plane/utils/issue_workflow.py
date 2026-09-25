@@ -100,7 +100,7 @@ def validate_issue_completion(issue, next_state):
 
 def validate_testing_state(data, issue=None, *, project_id=None):
     """Validate the effective flag/state pair, including partial and atomic updates."""
-    needs_testing = data.get("needs_testing", getattr(issue, "needs_testing", True))
+    needs_testing = data.get("needs_testing", getattr(issue, "needs_testing", False))
     if needs_testing:
         return
     state = data.get("state", getattr(issue, "state", None))

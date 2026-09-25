@@ -10,6 +10,7 @@ import { useTranslation } from "@plane/i18n";
 import type { TIssue } from "@plane/types";
 import { MemberDropdown } from "@/components/dropdowns/member/dropdown";
 import { canConfigureStateAssignees, getDefaultStateAssignees } from "@/helpers/issue-state-assignees";
+import { isStateAvailableForIssue } from "@/helpers/issue-testing-state";
 import { useProjectState } from "@/hooks/store/use-project-state";
 
 type Props = {
@@ -66,7 +67,7 @@ export const StateAssigneeFields = observer(function StateAssigneeFields(props: 
   return (
     <div className={columns === 2 ? "mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2" : "mt-3 grid grid-cols-1 gap-2"}>
       {states
-        .filter((state) => canConfigureStateAssignees(state) && (props.needsTesting !== false || !state.is_testing))
+        .filter((state) => canConfigureStateAssignees(state) && isStateAvailableForIssue(state, props.needsTesting))
         .map((state) => {
           const owners = assignments[state.id];
           const isCreator = owners.length === 1 && owners[0] === creatorId;

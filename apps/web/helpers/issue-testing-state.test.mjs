@@ -16,20 +16,20 @@ const states = [
   { id: "done", name: "Done", is_testing: false },
 ];
 
-test("testing remains available by default and when explicitly required", () => {
-  for (const needsTesting of [undefined, true]) {
-    assert.deepEqual(
-      states.filter((state) => isStateAvailableForIssue(state, needsTesting)),
-      states
-    );
-  }
+test("testing remains available when explicitly required", () => {
+  assert.deepEqual(
+    states.filter((state) => isStateAvailableForIssue(state, true)),
+    states
+  );
 });
 
-test("opting out hides the marked state regardless of its name and preserves unmarked custom states", () => {
-  assert.deepEqual(
-    states.filter((state) => isStateAvailableForIssue(state, false)).map((state) => state.id),
-    ["todo", "acceptance", "custom", "done"]
-  );
+test("the default and opting out hide only backend-marked testing states", () => {
+  for (const needsTesting of [undefined, false]) {
+    assert.deepEqual(
+      states.filter((state) => isStateAvailableForIssue(state, needsTesting)).map((state) => state.id),
+      ["todo", "acceptance", "custom", "done"]
+    );
+  }
 });
 
 test("changing the testing preference restores choices without mutating the project workflow", () => {

@@ -15,7 +15,7 @@ type Props = {
   isTestingState?: boolean;
 };
 
-/** Missing values from older issue payloads retain the server's default: yes. */
+/** Missing values from older issue payloads use the default: no. */
 export function NeedsTestingSelect({ value, onChange, disabled, isTestingState }: Props) {
   const { t } = useTranslation();
   const [isSaving, setIsSaving] = useState(false);
@@ -39,7 +39,7 @@ export function NeedsTestingSelect({ value, onChange, disabled, isTestingState }
       aria-label={t("workflows.needs_testing.label")}
       title={isTestingState ? t("workflows.needs_testing.change_state_first") : undefined}
       className="h-7 rounded-sm border border-subtle bg-surface-1 px-2 text-body-xs-regular disabled:opacity-60"
-      value={value === false ? "no" : "yes"}
+      value={value === true ? "yes" : "no"}
       onChange={(event) => void handleChange(event.target.value === "yes")}
       disabled={disabled || isSaving}
     >

@@ -157,15 +157,15 @@ test("permission failures restore the issue, optional map, groups and parent cou
   assert.equal(result.stats[1].after.state_id, "todo");
 });
 
-test("rejected testing preference updates restore legacy default and explicit false", async () => {
+test("rejected testing preference updates restore the No default and explicit values", async () => {
   await Promise.all(
-    [undefined, false].map(async (previous) => {
+    [undefined, false, true].map(async (previous) => {
       const result = fixture(async () => {
         throw new Error("Rejected");
       });
       if (previous !== undefined) result.issue.needs_testing = previous;
-      await assert.rejects(result.update({ needs_testing: previous === false }), /Rejected/);
-      assert.equal(result.issue.needs_testing, previous ?? true);
+      await assert.rejects(result.update({ needs_testing: previous !== true }), /Rejected/);
+      assert.equal(result.issue.needs_testing, previous ?? false);
     })
   );
 });

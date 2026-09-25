@@ -35,6 +35,7 @@ def workflow(workspace, create_user):
     acceptance = State.objects.create(name="开发完成/待验收", group="started", project=project)
     issue = Issue(
         name="Workflow item",
+        needs_testing=True,
         project=project,
         state=development,
         created_by=developer,
@@ -87,8 +88,30 @@ def assert_denied(serializer):
         save(serializer)
 
 
-def test_testing_flag_defaults_to_true(workflow):
-    assert workflow.issue.needs_testing is True
+def test_testing_flag_defaults_to_false(workflow):
+    issue = Issue.objects.create(name="Default testing flag", project=workflow.project)
+    issue.refresh_from_db()
+    assert issue.needs_testing is False
+
+
+@pytest.mark.parametrize("needs_testing", [None, False, True])
+def test_create_testing_default_and_explicit_values(endpoint, workflow, needs_testing):
+    serializer_class, _, _ = endpoint
+    data = {"name": "Testing choice"}
+    if needs_testing is not None:
+        data["needs_testing"] = needs_testing
+    serializer = serializer_class(
+        data=data,
+        context={
+            "request": SimpleNamespace(user=workflow.admin),
+            "project_id": workflow.project.id,
+            "workspace_id": workflow.project.workspace_id,
+            "default_assignee_id": None,
+        },
+    )
+    issue = save(serializer)
+    issue.refresh_from_db()
+    assert issue.needs_testing is (False if needs_testing is None else needs_testing)
 
 
 @pytest.fixture

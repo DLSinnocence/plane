@@ -611,7 +611,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
       this.rootIssueStore.issues.updateIssue(issueId, {
         ...issueBeforeUpdate,
         state_assignees: issueBeforeUpdate?.state_assignees,
-        needs_testing: issueBeforeUpdate?.needs_testing ?? true,
+        needs_testing: issueBeforeUpdate?.needs_testing ?? false,
       });
       this.updateIssueList(issueBeforeUpdate, optimisticIssue);
       if (shouldSync) this.updateParentStats(optimisticIssue, issueBeforeUpdate);

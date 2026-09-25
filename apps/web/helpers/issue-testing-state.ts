@@ -4,6 +4,6 @@
  * See the LICENSE file for details.
  */
 
-/** Missing needsTesting values preserve the default workflow for existing work items. */
-export const isStateAvailableForIssue = (state: { is_testing?: boolean }, needsTesting = true): boolean =>
+/** Testing states are available only when a work item explicitly needs testing. */
+export const isStateAvailableForIssue = (state: { is_testing?: boolean }, needsTesting = false): boolean =>
   needsTesting || !state.is_testing;

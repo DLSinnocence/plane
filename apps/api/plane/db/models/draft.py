@@ -35,7 +35,7 @@ class DraftIssue(WorkspaceBaseModel):
         blank=True,
         related_name="state_draft_issue",
     )
-    needs_testing = models.BooleanField(default=True)
+    needs_testing = models.BooleanField(default=False)
     state_assignees = models.JSONField(default=dict, blank=True)
     estimate_point = models.ForeignKey(
         "db.EstimatePoint",

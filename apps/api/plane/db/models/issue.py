@@ -153,7 +153,7 @@ class Issue(ChangeTrackerMixin, ProjectBaseModel):
         through="IssueAssignee",
         through_fields=("issue", "assignee"),
     )
-    needs_testing = models.BooleanField(default=True)
+    needs_testing = models.BooleanField(default=False)
     state_assignees = models.JSONField(blank=True, default=dict)
     sequence_id = models.IntegerField(default=1, verbose_name="Issue Sequence ID")
     labels = models.ManyToManyField("db.Label", blank=True, related_name="labels", through="IssueLabel")

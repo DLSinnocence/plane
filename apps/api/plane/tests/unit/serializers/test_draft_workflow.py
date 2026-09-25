@@ -159,6 +159,17 @@ def save_draft(workflow, data, instance=None, context=None):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize("needs_testing", [None, False, True])
+def test_draft_testing_default_and_explicit_values(draft_workflow, needs_testing):
+    data = {"name": "Testing choice"}
+    if needs_testing is not None:
+        data["needs_testing"] = needs_testing
+    draft = save_draft(draft_workflow, data)
+    draft.refresh_from_db()
+    assert draft.needs_testing is (False if needs_testing is None else needs_testing)
+
+
+@pytest.mark.django_db
 def test_draft_workflow_survives_save_reopen_edit_and_conversion(draft_workflow):
     wf = draft_workflow
     plan = {str(wf.review.id): [str(wf.reviewer.id)]}

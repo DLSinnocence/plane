@@ -34,5 +34,11 @@ def test_enabling_testing_allows_entering_testing_state_in_same_request():
     validate_testing_state({"needs_testing": True, "state": SimpleNamespace(is_testing=True)}, issue)
 
 
-def test_new_issues_require_testing_by_default():
-    validate_testing_state({"state": SimpleNamespace(is_testing=True)})
+def test_new_issues_do_not_require_testing_by_default():
+    with pytest.raises(ValidationError):
+        validate_testing_state({"state": SimpleNamespace(is_testing=True)})
+    validate_testing_state({"state": SimpleNamespace(is_testing=False)})
+
+
+def test_new_issues_can_explicitly_enable_testing():
+    validate_testing_state({"needs_testing": True, "state": SimpleNamespace(is_testing=True)})
