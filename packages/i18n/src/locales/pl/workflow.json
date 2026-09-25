@@ -112,6 +112,13 @@
     },
     "errors": {
       "unfinished_sub_issues": "Some sub-work items are unfinished. Finish or cancel all sub-work items first."
+    },
+    "fixed_states_description": "States are managed by the platform and cannot be customized per project.",
+    "needs_testing": {
+      "label": "Needs testing",
+      "yes": "Yes",
+      "no": "No",
+      "change_state_first": "Move out of the testing state before turning testing off."
     }
   }
 }
