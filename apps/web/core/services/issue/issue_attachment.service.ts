@@ -16,6 +16,8 @@ import type {
   TIssueServiceType,
 } from "@plane/types";
 import { EIssueServiceType } from "@plane/types";
+// helpers
+import { prepareAttachmentUpload, validateAttachmentUploadEncoding } from "@/helpers/attachment-compression";
 // services
 import { APIService } from "@/services/api.service";
 import { FileUploadService } from "@/services/file-upload.service";
@@ -58,12 +60,14 @@ export class IssueAttachmentService extends APIService {
     slotId?: string
   ): Promise<TIssueAttachmentUploadResult> {
     const fileMetaData = await getFileMetaDataForUpload(file);
+    const prepared = await prepareAttachmentUpload(file, fileMetaData);
     return this.post(
       `/api/assets/v2/workspaces/${workspaceSlug}/projects/${projectId}/${this.serviceType}/${issueId}/attachments/`,
-      slotId ? { ...fileMetaData, slot_id: slotId } : fileMetaData
+      slotId ? { ...prepared.metadata, slot_id: slotId } : prepared.metadata
     ).then(async (response) => {
       const signedURLResponse: TIssueAttachmentUploadResponse = response?.data;
-      const fileUploadPayload = generateFileUploadPayload(signedURLResponse, file);
+      validateAttachmentUploadEncoding(prepared.metadata, signedURLResponse?.upload_data?.fields);
+      const fileUploadPayload = generateFileUploadPayload(signedURLResponse, prepared.file);
       await this.fileUploadService.uploadFile(
         signedURLResponse.upload_data.url,
         fileUploadPayload,

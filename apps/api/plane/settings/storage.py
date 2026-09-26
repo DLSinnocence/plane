@@ -3,8 +3,10 @@
 # See the LICENSE file for details.
 
 # Python imports
+import gzip
 import os
 import uuid
+import zlib
 
 # Third party imports
 import boto3
@@ -62,7 +64,7 @@ class S3Storage(S3Boto3Storage):
                 config=boto3.session.Config(signature_version="s3v4"),
             )
 
-    def generate_presigned_post(self, object_name, file_type, file_size, expiration=None):
+    def generate_presigned_post(self, object_name, file_type, file_size, expiration=None, content_encoding=None):
         """Generate a presigned URL to upload an S3 object"""
         if expiration is None:
             expiration = self.signed_url_expiration
@@ -73,6 +75,14 @@ class S3Storage(S3Boto3Storage):
             ["content-length-range", 1, file_size],
             {"Content-Type": file_type},
         ]
+
+        if content_encoding is not None:
+            if content_encoding != "gzip":
+                raise ValueError("Unsupported content encoding")
+            # Persist encoding on the object so every signed GET is transparently
+            # decoded by browsers, including existing attachment download routes.
+            fields["Content-Encoding"] = content_encoding
+            conditions.append({"Content-Encoding": content_encoding})
 
         # Add condition for the object name (key)
         if object_name.startswith("${filename}"):
@@ -139,6 +149,42 @@ class S3Storage(S3Boto3Storage):
         # The response contains the presigned URL
         return response
 
+    def verify_gzip_object(self, object_name, original_size, compressed_size, file_type):
+        """Validate uploaded gzip without buffering its decoded contents.
+
+        Stop after the declared original size plus one byte. Reading to EOF also
+        checks gzip CRC/truncation and includes all concatenated gzip members.
+        Storage/network failures propagate so the caller can return a retryable error.
+        """
+        response = self.s3_client.get_object(Bucket=self.aws_storage_bucket_name, Key=object_name)
+        body = response["Body"]
+        try:
+            if (
+                response.get("ContentEncoding") != "gzip"
+                or response.get("ContentType") != file_type
+                or response.get("ContentLength") != compressed_size
+            ):
+                raise ValueError("Uploaded file metadata does not match the authorized attachment.")
+            # Empty streams also fail the exact, positive original-size check.
+            with gzip.GzipFile(fileobj=body, mode="rb") as decoded:
+                total = 0
+                while True:
+                    chunk = decoded.read(min(64 * 1024, original_size - total + 1))
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > original_size:
+                        raise ValueError("Decoded attachment exceeds its declared original size.")
+                if total != original_size:
+                    raise ValueError("Decoded attachment size does not match its declared original size.")
+            if not response.get("ETag"):
+                raise ValueError("Uploaded attachment is missing its storage integrity tag.")
+            return response["ETag"]
+        except (gzip.BadGzipFile, EOFError, zlib.error) as exc:
+            raise ValueError("Uploaded attachment is not a complete, valid gzip file.") from exc
+        finally:
+            body.close()
+
     def get_object_metadata(self, object_name):
         """Get the metadata for an S3 object"""
         try:
@@ -149,19 +195,22 @@ class S3Storage(S3Boto3Storage):
 
         return {
             "ContentType": response.get("ContentType"),
+            "ContentEncoding": response.get("ContentEncoding"),
             "ContentLength": response.get("ContentLength"),
             "LastModified": (response.get("LastModified").isoformat() if response.get("LastModified") else None),
             "ETag": response.get("ETag"),
             "Metadata": response.get("Metadata", {}),
         }
 
-    def copy_object(self, object_name, new_object_name):
-        """Copy an S3 object to a new location"""
+    def copy_object(self, object_name, new_object_name, source_etag=None):
+        """Copy an S3 object, optionally only if it is the verified source version."""
+        options = {"CopySourceIfMatch": source_etag} if source_etag is not None else {}
         try:
             response = self.s3_client.copy_object(
                 Bucket=self.aws_storage_bucket_name,
                 CopySource={"Bucket": self.aws_storage_bucket_name, "Key": object_name},
                 Key=new_object_name,
+                **options,
             )
         except ClientError as e:
             log_exception(e)

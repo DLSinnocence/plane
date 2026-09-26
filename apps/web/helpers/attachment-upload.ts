@@ -13,7 +13,10 @@ export type TAttachmentUploadErrorKey =
   | "attachment.invalid_file_type"
   | "attachment.file_read_error"
   | "attachment.permission_denied"
-  | "attachment.server_size_rejected";
+  | "attachment.server_size_rejected"
+  | "attachment.compression_unsupported"
+  | "attachment.compression_failed"
+  | "attachment.compression_not_accepted";
 
 export function getAttachmentRejectionKey(
   rejections: FileRejection[],
@@ -55,7 +58,7 @@ export function getAttachmentUploadErrorDetails(error: unknown): string {
     if (!data.includes("<") && data.trim()) reasons.push(data.trim().slice(0, 400));
   }
   if (body) {
-    for (const key of ["error", "detail", "name", "size", "type", "slot_id"]) {
+    for (const key of ["error", "detail", "name", "size", "type", "slot_id", "content_encoding", "compressed_size"]) {
       const value = body[key];
       const text =
         typeof value === "string"
@@ -84,6 +87,9 @@ export function getAttachmentUploadErrorKey(error: unknown): TAttachmentUploadEr
   ) {
     return "attachment.permission_denied";
   }
+  if (details?.code === "ATTACHMENT_COMPRESSION_UNSUPPORTED") return "attachment.compression_unsupported";
+  if (details?.code === "ATTACHMENT_COMPRESSION_FAILED") return "attachment.compression_failed";
+  if (details?.code === "ATTACHMENT_COMPRESSION_NOT_ACCEPTED") return "attachment.compression_not_accepted";
   if (status === 413 || body?.error === "REQUEST_BODY_TOO_LARGE") return "attachment.server_size_rejected";
   if (body?.error === "Invalid file type.") return "attachment.invalid_file_type";
   return "attachment.error";

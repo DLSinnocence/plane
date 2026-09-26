@@ -466,6 +466,11 @@ ATTACHMENT_MIME_TYPES = [
     "image/webp",
     "image/tiff",
     "image/bmp",
+    # Photoshop documents (canonical MIME and common client aliases)
+    "image/vnd.adobe.photoshop",
+    "image/x-photoshop",
+    "application/photoshop",
+    "application/x-photoshop",
     # Documents
     "application/pdf",
     "application/msword",

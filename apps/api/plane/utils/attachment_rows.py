@@ -7,6 +7,8 @@ Formal uploads and completion authorize the persisted issue under its row lock.
 Provisioning is part of uploading; the issue lock serializes naming and the row cap.
 """
 
+from botocore.exceptions import BotoCoreError, ClientError
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Max
 from django.shortcuts import get_object_or_404
@@ -15,6 +17,8 @@ from rest_framework.exceptions import APIException, PermissionDenied, Validation
 
 from plane.db.models import FileAsset, Issue, IssueAttachmentSlot, User
 from plane.utils.issue_permissions import has_project_admin_access, require_issue_write_access
+from plane.settings.storage import S3Storage
+from plane.utils.exception_logger import log_exception
 
 MAX_ATTACHMENT_ROWS = 50
 
@@ -24,11 +28,13 @@ class AttachmentUploadUnavailable(APIException):
     default_detail = "Unable to prepare attachment upload. Please try again."
 
 
-def presign_attachment_upload(storage, asset, file_type, size_limit):
+def presign_attachment_upload(storage, asset, file_type, size_limit, content_encoding=None):
+    options = {"content_encoding": content_encoding} if content_encoding is not None else {}
     data = storage.generate_presigned_post(
         object_name=asset.asset.name,
         file_type=file_type,
         file_size=size_limit,
+        **options,
     )
     if not data:
         raise AttachmentUploadUnavailable()
@@ -193,6 +199,38 @@ def attachment_completion_data(asset):
     }
 
 
+def verify_and_promote_attachment_upload(asset):
+    """Freeze validated gzip bytes under a key the upload signature cannot overwrite."""
+    attributes = asset.attributes
+    if not isinstance(attributes, dict) or "content_encoding" not in attributes:
+        return
+    size = attributes.get("size")
+    compressed_size = attributes.get("compressed_size")
+    if (
+        attributes["content_encoding"] != "gzip"
+        or type(size) is not int or not 0 < size <= settings.FILE_SIZE_LIMIT
+        or type(compressed_size) is not int or compressed_size <= 0
+    ):
+        raise ValidationError({"error": "Invalid compressed attachment metadata."})
+    storage = S3Storage()  # Internal endpoint, never the browser-facing proxy host.
+    staging_key = asset.asset.name
+    # A stable destination avoids accumulating copied objects on DB-failure retries.
+    final_key = f"{asset.workspace_id}/{asset.pk}-verified"
+    try:
+        etag = storage.verify_gzip_object(staging_key, size, compressed_size, attributes.get("type"))
+        # Conditional copy prevents a concurrent re-upload from replacing the bytes
+        # just verified; the final key has never been authorized in a POST policy.
+        if not storage.copy_object(staging_key, final_key, source_etag=etag):
+            raise AttachmentUploadUnavailable("Unable to finalize attachment upload. Please retry.")
+    except ValueError as exc:
+        raise ValidationError({"error": str(exc)}) from exc
+    except (BotoCoreError, ClientError, OSError) as exc:
+        log_exception(exc)
+        raise AttachmentUploadUnavailable("Unable to verify attachment upload. Please retry.") from exc
+    asset.asset = final_key
+    transaction.on_commit(lambda: storage.delete_files([staging_key]), robust=True)
+
+
 @transaction.atomic
 def complete_attachment_asset(asset, user):
     """Complete once, retaining the replaced asset as a soft-deleted audit row."""
@@ -226,6 +264,7 @@ def complete_attachment_asset(asset, user):
             asset.save(update_fields=["attachment_slot"], disable_auto_set_user=True)
         return asset, False
     require_replacement_permission(slot, user)
+    verify_and_promote_attachment_upload(asset)
     replaced = FileAsset.objects.filter(
         attachment_slot=slot,
         workspace_id=issue.workspace_id,
@@ -238,5 +277,5 @@ def complete_attachment_asset(asset, user):
     asset.deleted_attachment_ids = [str(pk) for pk in replaced.values_list("pk", flat=True)]
     replaced.update(is_deleted=True, deleted_at=timezone.now())
     asset.is_uploaded = True
-    asset.save(update_fields=["attachment_slot", "is_uploaded", "updated_at"], disable_auto_set_user=True)
+    asset.save(update_fields=["attachment_slot", "asset", "is_uploaded", "updated_at"], disable_auto_set_user=True)
     return asset, True

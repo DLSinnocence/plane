@@ -68,6 +68,27 @@ test("network errors and field validation reasons are retained without claiming 
   );
 });
 
+test("compression failures have distinct actionable translations", () => {
+  for (const [code, key] of [
+    ["ATTACHMENT_COMPRESSION_UNSUPPORTED", "attachment.compression_unsupported"],
+    ["ATTACHMENT_COMPRESSION_FAILED", "attachment.compression_failed"],
+    ["ATTACHMENT_COMPRESSION_NOT_ACCEPTED", "attachment.compression_not_accepted"],
+  ]) {
+    const error = Object.assign(new Error("No file was uploaded."), { code });
+    assert.equal(getAttachmentUploadErrorKey(error), key);
+    assert.equal(getAttachmentUploadErrorDetails(error), "No file was uploaded.");
+  }
+  assert.equal(
+    getAttachmentUploadErrorDetails({
+      response: {
+        status: 400,
+        data: { content_encoding: ["Unsupported encoding"], compressed_size: ["Must be positive"] },
+      },
+    }),
+    "HTTP 400: content_encoding: Unsupported encoding; compressed_size: Must be positive"
+  );
+});
+
 test("HTML server pages and malformed responses do not become raw UI markup", () => {
   assert.equal(
     getAttachmentUploadErrorDetails({ response: { status: 502, data: "<html>internal proxy diagnostic</html>" } }),

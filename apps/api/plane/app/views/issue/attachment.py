@@ -138,7 +138,9 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
             require_replacement_permission(slot, request.user)
         name = sanitize_filename(request.data.get("name")) or "unnamed"
         type = request.data.get("type", False)
-        size = int(request.data.get("size", settings.FILE_SIZE_LIMIT))
+        size = slot_data.validated_data.get("size", settings.FILE_SIZE_LIMIT)
+        content_encoding = slot_data.validated_data.get("content_encoding")
+        upload_size = slot_data.validated_data.get("compressed_size", size)
 
         if not type or type not in settings.ATTACHMENT_MIME_TYPES:
             return Response(
@@ -152,15 +154,18 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
         # asset key
         asset_key = f"{workspace.id}/{uuid.uuid4().hex}-{name}"
 
-        # Get the size limit
-        size_limit = min(size, settings.FILE_SIZE_LIMIT)
+        # Display and retain the original file metadata; storage policy limits
+        # the encoded bytes independently. No .gz suffix is added to the name.
+        attributes = {"name": name, "type": type, "size": size}
+        if content_encoding:
+            attributes.update(content_encoding=content_encoding, compressed_size=upload_size)
 
         # Create a File Asset
         asset = create_attachment_asset(
             attachment_slot=slot,
-            attributes={"name": name, "type": type, "size": size_limit},
+            attributes=attributes,
             asset=asset_key,
-            size=size_limit,
+            size=size,
             workspace_id=workspace.id,
             created_by=request.user,
             issue_id=issue_id,
@@ -172,7 +177,9 @@ class IssueAttachmentV2Endpoint(BaseAPIView):
         storage = S3Storage(request=request)
 
         # Generate a presigned URL to share an S3 object
-        presigned_url = presign_attachment_upload(storage, asset, type, size_limit)
+        presigned_url = presign_attachment_upload(
+            storage, asset, type, upload_size, content_encoding=content_encoding
+        )
 
         # Return the presigned URL
         return Response(

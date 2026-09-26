@@ -1942,7 +1942,11 @@ class IssueAttachmentListCreateAPIEndpoint(BaseAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        size_limit = min(size, settings.FILE_SIZE_LIMIT)
+        slot_data = AttachmentSlotUploadSerializer(data=request.data)
+        slot_data.is_valid(raise_exception=True)
+        size = slot_data.validated_data["size"]
+        content_encoding = slot_data.validated_data.get("content_encoding")
+        upload_size = slot_data.validated_data.get("compressed_size", size)
 
         if not type or type not in settings.ATTACHMENT_MIME_TYPES:
             return Response(
@@ -1984,8 +1988,6 @@ class IssueAttachmentListCreateAPIEndpoint(BaseAPIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        slot_data = AttachmentSlotUploadSerializer(data=request.data)
-        slot_data.is_valid(raise_exception=True)
         slot = None
         if "slot_id" in slot_data.validated_data:
             slot = get_object_or_404(
@@ -1994,12 +1996,15 @@ class IssueAttachmentListCreateAPIEndpoint(BaseAPIView):
                 workspace_id=issue.workspace_id, project_id=project_id, issue_id=issue_id,
             )
             require_replacement_permission(slot, request.user)
+        attributes = {"name": name, "type": type, "size": size}
+        if content_encoding:
+            attributes.update(content_encoding=content_encoding, compressed_size=upload_size)
         # Create a File Asset
         asset = create_attachment_asset(
             attachment_slot=slot,
-            attributes={"name": name, "type": type, "size": size_limit},
+            attributes=attributes,
             asset=asset_key,
-            size=size_limit,
+            size=size,
             workspace_id=workspace.id,
             created_by=request.user,
             issue_id=issue_id,
@@ -2012,7 +2017,9 @@ class IssueAttachmentListCreateAPIEndpoint(BaseAPIView):
         # Get the presigned URL
         storage = S3Storage(request=request)
         # Generate a presigned URL to share an S3 object
-        presigned_url = presign_attachment_upload(storage, asset, type, size_limit)
+        presigned_url = presign_attachment_upload(
+            storage, asset, type, upload_size, content_encoding=content_encoding
+        )
         # Return the presigned URL
         return Response(
             {
